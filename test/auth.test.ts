@@ -1,0 +1,130 @@
+import assert from 'node:assert/strict';
+import { once } from 'node:events';
+import test from 'node:test';
+import express from 'express';
+import session from 'express-session';
+
+process.env.DATABASE_URL ??= 'postgres://unused:unused@127.0.0.1:5432/unused';
+
+const { createAuthRouter } = await import('../src/auth.js');
+const { api } = await import('../src/api.js');
+
+const authEnv = {
+  googleClientId: 'client-id',
+  googleClientSecret: 'client-secret',
+  baseUrl: 'http://localhost',
+  inviteCode: 'family-only',
+  adminEmail: 'admin@example.com',
+};
+
+type QueryCall = { sql: string; params: unknown[] };
+
+async function openTestApp(existingUserId?: number) {
+  const calls: QueryCall[] = [];
+  const fakeQuery = async (sql: string, params: unknown[] = []) => {
+    calls.push({ sql, params });
+    if (sql.includes('select id from app_user')) {
+      return { rows: existingUserId ? [{ id: existingUserId }] : [], rowCount: existingUserId ? 1 : 0 };
+    }
+    if (sql.includes('insert into app_user')) return { rows: [{ id: 42 }], rowCount: 1 };
+    return { rows: [], rowCount: 1 };
+  };
+  const fakeFetch = async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url === 'https://oauth2.googleapis.com/token') {
+      return Response.json({ access_token: 'access-token', refresh_token: 'refresh-token' });
+    }
+    if (url === 'https://www.googleapis.com/oauth2/v3/userinfo') {
+      return Response.json({ sub: 'google-user-1', email: 'member@example.com', name: 'Family Member' });
+    }
+    throw new Error(`unexpected fetch: ${url}`);
+  };
+
+  const app = express();
+  app.use(express.json());
+  app.use(session({ secret: 'test-secret-test-secret-test-secret', resave: false, saveUninitialized: false }));
+  app.use('/auth', createAuthRouter({
+    query: fakeQuery as never,
+    encrypt: (value: string) => `encrypted:${value}`,
+    env: authEnv,
+    fetch: fakeFetch,
+  }));
+  app.use('/api', api);
+
+  const server = app.listen(0);
+  await once(server, 'listening');
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('test server did not open a TCP port');
+
+  let cookie = '';
+  const request = async (path: string, init: RequestInit = {}) => {
+    const headers = new Headers(init.headers);
+    if (cookie) headers.set('cookie', cookie);
+    const response = await fetch(`http://127.0.0.1:${address.port}${path}`, {
+      ...init,
+      headers,
+      redirect: 'manual',
+    });
+    const setCookie = response.headers.getSetCookie()[0];
+    if (setCookie) cookie = setCookie.split(';', 1)[0]!;
+    return response;
+  };
+
+  return { calls, request, close: () => server.close() };
+}
+
+async function completeGoogleLogin(request: (path: string, init?: RequestInit) => Promise<Response>) {
+  const start = await request('/auth/google');
+  assert.equal(start.status, 302);
+  const googleUrl = new URL(start.headers.get('location')!);
+  const state = googleUrl.searchParams.get('state');
+  assert.ok(state);
+  return request(`/auth/google/callback?code=oauth-code&state=${state}`);
+}
+
+test('new Google user is asked for the invite code only after OAuth', async (t) => {
+  const app = await openTestApp();
+  t.after(app.close);
+
+  const initialMe = await app.request('/api/me');
+  assert.deepEqual(await initialMe.json(), { user: null, signupInviteRequired: false });
+
+  const callback = await completeGoogleLogin(app.request);
+  assert.equal(callback.status, 302);
+  assert.equal(callback.headers.get('location'), '/');
+  assert.equal(app.calls.some(({ sql }) => sql.includes('insert into app_user')), false);
+
+  const me = await app.request('/api/me');
+  assert.deepEqual(await me.json(), { user: null, signupInviteRequired: true });
+
+  const rejected = await app.request('/auth/signup', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ inviteCode: 'wrong' }),
+  });
+  assert.equal(rejected.status, 403);
+
+  const accepted = await app.request('/auth/signup', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ inviteCode: 'family-only' }),
+  });
+  assert.equal(accepted.status, 200);
+  assert.equal(app.calls.some(({ sql }) => sql.includes('insert into app_user')), true);
+});
+
+test('existing member signs in without an invite-code step', async (t) => {
+  const app = await openTestApp(7);
+  t.after(app.close);
+
+  const callback = await completeGoogleLogin(app.request);
+  assert.equal(callback.status, 302);
+
+  const signup = await app.request('/auth/signup', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ inviteCode: 'family-only' }),
+  });
+  assert.equal(signup.status, 409);
+  assert.equal(app.calls.some(({ sql }) => sql.includes('insert into app_user')), false);
+});
