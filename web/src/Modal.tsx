@@ -1,4 +1,6 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
+import { Dialog, DialogContent, DialogTitle, IconButton, Stack, Typography } from '@mui/material';
+import CloseRounded from '@mui/icons-material/CloseRounded';
 
 type Props = {
   open: boolean;
@@ -8,29 +10,15 @@ type Props = {
 };
 
 export default function Modal({ open, title, onClose, children }: Props) {
-  const ref = useRef<HTMLDialogElement>(null);
-
-  useEffect(() => {
-    const dialog = ref.current;
-    if (!dialog) return;
-    if (open && !dialog.open) dialog.showModal();
-    if (!open && dialog.open) dialog.close();
-  }, [open]);
-
   return (
-    <dialog
-      ref={ref}
-      aria-labelledby="modal-title"
-      onCancel={onClose}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-    >
-      <section className="modal-content">
-        <header className="modal-header">
-          <h2 id="modal-title">{title}</h2>
-          <button type="button" className="icon-button" aria-label="ปิด" onClick={onClose}>×</button>
-        </header>
-        {children}
-      </section>
-    </dialog>
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth aria-labelledby="modal-title">
+      <DialogTitle component="div" id="modal-title">
+        <Stack direction="row" spacing={2} sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
+          <Typography component="h2" variant="h2">{title}</Typography>
+          <IconButton type="button" aria-label="ปิด" onClick={onClose}><CloseRounded /></IconButton>
+        </Stack>
+      </DialogTitle>
+      <DialogContent dividers>{children}</DialogContent>
+    </Dialog>
   );
 }

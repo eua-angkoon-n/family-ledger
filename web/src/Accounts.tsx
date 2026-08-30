@@ -1,4 +1,25 @@
 import { useEffect, useState } from 'react';
+import {
+  Alert,
+  Box,
+  Button,
+  Link,
+  MenuItem,
+  Paper,
+  Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  TextField,
+  Typography,
+} from '@mui/material';
+import AccountBalanceRounded from '@mui/icons-material/AccountBalanceRounded';
+import AddRounded from '@mui/icons-material/AddRounded';
+import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
+import EditRounded from '@mui/icons-material/EditRounded';
 import { del, patch, post, req, type Account, type Bank, type EmailAccount } from './api.js';
 import Modal from './Modal.js';
 
@@ -14,14 +35,14 @@ export default function Accounts() {
   const [error, setError] = useState('');
 
   const reload = () => {
-    req<Account[]>('/api/accounts').then(setAccounts).catch((e: Error) => setError(e.message));
-    req<Bank[]>('/api/banks').then(setBanks).catch((e: Error) => setError(e.message));
-    req<EmailAccount[]>('/api/email-accounts').then(setMailboxes).catch((e: Error) => setError(e.message));
+    req<Account[]>('/api/accounts').then(setAccounts).catch((responseError: Error) => setError(responseError.message));
+    req<Bank[]>('/api/banks').then(setBanks).catch((responseError: Error) => setError(responseError.message));
+    req<EmailAccount[]>('/api/email-accounts').then(setMailboxes).catch((responseError: Error) => setError(responseError.message));
   };
   useEffect(reload, []);
 
-  const set = (k: keyof typeof EMPTY) => (e: { target: { value: string } }) =>
-    setForm((f) => ({ ...f, [k]: e.target.value }));
+  const set = (key: keyof typeof EMPTY) => (event: { target: { value: string } }) =>
+    setForm((current) => ({ ...current, [key]: event.target.value }));
 
   const openAdd = () => {
     setEditingId(null);
@@ -45,121 +66,119 @@ export default function Accounts() {
   };
 
   return (
-    <>
-      <div className="section-header">
-        <div>
-          <h2>บัญชีธนาคารของฉัน</h2>
-          <p className="muted">จัดการบัญชีที่ใช้รับข้อมูลจาก statement</p>
-        </div>
-        <button type="button" className="compact primary" onClick={openAdd}>+ เพิ่มบัญชี</button>
-      </div>
-      {error && !modalOpen && <p className="error" role="alert">{error}</p>}
+    <Box sx={{ mt: 4 }}>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ alignItems: { xs: 'stretch', sm: 'flex-start' }, justifyContent: 'space-between' }}>
+        <Box>
+          <Typography component="h2" variant="h2">บัญชีธนาคารของฉัน</Typography>
+          <Typography color="text.secondary" sx={{ mt: 0.5 }}>จัดการบัญชีที่ใช้รับข้อมูลจาก statement</Typography>
+        </Box>
+        <Button variant="contained" startIcon={<AddRounded />} onClick={openAdd} sx={{ whiteSpace: 'nowrap' }}>เพิ่มบัญชี</Button>
+      </Stack>
+
+      {error && !modalOpen && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
 
       {accounts.length === 0 ? (
-        <p className="empty-state">ยังไม่มีบัญชีธนาคาร กด “เพิ่มบัญชี” เพื่อเริ่มต้น</p>
+        <Box sx={{ mt: 3, py: 5, px: 2, textAlign: 'center', border: 1, borderStyle: 'dashed', borderColor: 'divider', borderRadius: 1 }}>
+          <AccountBalanceRounded color="primary" sx={{ fontSize: 36 }} />
+          <Typography sx={{ mt: 1 }}>ยังไม่มีบัญชีธนาคาร</Typography>
+          <Typography color="text.secondary" variant="body2" sx={{ mt: 0.5 }}>เพิ่มบัญชีเพื่อเริ่มรับข้อมูลจาก statement</Typography>
+          <Button variant="outlined" startIcon={<AddRounded />} onClick={openAdd} sx={{ mt: 2 }}>เพิ่มบัญชีแรก</Button>
+        </Box>
       ) : (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr><th>ชื่อเล่น</th><th>ธนาคาร</th><th>เลขที่บัญชี</th><th>กล่องอีเมล</th><th>จัดการ</th></tr>
-            </thead>
-            <tbody>
+        <TableContainer component={Paper} variant="outlined" sx={{ mt: 3 }}>
+          <Table size="small" aria-label="บัญชีธนาคารของฉัน">
+            <TableHead>
+              <TableRow>
+                <TableCell>ชื่อเล่น</TableCell>
+                <TableCell>ธนาคาร</TableCell>
+                <TableCell>เลขที่บัญชี</TableCell>
+                <TableCell>กล่องอีเมล</TableCell>
+                <TableCell align="right">จัดการ</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
               {accounts.map((account) => (
-                <tr key={account.id}>
-                  <td>{account.nickname}</td>
-                  <td>{account.bank_name}</td>
-                  <td><code>{account.account_number}</code></td>
-                  <td><code>{account.email}</code></td>
-                  <td className="actions">
-                    <button type="button" className="compact" onClick={() => openEdit(account)}>แก้ไข</button>
-                    <button
-                      type="button"
-                      className="compact danger"
-                      onClick={() => confirm(`ลบบัญชี “${account.nickname}” และรายการทั้งหมดของบัญชีนี้?`) && del(`/api/accounts/${account.id}`).then(reload).catch((e: Error) => alert(e.message))}
-                    >
-                      ลบ
-                    </button>
-                  </td>
-                </tr>
+                <TableRow key={account.id} hover>
+                  <TableCell>{account.nickname}</TableCell>
+                  <TableCell>{account.bank_name}</TableCell>
+                  <TableCell><code>{account.account_number}</code></TableCell>
+                  <TableCell><code>{account.email}</code></TableCell>
+                  <TableCell align="right">
+                    <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end' }}>
+                      <Button size="small" variant="outlined" startIcon={<EditRounded />} onClick={() => openEdit(account)}>แก้ไข</Button>
+                      <Button
+                        size="small"
+                        color="error"
+                        startIcon={<DeleteOutlineRounded />}
+                        onClick={() => confirm(`ลบบัญชี “${account.nickname}” และรายการทั้งหมดของบัญชีนี้?`) && del(`/api/accounts/${account.id}`).then(reload).catch((responseError: Error) => alert(responseError.message))}
+                      >
+                        ลบ
+                      </Button>
+                    </Stack>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </TableBody>
+          </Table>
+        </TableContainer>
       )}
 
-      <Modal
-        open={modalOpen}
-        title={editingId ? 'แก้ไขบัญชีธนาคาร' : 'เพิ่มบัญชีธนาคาร'}
-        onClose={() => setModalOpen(false)}
-      >
-        <p className="muted">
-          ก่อนเพิ่มบัญชี ให้ขอ statement ย้อนหลังจากธนาคารส่งเข้ากล่องอีเมลของคุณ ระบบจะใช้เป็นข้อมูลตั้งต้น
-        </p>
-        <p className="muted"><a href="/auth/google?add=1">+ ต่อกล่องอีเมลอื่นเพิ่ม</a></p>
-        <form
-          className="modal-form"
-          onSubmit={async (e) => {
-            e.preventDefault();
+      <Modal open={modalOpen} title={editingId ? 'แก้ไขบัญชีธนาคาร' : 'เพิ่มบัญชีธนาคาร'} onClose={() => setModalOpen(false)}>
+        <Box
+          component="form"
+          onSubmit={async (event) => {
+            event.preventDefault();
             setError('');
             try {
               if (editingId) await patch(`/api/accounts/${editingId}`, form);
               else await post('/api/accounts', form);
               setModalOpen(false);
               reload();
-            } catch (err) {
-              setError(err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ');
+            } catch (submitError) {
+              setError(submitError instanceof Error ? submitError.message : 'บันทึกไม่สำเร็จ');
             }
           }}
         >
-          <div className="grid">
-            <label>
-              <span>ธนาคาร</span>
-              <select value={form.bank_id} onChange={set('bank_id')} required autoFocus>
-                <option value="">— เลือก —</option>
+          <Stack spacing={2.5}>
+            <Box>
+              <Typography color="text.secondary">
+                ก่อนเพิ่มบัญชี ให้ขอ statement ย้อนหลังจากธนาคารส่งเข้ากล่องอีเมลของคุณ ระบบจะใช้เป็นข้อมูลตั้งต้น
+              </Typography>
+              <Link href="/auth/google?add=1" sx={{ display: 'inline-block', mt: 1 }}>เชื่อมต่อกล่องอีเมลอื่นเพิ่ม</Link>
+            </Box>
+            <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 16rem), 1fr))' }}>
+              <TextField select label="ธนาคาร" value={form.bank_id} onChange={set('bank_id')} required autoFocus>
+                <MenuItem value=""><em>เลือกธนาคาร</em></MenuItem>
                 {banks.filter((bank) => bank.is_active || String(bank.id) === form.bank_id).map((bank) => (
-                  <option key={bank.id} value={bank.id}>{bank.name}</option>
+                  <MenuItem key={bank.id} value={bank.id}>{bank.name}</MenuItem>
                 ))}
-              </select>
-            </label>
-            <label>
-              <span>ชื่อเล่น</span>
-              <input value={form.nickname} onChange={set('nickname')} required maxLength={60} />
-            </label>
-            <label>
-              <span>กล่องอีเมลที่ให้ระบบเข้าไปอ่าน</span>
-              <select value={form.email_account_id} onChange={set('email_account_id')} required>
-                <option value="">— เลือก —</option>
-                {mailboxes.map((mailbox) => <option key={mailbox.id} value={mailbox.id}>{mailbox.email}</option>)}
-              </select>
-            </label>
-            <label>
-              <span>เลขที่บัญชี</span>
-              <input value={form.account_number} onChange={set('account_number')} required maxLength={40} />
-            </label>
-            <label>
-              <span>รหัสผ่านเปิดไฟล์ statement</span>
-              <input
+              </TextField>
+              <TextField label="ชื่อเล่น" value={form.nickname} onChange={set('nickname')} required slotProps={{ htmlInput: { maxLength: 60 } }} />
+              <TextField select label="กล่องอีเมลที่ให้ระบบเข้าไปอ่าน" value={form.email_account_id} onChange={set('email_account_id')} required>
+                <MenuItem value=""><em>เลือกกล่องอีเมล</em></MenuItem>
+                {mailboxes.map((mailbox) => <MenuItem key={mailbox.id} value={mailbox.id}>{mailbox.email}</MenuItem>)}
+              </TextField>
+              <TextField label="เลขที่บัญชี" value={form.account_number} onChange={set('account_number')} required slotProps={{ htmlInput: { maxLength: 40 } }} />
+              <TextField
                 type="password"
+                label="รหัสผ่านเปิดไฟล์ statement"
                 value={form.pdf_password}
                 onChange={set('pdf_password')}
                 required={!editingId}
                 placeholder={editingId ? 'เว้นว่างเพื่อใช้รหัสเดิม' : undefined}
                 autoComplete="off"
               />
-            </label>
-            <label>
-              <span>พร้อมเพย์ (ไม่บังคับ)</span>
-              <input value={form.promptpay_id} onChange={set('promptpay_id')} maxLength={40} />
-            </label>
-          </div>
-          <p className="muted">รหัสผ่านถูกเข้ารหัส AES-256-GCM ก่อนบันทึก และระบบจะไม่ส่งค่ากลับมาแสดงอีก</p>
-          {error && <p className="error" role="alert">{error}</p>}
-          <div className="form-actions">
-            <button type="button" onClick={() => setModalOpen(false)}>ยกเลิก</button>
-            <button type="submit" className="primary">{editingId ? 'บันทึกการแก้ไข' : 'เพิ่มบัญชี'}</button>
-          </div>
-        </form>
+              <TextField label="พร้อมเพย์ (ไม่บังคับ)" value={form.promptpay_id} onChange={set('promptpay_id')} slotProps={{ htmlInput: { maxLength: 40 } }} />
+            </Box>
+            <Alert severity="info">รหัสผ่านถูกเข้ารหัส AES-256-GCM ก่อนบันทึก และระบบจะไม่ส่งค่ากลับมาแสดงอีก</Alert>
+            {error && <Alert severity="error">{error}</Alert>}
+            <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end' }}>
+              <Button type="button" color="inherit" onClick={() => setModalOpen(false)}>ยกเลิก</Button>
+              <Button type="submit" variant="contained">{editingId ? 'บันทึกการแก้ไข' : 'เพิ่มบัญชี'}</Button>
+            </Stack>
+          </Stack>
+        </Box>
       </Modal>
-    </>
+    </Box>
   );
 }
