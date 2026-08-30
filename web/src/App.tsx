@@ -3,12 +3,14 @@ import { post, req, type User } from './api.js';
 import Accounts from './Accounts.js';
 import Admin from './Admin.js';
 
-type Tab = 'accounts' | 'banks' | 'users';
+type Page = 'reports' | 'settings';
+type SettingsTab = 'accounts' | 'banks' | 'users';
 
 export default function App() {
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const [signupInviteRequired, setSignupInviteRequired] = useState(false);
-  const [tab, setTab] = useState<Tab>('accounts');
+  const [page, setPage] = useState<Page>('reports');
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('accounts');
   const [invite, setInvite] = useState('');
   const [inviteError, setInviteError] = useState('');
   const [submittingInvite, setSubmittingInvite] = useState(false);
@@ -91,23 +93,43 @@ export default function App() {
 
   return (
     <main>
-      <h1>บัญชีครอบครัว</h1>
-      <nav>
-        <button aria-current={tab === 'accounts'} onClick={() => setTab('accounts')}>บัญชีธนาคารของฉัน</button>
-        {user.is_admin && (
-          <>
-            <button aria-current={tab === 'banks'} onClick={() => setTab('banks')}>ธนาคาร (แอดมิน)</button>
-            <button aria-current={tab === 'users'} onClick={() => setTab('users')}>ผู้ใช้ (แอดมิน)</button>
-          </>
-        )}
-        <button onClick={() => req('/auth/logout', { method: 'POST' }).then(() => location.reload())}>
+      <p className="app-name">บัญชีครอบครัว</p>
+      <nav className="app-nav" aria-label="เมนูหลัก">
+        <button aria-current={page === 'reports' ? 'page' : undefined} onClick={() => setPage('reports')}>
+          รายงาน
+        </button>
+        <button aria-current={page === 'settings' ? 'page' : undefined} onClick={() => setPage('settings')}>
+          ตั้งค่า
+        </button>
+        <button className="logout-button" onClick={() => req('/auth/logout', { method: 'POST' }).then(() => location.reload())}>
           ออกจากระบบ
         </button>
       </nav>
 
-      {tab === 'accounts' && <Accounts />}
-      {tab === 'banks' && <Admin.Banks />}
-      {tab === 'users' && <Admin.Users currentUserId={user.id} />}
+      {page === 'reports' && (
+        <section className="page-content" aria-labelledby="reports-heading">
+          <h1 id="reports-heading">รายงาน</h1>
+        </section>
+      )}
+
+      {page === 'settings' && (
+        <section className="page-content" aria-labelledby="settings-heading">
+          <h1 id="settings-heading">ตั้งค่า</h1>
+          <nav className="settings-nav" aria-label="เมนูตั้งค่า">
+            <button aria-current={settingsTab === 'accounts'} onClick={() => setSettingsTab('accounts')}>บัญชีธนาคารของฉัน</button>
+            {user.is_admin && (
+              <>
+                <button aria-current={settingsTab === 'banks'} onClick={() => setSettingsTab('banks')}>ธนาคาร (แอดมิน)</button>
+                <button aria-current={settingsTab === 'users'} onClick={() => setSettingsTab('users')}>ผู้ใช้ (แอดมิน)</button>
+              </>
+            )}
+          </nav>
+
+          {settingsTab === 'accounts' && <Accounts />}
+          {settingsTab === 'banks' && <Admin.Banks />}
+          {settingsTab === 'users' && <Admin.Users currentUserId={user.id} />}
+        </section>
+      )}
     </main>
   );
 }
