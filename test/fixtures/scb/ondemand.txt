@@ -1,0 +1,19 @@
+ธนาคารไทยพาณิชย์ จำกัด (มหาชน)
+THE SIAM COMMERCIAL BANK PUBLIC COMPANY LIMITED
+ชื่อ - สกุล      บุคคลตัวอย่าง
+เลขที่บัญชี          123-456789-0
+Account No.
+วันที่               01/06/2026 - 30/06/2026
+Date
+Date   Time Code Channel                   Debit/Credit                                    Balance/Baht                            Description/Note
+ยอดเงินคงเหลือยกมา (BALANCE BROUGHT FORWARD)                                                      0.00
+25/06/26 00:00 IN         SYSG                                                    0.34                       0.34 DESC : จากระบบเงินฝาก
+NOTE : -
+30/06/26 10:22       X1       BCMS                                           1,770.38                  1,770.72 DESC : นายจ้างตัวอย่าง
+NOTE : -
+30/06/26 10:36       X2        ENET                   1,770.72                                             0.00 DESC : PromptPay ผู้รับตัวอย่าง
+NOTE : -
+
+TOTAL AMOUNTS (Debit)                       1,770.72
+TOTAL AMOUNTS (Credit)                                              1,770.72
+TOTAL ITEMS                                  1                       2

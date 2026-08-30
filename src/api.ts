@@ -5,7 +5,7 @@ import { query } from './db.js';
 import { syncEmailAccount } from './worker.js';
 
 /** parser ที่มีโค้ดจริงแล้ว — แอดมินเลือกได้เฉพาะในนี้ ไม่ให้พิมพ์เอง */
-export const PARSER_KEYS = ['kbank'] as const;
+export const PARSER_KEYS = ['kbank', 'scb'] as const;
 
 export class HttpError extends Error {
   constructor(public status: number, message: string) {

@@ -49,6 +49,7 @@ function Banks() {
             <span>ตัวแกะข้อมูล</span>
             <select value={form.parser_key} onChange={set('parser_key')}>
               <option value="kbank">kbank</option>
+              <option value="scb">scb</option>
             </select>
           </label>
         </div>

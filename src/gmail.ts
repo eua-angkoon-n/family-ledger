@@ -106,6 +106,10 @@ export async function getAttachment(accessToken: string, messageId: string, atta
   return Buffer.from(body.data, 'base64url');
 }
 
+export function hasPdfMagic(data: Buffer): boolean {
+  return data.length >= 5 && data.toString('ascii', 0, 5) === '%PDF-';
+}
+
 /** `"KPLUS" <KPLUS@kasikornbank.com>` → `kplus@kasikornbank.com` */
 export function fromAddress(headerValue: string): string {
   const m = headerValue.match(/<([^>]+)>/);
@@ -163,24 +167,20 @@ export function dkimPasses(headers: GmailHeader[], senderDomain: string): boolea
   return false;
 }
 
-/** ห้ามหยิบไฟล์แนบอันแรกเฉย ๆ (โลโก้ inline) — ต้องเป็น application/pdf และชื่อไฟล์ตรง pattern */
-export function pickPdfAttachment(
-  payload: GmailPayload,
-  filenamePattern: string,
-): { attachmentId: string; filename: string } | null {
+export type GmailAttachment = { attachmentId: string; filename: string };
+
+/** SCB ส่ง PDF เป็น octet-stream และอีเมลย้อนหลังแนบหลายเดือน — คืนทุกไฟล์ที่ชื่อและ MIME ตรงเงื่อนไข */
+export function pickPdfAttachments(payload: GmailPayload, filenamePattern: string): GmailAttachment[] {
   const re = new RegExp(filenamePattern);
-  const found: { attachmentId: string; filename: string }[] = [];
+  const found: GmailAttachment[] = [];
 
   function walk(part: GmailPayload): void {
-    if (part.mimeType === 'application/pdf' && part.filename && part.body?.attachmentId && re.test(part.filename)) {
+    const pdfMime = part.mimeType === 'application/pdf' || part.mimeType === 'application/octet-stream';
+    if (pdfMime && part.filename && part.body?.attachmentId && re.test(part.filename)) {
       found.push({ attachmentId: part.body.attachmentId, filename: part.filename });
     }
     for (const p of part.parts ?? []) walk(p);
   }
   walk(payload);
-
-  if (found.length > 1) {
-    console.warn(`[gmail] พบไฟล์ PDF ตรงเงื่อนไขมากกว่า 1 ไฟล์ในอีเมลเดียว เอาไฟล์แรก: ${found.map((f) => f.filename).join(', ')}`);
-  }
-  return found[0] ?? null;
+  return found;
 }

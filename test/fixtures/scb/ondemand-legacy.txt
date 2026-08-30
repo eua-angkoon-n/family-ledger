@@ -1,0 +1,13 @@
+ACCOUNT STATEMENT WITH NOTES
+Account No./Account Type Statement Period
+บุคคลตัวอย่าง 123-456789-0 01/05/2024-31/05/2024 1/1
+Date/Time Code/Channel Debit Credit Balance Description/Note
+ยอดเงินคงเหลือยกมา (Balance brought forward) ***0.00
+04/05/24 CO/OBIN 0.00 0.00 DESC : ONBOARDING INDIVIDUAL
+17:42 NOTE : -
+04/05/24 C1/TELL 500.00 500.00 DESC : ฝากเงินตัวอย่าง
+17:43 NOTE : -
+04/05/24 C2/ATM 500.00 0.00 DESC : ถอนเงินตัวอย่าง
+17:56 NOTE : -
+Total amount 500.00 500.00
+Total items 1 1

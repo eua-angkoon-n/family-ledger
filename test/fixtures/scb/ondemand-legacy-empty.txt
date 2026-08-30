@@ -1,0 +1,5 @@
+ACCOUNT STATEMENT WITH NOTES
+Account No./Account Type Statement Period
+บุคคลตัวอย่าง 123-456789-0 01/09/2024-13/09/2024 1/1
+Date/Time Code/Channel Debit Credit Balance Description/Note
+- - - No data - - -

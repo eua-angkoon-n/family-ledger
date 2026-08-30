@@ -10,7 +10,7 @@
 ```
 Gmail (poll ชั่วโมงละครั้ง)
   → จับคู่อีเมล: ผู้ส่ง + DKIM + หัวข้อ          [ตาราง bank — แอดมินแก้ได้]
-  → ดึงไฟล์แนบ PDF (ชื่อไฟล์ตรง pattern + เป็น application/pdf)
+  → ดึงไฟล์แนบ PDF ทุกไฟล์ (ชื่อไฟล์ตรง pattern + MIME PDF/octet-stream + magic `%PDF-`)
   → เก็บ PDF ต้นฉบับ (ยังเข้ารหัสอยู่)           [data/pdf/ + backup]
   → ถอดรหัส + สกัดข้อความ ในหน่วยความจำ           [qpdf | pdftotext]
   → แกะตาราง                                     [โค้ดต่อธนาคาร: parser_key]
@@ -44,7 +44,8 @@ Gmail (poll ชั่วโมงละครั้ง)
 | `src/account-match.ts` | จับคู่เลขบัญชีที่ statement ปิดบังไว้ กับเลขเต็มที่ผู้ใช้กรอก |
 | `src/auth.ts` | Google OAuth, session, ด่าน `requireUser` / `requireAdmin` |
 | `src/gmail.ts` | Gmail REST (`fetch` ดิบ) + ด่าน DKIM + เลือกไฟล์แนบ PDF |
-| `src/worker.ts` | worker ชั่วโมงละครั้ง: sync กล่องอีเมล → ถอดรหัส PDF → สกัดข้อความลง `statement.error_detail` |
+| `src/parsers/scb.ts` | แกะ SCB statement ทั้งแบบรายเดือนและย้อนหลัง + checksum gate |
+| `src/worker.ts` | worker ชั่วโมงละครั้ง: sync กล่องอีเมล → ถอดรหัส PDF → parse → เขียน statement/txn แบบ atomic |
 | `src/api.ts` | REST ทั้งหมด |
 | `web/` | React (Vite) — แท็บบัญชีของฉัน / ธนาคาร (แอดมิน) / ผู้ใช้ (แอดมิน) |
 
@@ -54,7 +55,7 @@ Gmail (poll ชั่วโมงละครั้ง)
 npm run migrate     # รัน migration (แอปรันให้เองตอนบูตอยู่แล้ว)
 npm run dev:api     # API ที่ :3000
 npm run dev:web     # Vite ที่ :5173 (proxy /api และ /auth ไป :3000)
-npm test            # node:test — crypto + account-match + gmail (ด่าน DKIM/เลือกไฟล์แนบ)
+npm test            # node:test — crypto + account-match + gmail + SCB parser/checksum
 npm run build       # tsc + vite build
 ```
 

@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { dkimPasses, fromAddress, pickPdfAttachment, type GmailHeader, type GmailPayload } from '../src/gmail.js';
+import {
+  dkimPasses,
+  fromAddress,
+  hasPdfMagic,
+  pickPdfAttachments,
+  type GmailHeader,
+  type GmailPayload,
+} from '../src/gmail.js';
 
 const DOMAIN = 'kasikornbank.com';
 
@@ -72,24 +79,44 @@ test('fromAddress ดึง addr-spec ออกจาก display name แล้�
 
 const PDF_PATTERN = '\\.pdf$';
 
-test('pickPdfAttachment: โลโก้ inline มาก่อน PDF → ได้ PDF ไม่ใช่โลโก้', () => {
+test('pickPdfAttachments: SCB ส่ง PDF เป็น application/octet-stream → รับทุกไฟล์ที่ชื่อตรง', () => {
+  const payload: GmailPayload = {
+    parts: [
+      { mimeType: 'image/x-png', filename: 'logo.png', body: { attachmentId: 'logo' } },
+      { mimeType: 'application/octet-stream', filename: 'AcctSt_Jan26.pdf', body: { attachmentId: 'jan' } },
+      { mimeType: 'application/octet-stream', filename: 'AcctSt_Feb26.pdf', body: { attachmentId: 'feb' } },
+    ],
+  };
+
+  assert.deepEqual(pickPdfAttachments(payload, '^AcctSt_[A-Za-z]{3}\\d{2}\\.pdf$'), [
+    { attachmentId: 'jan', filename: 'AcctSt_Jan26.pdf' },
+    { attachmentId: 'feb', filename: 'AcctSt_Feb26.pdf' },
+  ]);
+});
+
+test('hasPdfMagic: octet-stream ต้องมีลายเซ็น PDF ก่อนบันทึก', () => {
+  assert.equal(hasPdfMagic(Buffer.from('%PDF-1.5\n')), true);
+  assert.equal(hasPdfMagic(Buffer.from('<html>not a pdf</html>')), false);
+});
+
+test('pickPdfAttachments: โลโก้ inline มาก่อน PDF → ได้เฉพาะ PDF', () => {
   const payload: GmailPayload = {
     parts: [
       { mimeType: 'image/gif', filename: 'logo.gif', body: { attachmentId: 'a1' } },
       { mimeType: 'application/pdf', filename: 'statement_202601.pdf', body: { attachmentId: 'a2' } },
     ],
   };
-  assert.deepEqual(pickPdfAttachment(payload, PDF_PATTERN), { attachmentId: 'a2', filename: 'statement_202601.pdf' });
+  assert.deepEqual(pickPdfAttachments(payload, PDF_PATTERN), [{ attachmentId: 'a2', filename: 'statement_202601.pdf' }]);
 });
 
-test('pickPdfAttachment: ชื่อไฟล์ไม่ตรง pattern → ไม่ได้', () => {
+test('pickPdfAttachments: ชื่อไฟล์ไม่ตรง pattern → ไม่ได้', () => {
   const payload: GmailPayload = {
     parts: [{ mimeType: 'application/pdf', filename: 'random.pdf', body: { attachmentId: 'a1' } }],
   };
-  assert.equal(pickPdfAttachment(payload, '^statement_\\d+\\.pdf$'), null);
+  assert.deepEqual(pickPdfAttachments(payload, '^statement_\\d+\\.pdf$'), []);
 });
 
-test('pickPdfAttachment: multipart ซ้อนกันหลายชั้น → เจอไฟล์ข้างใน', () => {
+test('pickPdfAttachments: multipart ซ้อนกันหลายชั้น → เจอไฟล์ข้างใน', () => {
   const payload: GmailPayload = {
     parts: [
       {
@@ -101,25 +128,5 @@ test('pickPdfAttachment: multipart ซ้อนกันหลายชั้น
       },
     ],
   };
-  assert.deepEqual(pickPdfAttachment(payload, PDF_PATTERN), { attachmentId: 'nested1', filename: 'statement.pdf' });
-});
-
-test('pickPdfAttachment: มี PDF ตรงเงื่อนไข 2 ไฟล์ → เอาไฟล์แรก + เตือน', () => {
-  const payload: GmailPayload = {
-    parts: [
-      { mimeType: 'application/pdf', filename: 'statement_1.pdf', body: { attachmentId: 'a1' } },
-      { mimeType: 'application/pdf', filename: 'statement_2.pdf', body: { attachmentId: 'a2' } },
-    ],
-  };
-  const original = console.warn;
-  let warned = false;
-  console.warn = () => {
-    warned = true;
-  };
-  try {
-    assert.deepEqual(pickPdfAttachment(payload, PDF_PATTERN), { attachmentId: 'a1', filename: 'statement_1.pdf' });
-  } finally {
-    console.warn = original;
-  }
-  assert.equal(warned, true);
+  assert.deepEqual(pickPdfAttachments(payload, PDF_PATTERN), [{ attachmentId: 'nested1', filename: 'statement.pdf' }]);
 });
