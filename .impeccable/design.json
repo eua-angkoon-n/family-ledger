@@ -43,7 +43,7 @@
       "refersTo": "button-primary",
       "description": "Primary action หนึ่งรายการต่อบริบท",
       "html": "<button class=\"ds-btn-primary\">บันทึก</button>",
-      "css": ".ds-btn-primary { min-height: 40px; padding: 6px 16px; border: 0; border-radius: 10px; background: #70adfb; color: #0e101f; font: 650 0.875rem/1.75 system-ui, sans-serif; cursor: pointer; transition: background 200ms cubic-bezier(0,0,0.2,1), box-shadow 200ms cubic-bezier(0,0,0.2,1); } .ds-btn-primary:hover { background: rgb(140, 189, 251); box-shadow: 0 2px 3px rgba(0,0,0,.28); } .ds-btn-primary:focus-visible { outline: 2px solid #70adfb; outline-offset: 2px; } .ds-btn-primary:active { background: rgb(78, 121, 175); }"
+      "css": ".ds-btn-primary { min-height: 40px; padding: 6px 16px; border: 0; border-radius: 10px; background: #70adfb; color: #0e101f; font: 650 0.875rem/1.75 system-ui, 'Noto Sans Thai', sans-serif; cursor: pointer; transition: background 200ms cubic-bezier(0,0,0.2,1); } .ds-btn-primary:hover { background: rgb(140, 189, 251); } .ds-btn-primary:focus-visible { outline: 2px solid #70adfb; outline-offset: 2px; } .ds-btn-primary:active { background: rgb(78, 121, 175); }"
     },
     {
       "name": "Outlined Button",
@@ -51,7 +51,7 @@
       "refersTo": "button-outlined",
       "description": "Action รองและการยกเลิก",
       "html": "<button class=\"ds-btn-outlined\">ยกเลิก</button>",
-      "css": ".ds-btn-outlined { min-height: 40px; padding: 6px 16px; border: 1px solid #32364d; border-radius: 10px; background: transparent; color: #e9ebf2; font: 650 0.875rem/1.75 system-ui, sans-serif; cursor: pointer; transition: border-color 200ms cubic-bezier(0,0,0.2,1), background 200ms cubic-bezier(0,0,0.2,1); } .ds-btn-outlined:hover { border-color: #70adfb; background: rgba(112,173,251,.08); } .ds-btn-outlined:focus-visible { outline: 2px solid #70adfb; outline-offset: 2px; }"
+      "css": ".ds-btn-outlined { min-height: 40px; padding: 6px 16px; border: 1px solid #32364d; border-radius: 10px; background: transparent; color: #e9ebf2; font: 650 0.875rem/1.75 system-ui, 'Noto Sans Thai', sans-serif; cursor: pointer; transition: border-color 200ms cubic-bezier(0,0,0.2,1), background 200ms cubic-bezier(0,0,0.2,1); } .ds-btn-outlined:hover { border-color: #70adfb; background: rgba(112,173,251,.08); } .ds-btn-outlined:focus-visible { outline: 2px solid #70adfb; outline-offset: 2px; }"
     },
     {
       "name": "Text Field",
@@ -59,7 +59,7 @@
       "refersTo": "input",
       "description": "Outlined field สำหรับข้อมูลบัญชีและการตั้งค่า",
       "html": "<label class=\"ds-field\"><span>ชื่อบัญชี</span><input value=\"บัญชีหลัก\" aria-label=\"ชื่อบัญชี\"></label>",
-      "css": ".ds-field { display: grid; gap: 4px; color: #9498a5; font: 400 .875rem/1.5 system-ui, sans-serif; } .ds-field input { height: 56px; padding: 16px 14px; border: 1px solid #32364d; border-radius: 10px; background: #0e101f; color: #e9ebf2; font: 400 1rem/1.5 system-ui, sans-serif; } .ds-field input:hover { border-color: #9498a5; } .ds-field input:focus-visible { border-color: #70adfb; outline: 2px solid #70adfb; outline-offset: -2px; }"
+      "css": ".ds-field { display: grid; gap: 4px; color: #9498a5; font: 400 .875rem/1.5 system-ui, 'Noto Sans Thai', sans-serif; } .ds-field input { height: 56px; padding: 16px 14px; border: 1px solid #32364d; border-radius: 10px; background: #0e101f; color: #e9ebf2; font: 400 1rem/1.5 system-ui, 'Noto Sans Thai', sans-serif; } .ds-field input:hover { border-color: #9498a5; } .ds-field input:focus-visible { border-color: #70adfb; outline: 2px solid #70adfb; outline-offset: -2px; }"
     },
     {
       "name": "Navigation Tabs",
@@ -67,7 +67,7 @@
       "refersTo": "nav-tab-active",
       "description": "Primary product navigation พร้อม selected indicator",
       "html": "<nav class=\"ds-tabs\" aria-label=\"เมนูหลัก\"><button class=\"ds-tab is-active\">รายงาน</button><button class=\"ds-tab\">ตั้งค่า</button></nav>",
-      "css": ".ds-tabs { display: flex; min-height: 48px; border-bottom: 1px solid #32364d; background: #0e101f; } .ds-tab { position: relative; padding: 12px 16px; border: 0; background: transparent; color: #9498a5; font: 650 .875rem/1.5 system-ui, sans-serif; cursor: pointer; } .ds-tab:hover { color: #e9ebf2; } .ds-tab:focus-visible { outline: 2px solid #70adfb; outline-offset: -2px; } .ds-tab.is-active { color: #70adfb; } .ds-tab.is-active::after { content: ''; position: absolute; right: 12px; bottom: 0; left: 12px; height: 2px; background: #70adfb; }"
+      "css": ".ds-tabs { display: flex; min-height: 48px; border-bottom: 1px solid #32364d; background: #0e101f; } .ds-tab { position: relative; padding: 12px 16px; border: 0; background: transparent; color: #9498a5; font: 650 .875rem/1.5 system-ui, 'Noto Sans Thai', sans-serif; cursor: pointer; } .ds-tab:hover { color: #e9ebf2; } .ds-tab:focus-visible { outline: 2px solid #70adfb; outline-offset: -2px; } .ds-tab.is-active { color: #70adfb; } .ds-tab.is-active::after { content: ''; position: absolute; right: 12px; bottom: 0; left: 12px; height: 2px; background: #70adfb; }"
     },
     {
       "name": "Success Chip",
@@ -75,7 +75,7 @@
       "refersTo": "chip-success",
       "description": "สถานะสำเร็จหรือเปิดใช้งาน",
       "html": "<span class=\"ds-chip-success\">เปิดใช้งานอยู่</span>",
-      "css": ".ds-chip-success { display: inline-flex; min-height: 24px; align-items: center; padding: 4px 10px; border-radius: 999px; background: #52cd86; color: #0e101f; font: 650 .75rem/1.3 system-ui, sans-serif; }"
+      "css": ".ds-chip-success { display: inline-flex; min-height: 24px; align-items: center; padding: 4px 10px; border-radius: 999px; background: #52cd86; color: #0e101f; font: 650 .75rem/1.3 system-ui, 'Noto Sans Thai', sans-serif; }"
     },
     {
       "name": "Outlined Surface",
@@ -83,7 +83,7 @@
       "refersTo": "surface-outlined",
       "description": "Container สำหรับ auth, ตาราง และกลุ่มข้อมูล",
       "html": "<section class=\"ds-surface\"><h2>บัญชีธนาคารของฉัน</h2><p>จัดการบัญชีที่ใช้รับข้อมูลจาก statement</p></section>",
-      "css": ".ds-surface { max-width: 420px; padding: 24px; border: 1px solid #32364d; border-radius: 10px; background: #1a1e30; color: #e9ebf2; font: 400 1rem/1.5 system-ui, sans-serif; transition: box-shadow 200ms cubic-bezier(0,0,0.2,1); } .ds-surface:hover { box-shadow: 0 2px 3px rgba(0,0,0,.24); } .ds-surface h2 { margin: 0; font-size: 1.25rem; line-height: 1.4; } .ds-surface p { margin: 8px 0 0; color: #9498a5; }"
+      "css": ".ds-surface { max-width: 420px; padding: 24px; border: 1px solid #32364d; border-radius: 10px; background: #1a1e30; color: #e9ebf2; font: 400 1rem/1.5 system-ui, 'Noto Sans Thai', sans-serif; } .ds-surface h2 { margin: 0; font-size: 1.25rem; line-height: 1.4; } .ds-surface p { margin: 8px 0 0; color: #9498a5; }"
     }
   ],
   "narrative": {
@@ -97,10 +97,10 @@
       "การเคลื่อนไหวสั้นและมีหน้าที่ พร้อม reduced-motion fallback"
     ],
     "rules": [
-      { "name": "The Hyacine Identity Rule", "body": "ใช้ layout ของ KBank เป็นข้อมูลอ้างอิงได้ แต่ห้ามนำสีเขียวหรืออัตลักษณ์แบรนด์ของ KBank มาใช้", "section": "colors" },
+      { "name": "The Hyacine Identity Rule", "body": "ใช้ layout ของ KBank เป็นข้อมูลอ้างอิงได้ แต่ห้ามนำสีเขียวประจำแบรนด์หรืออัตลักษณ์ของ KBank มาใช้เป็นสีหลัก สีเขียวสงวนไว้สำหรับ income และสถานะสำเร็จเท่านั้น", "section": "colors" },
       { "name": "The Semantic Color Rule", "body": "สีสถานะต้องมาพร้อมข้อความหรือไอคอนเสมอ ห้ามสื่อความหมายด้วยสีเพียงอย่างเดียว", "section": "colors" },
       { "name": "The Restrained Accent Rule", "body": "Hyacinthia Sky มีไว้สำหรับ action, focus และ selection ไม่ใช่สีตกแต่งทั่วไป", "section": "colors" },
-      { "name": "The One-Family Rule", "body": "ใช้ font family เดียวทั่ว product UI และสร้าง hierarchy ด้วยขนาดกับน้ำหนักเท่านั้น", "section": "typography" },
+      { "name": "The One-Family Rule", "body": "ใช้ font family เดียวกับข้อความและ controls ทั่ว product UI และสร้าง hierarchy ด้วยขนาดกับน้ำหนัก; อนุญาต monospace เฉพาะ technical identifier ที่ระบุไว้เท่านั้น", "section": "typography" },
       { "name": "The Financial Clarity Rule", "body": "ตัวเลขบัญชี อีเมล และข้อมูลเทคนิคต้องอ่านง่าย ห้ามใช้ display หรือ pixel font ในข้อมูลสำคัญ", "section": "typography" },
       { "name": "The Earned Shadow Rule", "body": "ทุกเงาต้องอธิบายการซ้อนชั้นหรือ interaction state ได้ ถ้าเอาเงาออกแล้วความหมายไม่เปลี่ยน เงานั้นไม่จำเป็น", "section": "elevation" }
     ],
@@ -113,7 +113,7 @@
       "Do ใช้เงานุ่มเฉพาะเมื่อช่วยอธิบายการซ้อนชั้นหรือ interaction"
     ],
     "donts": [
-      "Don't ใช้สีเขียวหรืออัตลักษณ์แบรนด์ของ KBank",
+      "Don't ใช้สีเขียวประจำแบรนด์หรืออัตลักษณ์ของ KBank เป็นสีหลักหรือสีอ้างอิง; สีเขียวใช้ได้เฉพาะ income และสถานะสำเร็จ",
       "Don't ลอกหน้าตาของ KBank โดยตรง การอ้างอิงจำกัดอยู่ที่แนวทาง layout เท่านั้น",
       "Don't ใช้ accent เป็นสีตกแต่งทั่วทั้งหน้าจอหรือใช้สีโดยไม่มี label/icon อธิบาย",
       "Don't ซ้อน card ภายใน card หรือใส่เงาให้ทุก container",

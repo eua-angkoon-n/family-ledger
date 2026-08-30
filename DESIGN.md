@@ -124,7 +124,7 @@ Hyacinthia Ledger คือสมุดบัญชีครอบครัว�
 
 ### Named Rules
 
-**The Hyacine Identity Rule.** ใช้ layout ของ KBank เป็นข้อมูลอ้างอิงได้ แต่ห้ามนำสีเขียวหรืออัตลักษณ์แบรนด์ของ KBank มาใช้
+**The Hyacine Identity Rule.** ใช้ layout ของ KBank เป็นข้อมูลอ้างอิงได้ แต่ห้ามนำสีเขียวประจำแบรนด์หรืออัตลักษณ์ของ KBank มาใช้เป็นสีหลัก สีเขียวสงวนไว้สำหรับ `income` และสถานะสำเร็จเท่านั้น
 
 **The Semantic Color Rule.** สีสถานะต้องมาพร้อมข้อความหรือไอคอนเสมอ ห้ามสื่อความหมายด้วยสีเพียงอย่างเดียว
 
@@ -134,7 +134,7 @@ Hyacinthia Ledger คือสมุดบัญชีครอบครัว�
 
 **Display Font:** system-ui พร้อม Noto Sans Thai fallback
 **Body Font:** system-ui พร้อม Noto Sans Thai fallback
-**Label/Mono Font:** system-ui สำหรับ label และ monospace เริ่มต้นของระบบสำหรับข้อมูลเทคนิค
+**Label/Mono Font:** system-ui พร้อม Noto Sans Thai fallback สำหรับ label; monospace เริ่มต้นของระบบใช้เฉพาะเลขบัญชี อีเมล parser key และข้อมูลเทคนิคที่เป็น identifier
 
 **Character:** ใช้ sans-serif ครอบครัวเดียวเพื่อให้หน้าจอผลิตภัณฑ์สงบและสม่ำเสมอ น้ำหนักที่ชัดสร้างลำดับชั้นโดยไม่ต้องพึ่ง display font
 
@@ -147,7 +147,7 @@ Hyacinthia Ledger คือสมุดบัญชีครอบครัว�
 
 ### Named Rules
 
-**The One-Family Rule.** ใช้ font family เดียวทั่ว product UI และสร้าง hierarchy ด้วยขนาดกับน้ำหนักเท่านั้น
+**The One-Family Rule.** ใช้ font family เดียวกับข้อความและ controls ทั่ว product UI และสร้าง hierarchy ด้วยขนาดกับน้ำหนัก; อนุญาต monospace เฉพาะ technical identifier ที่ระบุไว้เท่านั้น
 
 **The Financial Clarity Rule.** ตัวเลขบัญชี อีเมล และข้อมูลเทคนิคต้องอ่านง่าย ห้ามใช้ display หรือ pixel font ในข้อมูลสำคัญ
 
@@ -220,7 +220,7 @@ Component vocabulary คือ **คุ้นเคย มั่นใจ แล
 
 ### Don't:
 
-- **Don't** ใช้สีเขียวหรืออัตลักษณ์แบรนด์ของ KBank
+- **Don't** ใช้สีเขียวประจำแบรนด์หรืออัตลักษณ์ของ KBank เป็นสีหลักหรือสีอ้างอิง; สีเขียวใช้ได้เฉพาะ `income` และสถานะสำเร็จ
 - **Don't** ลอกหน้าตาของ KBank โดยตรง การอ้างอิงจำกัดอยู่ที่แนวทาง layout เท่านั้น
 - **Don't** ใช้ accent เป็นสีตกแต่งทั่วทั้งหน้าจอหรือใช้สีโดยไม่มี label/icon อธิบาย
 - **Don't** ซ้อน card ภายใน card หรือใส่เงาให้ทุก container
