@@ -21,6 +21,7 @@ import AddRounded from '@mui/icons-material/AddRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import EditRounded from '@mui/icons-material/EditRounded';
 import { del, patch, post, req, type Account, type Bank, type EmailAccount } from './api.js';
+import { createFormFieldChangeHandler } from './form.js';
 import Modal from './Modal.js';
 
 const EMPTY = { bank_id: '', email_account_id: '', nickname: '', account_number: '', pdf_password: '', promptpay_id: '' };
@@ -41,8 +42,7 @@ export default function Accounts() {
   };
   useEffect(reload, []);
 
-  const setFormField = (key: keyof typeof EMPTY) => (event: { target: { value: string } }) =>
-    setForm((current) => ({ ...current, [key]: event.target.value }));
+  const setFormField = createFormFieldChangeHandler(setForm);
 
   const openAdd = () => {
     setEditingId(null);

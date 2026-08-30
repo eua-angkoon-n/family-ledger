@@ -21,6 +21,7 @@ import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import EditRounded from '@mui/icons-material/EditRounded';
 import PowerSettingsNewRounded from '@mui/icons-material/PowerSettingsNewRounded';
 import { del, patch, post, req, type Bank, type User } from './api.js';
+import { createFormFieldChangeHandler } from './form.js';
 import Modal from './Modal.js';
 
 const EMPTY = {
@@ -43,8 +44,7 @@ function Banks() {
   const reload = () => { req<Bank[]>('/api/banks').then(setBanks).catch((responseError: Error) => setError(responseError.message)); };
   useEffect(reload, []);
 
-  const setFormField = (key: keyof typeof EMPTY) => (event: { target: { value: string } }) =>
-    setForm((current) => ({ ...current, [key]: event.target.value }));
+  const setFormField = createFormFieldChangeHandler(setForm);
 
   const openAdd = () => {
     setEditingId(null);
