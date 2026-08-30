@@ -107,7 +107,7 @@ export default function App() {
 
       {tab === 'accounts' && <Accounts />}
       {tab === 'banks' && <Admin.Banks />}
-      {tab === 'users' && <Admin.Users />}
+      {tab === 'users' && <Admin.Users currentUserId={user.id} />}
     </main>
   );
 }

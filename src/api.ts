@@ -90,6 +90,10 @@ api.post('/banks', requireAdmin(async (req, res) => {
 
 api.patch('/banks/:id', requireAdmin(async (req, res) => {
   const b = req.body as Body;
+  const parserKey = b.parser_key == null ? null : str(b, 'parser_key');
+  if (parserKey !== null && !(PARSER_KEYS as readonly string[]).includes(parserKey)) {
+    throw new HttpError(400, `parser_key ต้องเป็นหนึ่งใน ${PARSER_KEYS.join(', ')}`);
+  }
   const { rows } = await query(
     `update bank set
        name = coalesce($2, name),
@@ -98,7 +102,8 @@ api.patch('/banks/:id', requireAdmin(async (req, res) => {
        subject_monthly = coalesce($5, subject_monthly),
        subject_ondemand = coalesce($6, subject_ondemand),
        attachment_filename_pattern = coalesce($7, attachment_filename_pattern),
-       is_active = coalesce($8, is_active)
+       parser_key = coalesce($8, parser_key),
+       is_active = coalesce($9, is_active)
      where id = $1 returning *`,
     [
       Number(req.params.id),
@@ -108,6 +113,7 @@ api.patch('/banks/:id', requireAdmin(async (req, res) => {
       b.subject_monthly == null ? null : regex(b, 'subject_monthly'),
       b.subject_ondemand == null ? null : regex(b, 'subject_ondemand'),
       b.attachment_filename_pattern == null ? null : regex(b, 'attachment_filename_pattern'),
+      parserKey,
       typeof b.is_active === 'boolean' ? b.is_active : null,
     ],
   );
@@ -131,10 +137,15 @@ api.get('/admin/users', requireAdmin(async (_req, res) => {
 }));
 
 api.patch('/admin/users/:id', requireAdmin(async (req, res, admin) => {
-  const status = String((req.body as Body).status);
-  if (!['pending', 'approved', 'rejected'].includes(status)) throw new HttpError(400, 'status ไม่ถูกต้อง');
+  const b = req.body as Body;
+  const status = b.status == null ? null : String(b.status);
+  const isAdmin = typeof b.is_admin === 'boolean' ? b.is_admin : null;
+  if (status !== null && !['pending', 'approved', 'rejected'].includes(status)) {
+    throw new HttpError(400, 'status ไม่ถูกต้อง');
+  }
+  if (status === null && isAdmin === null) throw new HttpError(400, 'ไม่มีข้อมูลที่ต้องการแก้ไข');
   const targetId = Number(req.params.id);
-  if (targetId === admin.id) throw new HttpError(400, 'เปลี่ยนสถานะตัวเองไม่ได้');
+  if (targetId === admin.id) throw new HttpError(400, 'เปลี่ยนสถานะหรือบทบาทตัวเองไม่ได้');
 
   if (status === 'rejected') {
     // ยกเลิกสิทธิ์ที่ Google ก่อน แล้วค่อยลบของเรา — ลบก่อนแปลว่า token ยังใช้ได้แต่เราตามไปถอนไม่ได้แล้ว
@@ -147,10 +158,11 @@ api.patch('/admin/users/:id', requireAdmin(async (req, res, admin) => {
       await query('delete from email_account where id = $1', [r.id]);
     }
   }
-  const { rows } = await query('update app_user set status = $2 where id = $1 returning id, email, status', [
-    targetId,
-    status,
-  ]);
+  const { rows } = await query(
+    `update app_user set status = coalesce($2, status), is_admin = coalesce($3, is_admin)
+     where id = $1 returning id, email, status, is_admin`,
+    [targetId, status, isAdmin],
+  );
   if (!rows[0]) throw new HttpError(404, 'ไม่พบผู้ใช้');
   res.json(rows[0]);
 }));
@@ -214,21 +226,37 @@ api.post('/accounts', requireUser(async (req, res, user) => {
 
 api.patch('/accounts/:id', requireUser(async (req, res, user) => {
   const b = req.body as Body;
-  const { rows } = await query(
+  const emailAccountId = b.email_account_id == null ? null : id(b, 'email_account_id');
+  if (emailAccountId !== null) {
+    const owns = await query('select 1 from email_account where id = $1 and user_id = $2', [emailAccountId, user.id]);
+    if (!owns.rowCount) throw new HttpError(403, 'กล่องอีเมลนี้ไม่ใช่ของคุณ');
+  }
+  const hasPromptpay = Object.prototype.hasOwnProperty.call(b, 'promptpay_id');
+  const { rows } = await query<{ id: number; email_account_id: number }>(
     `update bank_account set
-       nickname = coalesce($3, nickname),
-       promptpay_id = coalesce($4, promptpay_id),
-       pdf_password_enc = coalesce($5, pdf_password_enc)
-     where id = $1 and user_id = $2 returning id`,
+       bank_id = coalesce($3, bank_id),
+       email_account_id = coalesce($4, email_account_id),
+       nickname = coalesce($5, nickname),
+       account_number = coalesce($6, account_number),
+       promptpay_id = case when $7 then $8 else promptpay_id end,
+       pdf_password_enc = coalesce($9, pdf_password_enc)
+     where id = $1 and user_id = $2 returning id, email_account_id`,
     [
       Number(req.params.id),
       user.id,
-      optionalStr(b, 'nickname', 60),
-      optionalStr(b, 'promptpay_id', 40),
+      b.bank_id == null ? null : id(b, 'bank_id'),
+      emailAccountId,
+      b.nickname == null ? null : str(b, 'nickname', 60),
+      b.account_number == null ? null : str(b, 'account_number', 40),
+      hasPromptpay,
+      hasPromptpay ? optionalStr(b, 'promptpay_id', 40) : null,
       b.pdf_password == null || b.pdf_password === '' ? null : encrypt(str(b, 'pdf_password', 200)),
     ],
   );
   if (!rows[0]) throw new HttpError(404, 'ไม่พบบัญชี');
+  syncEmailAccount(rows[0].email_account_id, { full: true }).catch((e) =>
+    console.error(`[worker] reprocess account=${rows[0]!.id} ล้มเหลว:`, e),
+  );
   res.json(rows[0]);
 }));
 
