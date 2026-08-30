@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-30T18:16:35.5953414Z",
+  "title": "Design System: Hyacinthia Ledger",
+  "extensions": {
+    "colorMeta": {
+      "background": { "role": "neutral", "displayName": "Hyacinthia Midnight", "tonalRamp": ["#080a18", "#202333", "#3b3f50", "#585d6f", "#787c90", "#999db2", "#bbc0d5", "#dee4f9"] },
+      "surface": { "role": "neutral", "displayName": "Quiet Indigo", "tonalRamp": ["#07091a", "#1f2335", "#3a3e53", "#585c72", "#777c93", "#989db5", "#bac0d8", "#dde3fd"] },
+      "border": { "role": "neutral", "displayName": "Indigo Boundary", "tonalRamp": ["#07091c", "#1e2237", "#393e55", "#575c75", "#767c96", "#979db8", "#b9bfdb", "#dce3ff"] },
+      "text": { "role": "neutral", "displayName": "Lavender Ink", "tonalRamp": ["#0a0b0f", "#222429", "#3e3f45", "#5c5d63", "#7b7d83", "#9c9ea5", "#bfc0c8", "#e2e4eb"] },
+      "muted": { "role": "neutral", "displayName": "Muted Lavender", "tonalRamp": ["#090a14", "#21232e", "#3c3f4b", "#5a5d69", "#797d8a", "#9a9eab", "#bdc0ce", "#e0e4f2"] },
+      "accent": { "role": "primary", "displayName": "Hyacinthia Sky", "tonalRamp": ["#000040", "#001d60", "#003d82", "#215da5", "#437fc9", "#64a1ee", "#86c4ff", "#a9e8ff"] },
+      "income": { "role": "secondary", "displayName": "Mint Balance", "tonalRamp": ["#001800", "#003500", "#005415", "#007434", "#009654", "#3bb974", "#64dd95", "#8affb8"] },
+      "expense": { "role": "tertiary", "displayName": "Coral Alert", "tonalRamp": ["#3b0000", "#600000", "#860000", "#ac1922", "#d34443", "#fa6863", "#ff8c84", "#ffb1a7"] }
+    },
+    "typographyMeta": {
+      "headline-large": { "displayName": "Headline Large", "purpose": "ชื่อหน้าหลักหนึ่งครั้งต่อ surface" },
+      "headline-medium": { "displayName": "Headline Medium", "purpose": "หัวข้อส่วนและ dialog" },
+      "body": { "displayName": "Body", "purpose": "เนื้อหาหลักและคำอธิบาย" },
+      "label": { "displayName": "Label", "purpose": "ปุ่ม tab และ table header" }
+    },
+    "shadows": [
+      { "name": "low-lift", "value": "0px 2px 1px -1px rgba(0,0,0,0.2), 0px 1px 1px 0px rgba(0,0,0,0.14), 0px 1px 3px 0px rgba(0,0,0,0.12)", "purpose": "Hover หรือพื้นผิวขนาดเล็กที่ยกขึ้นชั่วคราว" },
+      { "name": "floating-menu", "value": "0px 5px 5px -3px rgba(0,0,0,0.2), 0px 8px 10px 1px rgba(0,0,0,0.14), 0px 3px 14px 2px rgba(0,0,0,0.12)", "purpose": "Menu และ popover" },
+      { "name": "dialog-focus", "value": "0px 11px 15px -7px rgba(0,0,0,0.2), 0px 24px 38px 3px rgba(0,0,0,0.14), 0px 9px 46px 8px rgba(0,0,0,0.12)", "purpose": "Dialog ที่แยกจากฉากหลัง" }
+    ],
+    "motion": [
+      { "name": "state-fast", "value": "200ms cubic-bezier(0.0, 0, 0.2, 1)", "purpose": "Hover, focus และ state feedback" },
+      { "name": "state-standard", "value": "300ms cubic-bezier(0.0, 0, 0.2, 1)", "purpose": "Dialog และการเปลี่ยนสถานะที่ซับซ้อนกว่า" }
+    ],
+    "breakpoints": [
+      { "name": "xs", "value": "0px" },
+      { "name": "sm", "value": "600px" },
+      { "name": "md", "value": "900px" },
+      { "name": "lg", "value": "1200px" },
+      { "name": "xl", "value": "1536px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Primary action หนึ่งรายการต่อบริบท",
+      "html": "<button class=\"ds-btn-primary\">บันทึก</button>",
+      "css": ".ds-btn-primary { min-height: 40px; padding: 6px 16px; border: 0; border-radius: 10px; background: #70adfb; color: #0e101f; font: 650 0.875rem/1.75 system-ui, sans-serif; cursor: pointer; transition: background 200ms cubic-bezier(0,0,0.2,1), box-shadow 200ms cubic-bezier(0,0,0.2,1); } .ds-btn-primary:hover { background: rgb(140, 189, 251); box-shadow: 0 2px 3px rgba(0,0,0,.28); } .ds-btn-primary:focus-visible { outline: 2px solid #70adfb; outline-offset: 2px; } .ds-btn-primary:active { background: rgb(78, 121, 175); }"
+    },
+    {
+      "name": "Outlined Button",
+      "kind": "button",
+      "refersTo": "button-outlined",
+      "description": "Action รองและการยกเลิก",
+      "html": "<button class=\"ds-btn-outlined\">ยกเลิก</button>",
+      "css": ".ds-btn-outlined { min-height: 40px; padding: 6px 16px; border: 1px solid #32364d; border-radius: 10px; background: transparent; color: #e9ebf2; font: 650 0.875rem/1.75 system-ui, sans-serif; cursor: pointer; transition: border-color 200ms cubic-bezier(0,0,0.2,1), background 200ms cubic-bezier(0,0,0.2,1); } .ds-btn-outlined:hover { border-color: #70adfb; background: rgba(112,173,251,.08); } .ds-btn-outlined:focus-visible { outline: 2px solid #70adfb; outline-offset: 2px; }"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Outlined field สำหรับข้อมูลบัญชีและการตั้งค่า",
+      "html": "<label class=\"ds-field\"><span>ชื่อบัญชี</span><input value=\"บัญชีหลัก\" aria-label=\"ชื่อบัญชี\"></label>",
+      "css": ".ds-field { display: grid; gap: 4px; color: #9498a5; font: 400 .875rem/1.5 system-ui, sans-serif; } .ds-field input { height: 56px; padding: 16px 14px; border: 1px solid #32364d; border-radius: 10px; background: #0e101f; color: #e9ebf2; font: 400 1rem/1.5 system-ui, sans-serif; } .ds-field input:hover { border-color: #9498a5; } .ds-field input:focus-visible { border-color: #70adfb; outline: 2px solid #70adfb; outline-offset: -2px; }"
+    },
+    {
+      "name": "Navigation Tabs",
+      "kind": "nav",
+      "refersTo": "nav-tab-active",
+      "description": "Primary product navigation พร้อม selected indicator",
+      "html": "<nav class=\"ds-tabs\" aria-label=\"เมนูหลัก\"><button class=\"ds-tab is-active\">รายงาน</button><button class=\"ds-tab\">ตั้งค่า</button></nav>",
+      "css": ".ds-tabs { display: flex; min-height: 48px; border-bottom: 1px solid #32364d; background: #0e101f; } .ds-tab { position: relative; padding: 12px 16px; border: 0; background: transparent; color: #9498a5; font: 650 .875rem/1.5 system-ui, sans-serif; cursor: pointer; } .ds-tab:hover { color: #e9ebf2; } .ds-tab:focus-visible { outline: 2px solid #70adfb; outline-offset: -2px; } .ds-tab.is-active { color: #70adfb; } .ds-tab.is-active::after { content: ''; position: absolute; right: 12px; bottom: 0; left: 12px; height: 2px; background: #70adfb; }"
+    },
+    {
+      "name": "Success Chip",
+      "kind": "chip",
+      "refersTo": "chip-success",
+      "description": "สถานะสำเร็จหรือเปิดใช้งาน",
+      "html": "<span class=\"ds-chip-success\">เปิดใช้งานอยู่</span>",
+      "css": ".ds-chip-success { display: inline-flex; min-height: 24px; align-items: center; padding: 4px 10px; border-radius: 999px; background: #52cd86; color: #0e101f; font: 650 .75rem/1.3 system-ui, sans-serif; }"
+    },
+    {
+      "name": "Outlined Surface",
+      "kind": "card",
+      "refersTo": "surface-outlined",
+      "description": "Container สำหรับ auth, ตาราง และกลุ่มข้อมูล",
+      "html": "<section class=\"ds-surface\"><h2>บัญชีธนาคารของฉัน</h2><p>จัดการบัญชีที่ใช้รับข้อมูลจาก statement</p></section>",
+      "css": ".ds-surface { max-width: 420px; padding: 24px; border: 1px solid #32364d; border-radius: 10px; background: #1a1e30; color: #e9ebf2; font: 400 1rem/1.5 system-ui, sans-serif; transition: box-shadow 200ms cubic-bezier(0,0,0.2,1); } .ds-surface:hover { box-shadow: 0 2px 3px rgba(0,0,0,.24); } .ds-surface h2 { margin: 0; font-size: 1.25rem; line-height: 1.4; } .ds-surface p { margin: 8px 0 0; color: #9498a5; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Hyacinthia Ledger - สมุดบัญชีครบวงจร",
+    "overview": "Hyacinthia Ledger คือสมุดบัญชีครอบครัวยุคดิจิทัลที่ทำให้ข้อมูลการเงินซับซ้อนดูสงบ ชัดเจน และตรวจสอบได้ ภาษาภาพใช้ dark Hyacine palette ร่วมกับโครงสร้างผลิตภัณฑ์ที่คุ้นเคย เพื่อให้ผู้ใช้มุ่งกับงานแทนที่จะต้องเรียนรู้หน้าจอ\n\nการจัดวางอ้างอิงความชัดเจนของแอป KBank เฉพาะระดับ layout และลำดับชั้นข้อมูล อัตลักษณ์สีและบุคลิกยังเป็นของ Hyacinthia Ledger อย่างชัดเจน ส่วนประกอบต้องรู้สึกคุ้นเคย มั่นใจ และเป็นมิตร โดยไม่ลดทอนความแม่นยำที่ผลิตภัณฑ์การเงินต้องมี",
+    "keyCharacteristics": [
+      "Dark-first และมี contrast สูง",
+      "โครงสร้าง task-first ที่ใช้งานได้ทั้งเดสก์ท็อปและมือถือ",
+      "พื้นผิวสงบ ใช้สีหลักเฉพาะ action และสถานะสำคัญ",
+      "ความหนาแน่นระดับสบาย อ่านข้อมูลการเงินและตารางได้รวดเร็ว",
+      "การเคลื่อนไหวสั้นและมีหน้าที่ พร้อม reduced-motion fallback"
+    ],
+    "rules": [
+      { "name": "The Hyacine Identity Rule", "body": "ใช้ layout ของ KBank เป็นข้อมูลอ้างอิงได้ แต่ห้ามนำสีเขียวหรืออัตลักษณ์แบรนด์ของ KBank มาใช้", "section": "colors" },
+      { "name": "The Semantic Color Rule", "body": "สีสถานะต้องมาพร้อมข้อความหรือไอคอนเสมอ ห้ามสื่อความหมายด้วยสีเพียงอย่างเดียว", "section": "colors" },
+      { "name": "The Restrained Accent Rule", "body": "Hyacinthia Sky มีไว้สำหรับ action, focus และ selection ไม่ใช่สีตกแต่งทั่วไป", "section": "colors" },
+      { "name": "The One-Family Rule", "body": "ใช้ font family เดียวทั่ว product UI และสร้าง hierarchy ด้วยขนาดกับน้ำหนักเท่านั้น", "section": "typography" },
+      { "name": "The Financial Clarity Rule", "body": "ตัวเลขบัญชี อีเมล และข้อมูลเทคนิคต้องอ่านง่าย ห้ามใช้ display หรือ pixel font ในข้อมูลสำคัญ", "section": "typography" },
+      { "name": "The Earned Shadow Rule", "body": "ทุกเงาต้องอธิบายการซ้อนชั้นหรือ interaction state ได้ ถ้าเอาเงาออกแล้วความหมายไม่เปลี่ยน เงานั้นไม่จำเป็น", "section": "elevation" }
+    ],
+    "dos": [
+      "Do ใช้ Hyacinthia Sky เฉพาะ primary action, focus และ current selection",
+      "Do ใช้ layout ที่อ่านง่ายและลำดับชั้นชัดเจนแบบแอปการเงินที่คุ้นเคย",
+      "Do รักษาพื้นที่กดอย่างน้อย 40px และรองรับ viewport ตั้งแต่ 320px",
+      "Do รักษา contrast ระดับ WCAG AA และใช้ข้อความหรือไอคอนควบคู่กับสีสถานะ",
+      "Do ใช้ state transition ประมาณ 200ms และปิด motion ที่ไม่จำเป็นเมื่อผู้ใช้ตั้งค่า reduced motion",
+      "Do ใช้เงานุ่มเฉพาะเมื่อช่วยอธิบายการซ้อนชั้นหรือ interaction"
+    ],
+    "donts": [
+      "Don't ใช้สีเขียวหรืออัตลักษณ์แบรนด์ของ KBank",
+      "Don't ลอกหน้าตาของ KBank โดยตรง การอ้างอิงจำกัดอยู่ที่แนวทาง layout เท่านั้น",
+      "Don't ใช้ accent เป็นสีตกแต่งทั่วทั้งหน้าจอหรือใช้สีโดยไม่มี label/icon อธิบาย",
+      "Don't ซ้อน card ภายใน card หรือใส่เงาให้ทุก container",
+      "Don't ใช้ display/pixel font กับตัวเลขการเงิน, input, button หรือ table",
+      "Don't เปลี่ยนรูปแบบปุ่ม, input, dialog หรือ icon ระหว่างหน้าจอโดยไม่มีเหตุผลเชิงงาน"
+    ]
+  }
+}
