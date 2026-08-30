@@ -43,7 +43,7 @@ function Banks() {
   const reload = () => { req<Bank[]>('/api/banks').then(setBanks).catch((responseError: Error) => setError(responseError.message)); };
   useEffect(reload, []);
 
-  const set = (key: keyof typeof EMPTY) => (event: { target: { value: string } }) =>
+  const setFormField = (key: keyof typeof EMPTY) => (event: { target: { value: string } }) =>
     setForm((current) => ({ ...current, [key]: event.target.value }));
 
   const openAdd = () => {
@@ -148,13 +148,13 @@ function Banks() {
           <Stack spacing={2.5}>
             <Alert severity="info">อีเมลผู้ส่งต้องเป็นอีเมลของธนาคารที่ส่ง statement และโดเมนใช้ตรวจ DKIM</Alert>
             <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 18rem), 1fr))' }}>
-              <TextField label="ชื่อธนาคาร" value={form.name} onChange={set('name')} required autoFocus />
-              <TextField label="อีเมลผู้ส่งของธนาคาร" value={form.sender_email} onChange={set('sender_email')} required placeholder="statement@kasikornbank.com" />
-              <TextField label="โดเมนผู้ส่ง (ตรวจ DKIM)" value={form.sender_domain} onChange={set('sender_domain')} required placeholder="kasikornbank.com" />
-              <TextField label="หัวข้ออีเมล statement รายเดือน (regex)" value={form.subject_monthly} onChange={set('subject_monthly')} required />
-              <TextField label="หัวข้ออีเมล statement ที่ผู้ใช้ขอเอง (regex)" value={form.subject_ondemand} onChange={set('subject_ondemand')} required />
-              <TextField label="ชื่อไฟล์แนบ (regex)" value={form.attachment_filename_pattern} onChange={set('attachment_filename_pattern')} required />
-              <TextField select label="ตัวแกะข้อมูล" value={form.parser_key} onChange={set('parser_key')}>
+              <TextField label="ชื่อธนาคาร" value={form.name} onChange={setFormField('name')} required autoFocus />
+              <TextField label="อีเมลผู้ส่งของธนาคาร" value={form.sender_email} onChange={setFormField('sender_email')} required placeholder="statement@kasikornbank.com" />
+              <TextField label="โดเมนผู้ส่ง (ตรวจ DKIM)" value={form.sender_domain} onChange={setFormField('sender_domain')} required placeholder="kasikornbank.com" />
+              <TextField label="หัวข้ออีเมล statement รายเดือน (regex)" value={form.subject_monthly} onChange={setFormField('subject_monthly')} required />
+              <TextField label="หัวข้ออีเมล statement ที่ผู้ใช้ขอเอง (regex)" value={form.subject_ondemand} onChange={setFormField('subject_ondemand')} required />
+              <TextField label="ชื่อไฟล์แนบ (regex)" value={form.attachment_filename_pattern} onChange={setFormField('attachment_filename_pattern')} required />
+              <TextField select label="ตัวแกะข้อมูล" value={form.parser_key} onChange={setFormField('parser_key')}>
                 <MenuItem value="kbank">kbank</MenuItem>
                 <MenuItem value="scb">scb</MenuItem>
               </TextField>

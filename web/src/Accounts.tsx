@@ -41,7 +41,7 @@ export default function Accounts() {
   };
   useEffect(reload, []);
 
-  const set = (key: keyof typeof EMPTY) => (event: { target: { value: string } }) =>
+  const setFormField = (key: keyof typeof EMPTY) => (event: { target: { value: string } }) =>
     setForm((current) => ({ ...current, [key]: event.target.value }));
 
   const openAdd = () => {
@@ -80,9 +80,7 @@ export default function Accounts() {
       {accounts.length === 0 ? (
         <Box sx={{ mt: 3, py: 5, px: 2, textAlign: 'center', border: 1, borderStyle: 'dashed', borderColor: 'divider', borderRadius: 1 }}>
           <AccountBalanceRounded color="primary" sx={{ fontSize: 36 }} />
-          <Typography sx={{ mt: 1 }}>ยังไม่มีบัญชีธนาคาร</Typography>
-          <Typography color="text.secondary" variant="body2" sx={{ mt: 0.5 }}>เพิ่มบัญชีเพื่อเริ่มรับข้อมูลจาก statement</Typography>
-          <Button variant="outlined" startIcon={<AddRounded />} onClick={openAdd} sx={{ mt: 2 }}>เพิ่มบัญชีแรก</Button>
+          <Typography color="text.secondary" sx={{ mt: 1 }}>ยังไม่มีบัญชีธนาคาร กด “เพิ่มบัญชี” เพื่อเริ่มต้น</Typography>
         </Box>
       ) : (
         <TableContainer component={Paper} variant="outlined" sx={{ mt: 3 }}>
@@ -144,31 +142,31 @@ export default function Accounts() {
               <Typography color="text.secondary">
                 ก่อนเพิ่มบัญชี ให้ขอ statement ย้อนหลังจากธนาคารส่งเข้ากล่องอีเมลของคุณ ระบบจะใช้เป็นข้อมูลตั้งต้น
               </Typography>
-              <Link href="/auth/google?add=1" sx={{ display: 'inline-block', mt: 1 }}>เชื่อมต่อกล่องอีเมลอื่นเพิ่ม</Link>
+              <Link href="/auth/google?add=1" sx={{ display: 'inline-block', mt: 1 }}>+ ต่อกล่องอีเมลอื่นเพิ่ม</Link>
             </Box>
             <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 16rem), 1fr))' }}>
-              <TextField select label="ธนาคาร" value={form.bank_id} onChange={set('bank_id')} required autoFocus>
-                <MenuItem value=""><em>เลือกธนาคาร</em></MenuItem>
+              <TextField select label="ธนาคาร" value={form.bank_id} onChange={setFormField('bank_id')} required autoFocus>
+                <MenuItem value=""><em>— เลือก —</em></MenuItem>
                 {banks.filter((bank) => bank.is_active || String(bank.id) === form.bank_id).map((bank) => (
                   <MenuItem key={bank.id} value={bank.id}>{bank.name}</MenuItem>
                 ))}
               </TextField>
-              <TextField label="ชื่อเล่น" value={form.nickname} onChange={set('nickname')} required slotProps={{ htmlInput: { maxLength: 60 } }} />
-              <TextField select label="กล่องอีเมลที่ให้ระบบเข้าไปอ่าน" value={form.email_account_id} onChange={set('email_account_id')} required>
-                <MenuItem value=""><em>เลือกกล่องอีเมล</em></MenuItem>
+              <TextField label="ชื่อเล่น" value={form.nickname} onChange={setFormField('nickname')} required slotProps={{ htmlInput: { maxLength: 60 } }} />
+              <TextField select label="กล่องอีเมลที่ให้ระบบเข้าไปอ่าน" value={form.email_account_id} onChange={setFormField('email_account_id')} required>
+                <MenuItem value=""><em>— เลือก —</em></MenuItem>
                 {mailboxes.map((mailbox) => <MenuItem key={mailbox.id} value={mailbox.id}>{mailbox.email}</MenuItem>)}
               </TextField>
-              <TextField label="เลขที่บัญชี" value={form.account_number} onChange={set('account_number')} required slotProps={{ htmlInput: { maxLength: 40 } }} />
+              <TextField label="เลขที่บัญชี" value={form.account_number} onChange={setFormField('account_number')} required slotProps={{ htmlInput: { maxLength: 40 } }} />
               <TextField
                 type="password"
                 label="รหัสผ่านเปิดไฟล์ statement"
                 value={form.pdf_password}
-                onChange={set('pdf_password')}
+                onChange={setFormField('pdf_password')}
                 required={!editingId}
                 placeholder={editingId ? 'เว้นว่างเพื่อใช้รหัสเดิม' : undefined}
                 autoComplete="off"
               />
-              <TextField label="พร้อมเพย์ (ไม่บังคับ)" value={form.promptpay_id} onChange={set('promptpay_id')} slotProps={{ htmlInput: { maxLength: 40 } }} />
+              <TextField label="พร้อมเพย์ (ไม่บังคับ)" value={form.promptpay_id} onChange={setFormField('promptpay_id')} slotProps={{ htmlInput: { maxLength: 40 } }} />
             </Box>
             <Alert severity="info">รหัสผ่านถูกเข้ารหัส AES-256-GCM ก่อนบันทึก และระบบจะไม่ส่งค่ากลับมาแสดงอีก</Alert>
             {error && <Alert severity="error">{error}</Alert>}
