@@ -23,6 +23,7 @@ import PowerSettingsNewRounded from '@mui/icons-material/PowerSettingsNewRounded
 import { del, patch, post, req, type Bank, type User } from './api.js';
 import { createFormFieldChangeHandler } from './form.js';
 import Modal from './Modal.js';
+import { dataTextSx, descriptionSx } from './theme.js';
 
 const EMPTY = {
   name: '',
@@ -73,7 +74,7 @@ function Banks() {
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ alignItems: { xs: 'stretch', sm: 'flex-start' }, justifyContent: 'space-between' }}>
         <Box>
           <Typography component="h2" variant="h2">ธนาคารที่รองรับ</Typography>
-          <Typography color="text.secondary" sx={{ mt: 0.5 }}>กำหนดรูปแบบอีเมลและตัวแกะข้อมูลของแต่ละธนาคาร</Typography>
+          <Typography color="text.secondary" sx={{ mt: 0.5, ...descriptionSx }}>กำหนดรูปแบบอีเมลและตัวแกะข้อมูลของแต่ละธนาคาร</Typography>
         </Box>
         <Button variant="contained" startIcon={<AddRounded />} onClick={openAdd} sx={{ whiteSpace: 'nowrap' }}>เพิ่มธนาคาร</Button>
       </Stack>
@@ -146,7 +147,9 @@ function Banks() {
           }}
         >
           <Stack spacing={2.5}>
-            <Alert severity="info">อีเมลผู้ส่งต้องเป็นอีเมลของธนาคารที่ส่ง statement และโดเมนใช้ตรวจ DKIM</Alert>
+            <Alert severity="info" sx={descriptionSx}>
+              อีเมลผู้ส่งต้องเป็นอีเมลของธนาคารที่ส่ง statement และโดเมนใช้ตรวจ <Box component="span" sx={dataTextSx}>DKIM</Box>
+            </Alert>
             <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 18rem), 1fr))' }}>
               <TextField label="ชื่อธนาคาร" value={form.name} onChange={setFormField('name')} required autoFocus />
               <TextField label="อีเมลผู้ส่งของธนาคาร" value={form.sender_email} onChange={setFormField('sender_email')} required placeholder="statement@kasikornbank.com" />
@@ -191,7 +194,7 @@ function Users({ currentUserId }: { currentUserId: number }) {
   return (
     <Box sx={{ mt: 4 }}>
       <Typography component="h2" variant="h2">ผู้ใช้งาน</Typography>
-      <Typography color="text.secondary" sx={{ mt: 0.5 }}>ปรับสถานะการเข้าใช้งานและบทบาทของสมาชิก</Typography>
+      <Typography color="text.secondary" sx={{ mt: 0.5, ...descriptionSx }}>ปรับสถานะการเข้าใช้งานและบทบาทของสมาชิก</Typography>
       {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
       <TableContainer component={Paper} variant="outlined" sx={{ mt: 3 }}>
         <Table size="small" aria-label="ผู้ใช้งาน">

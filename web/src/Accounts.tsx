@@ -23,6 +23,7 @@ import EditRounded from '@mui/icons-material/EditRounded';
 import { del, patch, post, req, type Account, type Bank, type EmailAccount } from './api.js';
 import { createFormFieldChangeHandler } from './form.js';
 import Modal from './Modal.js';
+import { dataTextSx, descriptionSx } from './theme.js';
 
 const EMPTY = { bank_id: '', email_account_id: '', nickname: '', account_number: '', pdf_password: '', promptpay_id: '' };
 
@@ -70,7 +71,7 @@ export default function Accounts() {
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ alignItems: { xs: 'stretch', sm: 'flex-start' }, justifyContent: 'space-between' }}>
         <Box>
           <Typography component="h2" variant="h2">บัญชีธนาคารของฉัน</Typography>
-          <Typography color="text.secondary" sx={{ mt: 0.5 }}>จัดการบัญชีที่ใช้รับข้อมูลจาก statement</Typography>
+          <Typography color="text.secondary" sx={{ mt: 0.5, ...descriptionSx }}>จัดการบัญชีที่ใช้รับข้อมูลจาก statement</Typography>
         </Box>
         <Button variant="contained" startIcon={<AddRounded />} onClick={openAdd} sx={{ whiteSpace: 'nowrap' }}>เพิ่มบัญชี</Button>
       </Stack>
@@ -80,7 +81,7 @@ export default function Accounts() {
       {accounts.length === 0 ? (
         <Box sx={{ mt: 3, py: 5, px: 2, textAlign: 'center', border: 1, borderStyle: 'dashed', borderColor: 'divider', borderRadius: 1 }}>
           <AccountBalanceRounded color="primary" sx={{ fontSize: 36 }} />
-          <Typography color="text.secondary" sx={{ mt: 1 }}>ยังไม่มีบัญชีธนาคาร กด “เพิ่มบัญชี” เพื่อเริ่มต้น</Typography>
+          <Typography color="text.secondary" sx={{ mt: 1, ...descriptionSx }}>ยังไม่มีบัญชีธนาคาร กด “เพิ่มบัญชี” เพื่อเริ่มต้น</Typography>
         </Box>
       ) : (
         <TableContainer component={Paper} variant="outlined" sx={{ mt: 3 }}>
@@ -139,7 +140,7 @@ export default function Accounts() {
         >
           <Stack spacing={2.5}>
             <Box>
-              <Typography color="text.secondary">
+              <Typography color="text.secondary" sx={descriptionSx}>
                 ก่อนเพิ่มบัญชี ให้ขอ statement ย้อนหลังจากธนาคารส่งเข้ากล่องอีเมลของคุณ ระบบจะใช้เป็นข้อมูลตั้งต้น
               </Typography>
               <Link href="/auth/google?add=1" sx={{ display: 'inline-block', mt: 1 }}>+ ต่อกล่องอีเมลอื่นเพิ่ม</Link>
@@ -168,7 +169,9 @@ export default function Accounts() {
               />
               <TextField label="พร้อมเพย์ (ไม่บังคับ)" value={form.promptpay_id} onChange={setFormField('promptpay_id')} slotProps={{ htmlInput: { maxLength: 40 } }} />
             </Box>
-            <Alert severity="info">รหัสผ่านถูกเข้ารหัส AES-256-GCM ก่อนบันทึก และระบบจะไม่ส่งค่ากลับมาแสดงอีก</Alert>
+            <Alert severity="info" sx={descriptionSx}>
+              รหัสผ่านถูกเข้ารหัส <Box component="span" sx={dataTextSx}>AES-256-GCM</Box> ก่อนบันทึก และระบบจะไม่ส่งค่ากลับมาแสดงอีก
+            </Alert>
             {error && <Alert severity="error">{error}</Alert>}
             <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end' }}>
               <Button type="button" color="inherit" onClick={() => setModalOpen(false)}>ยกเลิก</Button>

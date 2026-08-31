@@ -1,3 +1,11 @@
+@font-face {
+  font-family: "SOV BokThang";
+  src: url("/fonts/SOV_BokThang.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
 :root {
   --bg: #0e101f;
   --surface: #1a1e30;
@@ -20,6 +28,7 @@ html {
 
 body {
   margin: 0;
+  font-kerning: normal;
 }
 
 @media (prefers-reduced-motion: reduce) {

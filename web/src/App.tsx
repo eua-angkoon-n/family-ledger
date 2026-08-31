@@ -25,6 +25,7 @@ import SettingsRounded from '@mui/icons-material/SettingsRounded';
 import { post, req, type User } from './api.js';
 import Accounts from './Accounts.js';
 import Admin from './Admin.js';
+import { brandCopySx, dataTextSx, descriptionSx } from './theme.js';
 
 type Page = 'reports' | 'settings';
 type SettingsTab = 'accounts' | 'banks' | 'users';
@@ -91,7 +92,7 @@ export default function App() {
           >
             <Box>
               <Typography variant="h1">สมัครสมาชิก</Typography>
-              <Typography color="text.secondary" sx={{ mt: 1 }}>
+              <Typography color="text.secondary" sx={{ mt: 1, ...descriptionSx }}>
                 ยืนยันบัญชี Google สำเร็จแล้ว กรุณากรอกรหัสเชิญเพื่อเริ่มใช้งาน
               </Typography>
             </Box>
@@ -119,7 +120,7 @@ export default function App() {
           <AccountBalanceWalletRounded color="primary" sx={{ fontSize: 44 }} />
           <Box>
             <Typography variant="h1">บัญชีครอบครัว</Typography>
-            <Typography color="text.secondary" sx={{ mt: 1 }}>
+            <Typography color="text.secondary" sx={{ mt: 1, ...descriptionSx }}>
               เข้าสู่ระบบเพื่อจัดการบัญชีและรายรับรายจ่ายของครอบครัว
             </Typography>
           </Box>
@@ -138,8 +139,8 @@ export default function App() {
           <HourglassTopRounded color={user.status === 'pending' ? 'primary' : 'error'} sx={{ fontSize: 40 }} />
           <Box>
             <Typography variant="h1">รอการอนุมัติ</Typography>
-            <Typography color="text.secondary" sx={{ mt: 1 }}>
-              บัญชี {user.email} สถานะ “{user.status === 'pending' ? 'รออนุมัติ' : 'ถูกปฏิเสธ'}” — ให้แอดมินอนุมัติก่อนจึงจะใช้งานได้
+            <Typography color="text.secondary" sx={{ mt: 1, ...descriptionSx }}>
+              บัญชี <Box component="span" sx={dataTextSx}>{user.email}</Box> สถานะ “<Box component="span" sx={dataTextSx}>{user.status === 'pending' ? 'รออนุมัติ' : 'ถูกปฏิเสธ'}</Box>” — ให้แอดมินอนุมัติก่อนจึงจะใช้งานได้
             </Typography>
           </Box>
           <Button variant="outlined" startIcon={<LogoutRounded />} onClick={logout}>ออกจากระบบ</Button>
@@ -155,7 +156,7 @@ export default function App() {
           <Toolbar disableGutters sx={{ gap: { xs: 0.5, sm: 2 } }}>
             <Stack direction="row" spacing={1} sx={{ mr: 'auto', alignItems: 'center' }}>
               <AccountBalanceWalletRounded color="primary" />
-              <Typography sx={{ display: { xs: 'none', sm: 'block' }, fontWeight: 700, whiteSpace: 'nowrap' }}>
+              <Typography sx={{ display: { xs: 'none', sm: 'block' }, whiteSpace: 'nowrap', ...brandCopySx }}>
                 บัญชีครอบครัว
               </Typography>
             </Stack>

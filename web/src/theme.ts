@@ -11,6 +11,29 @@ export const colors = {
   expense: '#f3625d',
 } as const;
 
+export const fontFamilies = {
+  copy: '"SOV BokThang", "Noto Sans Thai", system-ui, sans-serif',
+  data: 'system-ui, "Noto Sans Thai", sans-serif',
+} as const;
+
+export const brandCopySx = {
+  fontFamily: fontFamilies.copy,
+  fontWeight: 400,
+} as const;
+
+export const dataTextSx = {
+  fontFamily: fontFamilies.data,
+  fontVariantNumeric: 'tabular-nums',
+} as const;
+
+export const descriptionSx = {
+  ...brandCopySx,
+  fontSize: '1rem',
+  lineHeight: 1.6,
+  letterSpacing: '0.01em',
+  textWrap: 'pretty',
+} as const;
+
 const theme = createTheme({
   palette: {
     mode: 'dark',
@@ -23,9 +46,9 @@ const theme = createTheme({
   },
   shape: { borderRadius: 10 },
   typography: {
-    fontFamily: 'system-ui, "Noto Sans Thai", sans-serif',
-    h1: { fontSize: '1.75rem', fontWeight: 700, lineHeight: 1.3 },
-    h2: { fontSize: '1.25rem', fontWeight: 700, lineHeight: 1.4 },
+    fontFamily: fontFamilies.data,
+    h1: { ...brandCopySx, fontSize: '1.75rem', lineHeight: 1.3, textWrap: 'balance' },
+    h2: { ...brandCopySx, fontSize: '1.25rem', lineHeight: 1.4, textWrap: 'balance' },
     button: { fontWeight: 650, textTransform: 'none' },
   },
   components: {
@@ -36,6 +59,7 @@ const theme = createTheme({
         code: {
           color: colors.muted,
           fontSize: '0.85em',
+          ...dataTextSx,
           overflowWrap: 'anywhere',
         },
       },
@@ -48,13 +72,18 @@ const theme = createTheme({
       styleOverrides: {
         root: {
           backgroundColor: colors.background,
+          ...dataTextSx,
           '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderWidth: 2 },
         },
       },
     },
     MuiTableCell: {
       styleOverrides: {
-        root: { borderColor: colors.border, verticalAlign: 'top' },
+        root: {
+          borderColor: colors.border,
+          verticalAlign: 'top',
+          ...dataTextSx,
+        },
         head: { color: colors.muted, fontWeight: 650, whiteSpace: 'nowrap' },
       },
     },
