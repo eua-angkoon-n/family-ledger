@@ -18,6 +18,7 @@ import {
 } from '@mui/material';
 import AccountBalanceWalletRounded from '@mui/icons-material/AccountBalanceWalletRounded';
 import AssessmentRounded from '@mui/icons-material/AssessmentRounded';
+import BlockRounded from '@mui/icons-material/BlockRounded';
 import HourglassTopRounded from '@mui/icons-material/HourglassTopRounded';
 import LoginRounded from '@mui/icons-material/LoginRounded';
 import LogoutRounded from '@mui/icons-material/LogoutRounded';
@@ -26,14 +27,15 @@ import { post, req, type User } from './api.js';
 import Accounts from './Accounts.js';
 import Admin from './Admin.js';
 import { brandCopySx, dataTextSx, descriptionSx } from './theme.js';
+import { EmptyState, FeedbackSnackbar, PageHeader, type Notice } from './ui.js';
 
 type Page = 'reports' | 'settings';
 type SettingsTab = 'accounts' | 'banks' | 'users';
 
 function AuthPanel({ children }: { children: ReactNode }) {
   return (
-    <Box component="main" sx={{ minHeight: '100vh', display: 'grid', placeItems: 'center', p: 2 }}>
-      <Paper component="section" variant="outlined" sx={{ width: 'min(100%, 26rem)', p: { xs: 3, sm: 4 } }}>
+    <Box component="main" sx={{ minHeight: '100vh', display: 'grid', placeItems: 'center', p: { xs: 2, sm: 3 } }}>
+      <Paper component="section" variant="outlined" sx={{ width: 'min(100%, 27rem)', p: { xs: 3, sm: 4 } }}>
         {children}
       </Paper>
     </Box>
@@ -48,6 +50,8 @@ export default function App() {
   const [invite, setInvite] = useState('');
   const [inviteError, setInviteError] = useState('');
   const [submittingInvite, setSubmittingInvite] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [notice, setNotice] = useState<Notice | null>(null);
 
   useEffect(() => {
     req<{ user: User | null; signupInviteRequired: boolean }>('/api/me')
@@ -58,15 +62,27 @@ export default function App() {
       .catch(() => setUser(null));
   }, []);
 
-  const logout = () => req('/auth/logout', { method: 'POST' }).then(() => location.reload());
+  const logout = async () => {
+    setLoggingOut(true);
+    try {
+      await req('/auth/logout', { method: 'POST' });
+      location.reload();
+    } catch (error) {
+      setLoggingOut(false);
+      setNotice({ message: error instanceof Error ? error.message : 'ออกจากระบบไม่สำเร็จ', severity: 'error' });
+    }
+  };
 
   if (user === undefined) {
     return (
-      <Container component="main" maxWidth="md" sx={{ py: 4 }} aria-label="กำลังโหลด">
-        <Skeleton width={156} height={32} />
-        <Skeleton height={52} sx={{ mt: 1 }} />
-        <Skeleton variant="rounded" height={180} sx={{ mt: 4 }} />
-      </Container>
+      <AuthPanel>
+        <Stack spacing={2} role="status" aria-label="กำลังโหลดข้อมูลผู้ใช้">
+          <Skeleton variant="circular" width={44} height={44} />
+          <Skeleton width="55%" height={38} />
+          <Skeleton width="90%" height={24} />
+          <Skeleton variant="rounded" height={40} sx={{ mt: 1 }} />
+        </Stack>
+      </AuthPanel>
     );
   }
 
@@ -117,11 +133,13 @@ export default function App() {
     return (
       <AuthPanel>
         <Stack spacing={3} sx={{ alignItems: 'center', textAlign: 'center' }}>
-          <AccountBalanceWalletRounded color="primary" sx={{ fontSize: 44 }} />
+          <Box sx={{ display: 'grid', placeItems: 'center', width: 56, height: 56, border: 1, borderColor: 'divider', borderRadius: 2, bgcolor: 'background.default', color: 'text.primary' }}>
+            <AccountBalanceWalletRounded sx={{ fontSize: 34 }} />
+          </Box>
           <Box>
             <Typography variant="h1">บัญชีครอบครัว</Typography>
             <Typography color="text.secondary" sx={{ mt: 1, ...descriptionSx }}>
-              เข้าสู่ระบบเพื่อจัดการบัญชีและรายรับรายจ่ายของครอบครัว
+              เปลี่ยน statement จากธนาคารให้เป็นภาพรวมการเงินที่ถูกต้องและดูแลง่าย
             </Typography>
           </Box>
           <Button fullWidth variant="contained" startIcon={<LoginRounded />} onClick={() => { location.href = '/auth/google'; }}>
@@ -133,19 +151,29 @@ export default function App() {
   }
 
   if (user.status !== 'approved') {
+    const isPending = user.status === 'pending';
     return (
-      <AuthPanel>
-        <Stack spacing={3} sx={{ alignItems: 'flex-start' }}>
-          <HourglassTopRounded color={user.status === 'pending' ? 'primary' : 'error'} sx={{ fontSize: 40 }} />
-          <Box>
-            <Typography variant="h1">รอการอนุมัติ</Typography>
-            <Typography color="text.secondary" sx={{ mt: 1, ...descriptionSx }}>
-              บัญชี <Box component="span" sx={dataTextSx}>{user.email}</Box> สถานะ “<Box component="span" sx={dataTextSx}>{user.status === 'pending' ? 'รออนุมัติ' : 'ถูกปฏิเสธ'}</Box>” — ให้แอดมินอนุมัติก่อนจึงจะใช้งานได้
-            </Typography>
-          </Box>
-          <Button variant="outlined" startIcon={<LogoutRounded />} onClick={logout}>ออกจากระบบ</Button>
-        </Stack>
-      </AuthPanel>
+      <>
+        <AuthPanel>
+          <Stack spacing={3} sx={{ alignItems: 'flex-start' }}>
+            {isPending
+              ? <HourglassTopRounded sx={{ color: 'text.secondary', fontSize: 40 }} />
+              : <BlockRounded color="error" sx={{ fontSize: 40 }} />}
+            <Box>
+              <Typography variant="h1">{isPending ? 'รอการอนุมัติ' : 'ไม่สามารถเข้าใช้งานได้'}</Typography>
+              <Typography color="text.secondary" sx={{ mt: 1, ...descriptionSx }}>
+                บัญชี <Box component="span" sx={dataTextSx}>{user.email}</Box> {isPending
+                  ? 'อยู่ระหว่างรอผู้ดูแลอนุมัติ เมื่อได้รับอนุมัติแล้วจึงจะเริ่มใช้งานได้'
+                  : 'ไม่ได้รับอนุมัติให้เข้าใช้งาน กรุณาติดต่อผู้ดูแลระบบหากต้องการตรวจสอบสถานะ'}
+              </Typography>
+            </Box>
+            <Button variant="outlined" startIcon={<LogoutRounded />} onClick={logout} disabled={loggingOut} aria-busy={loggingOut}>
+              {loggingOut ? 'กำลังออกจากระบบ…' : 'ออกจากระบบ'}
+            </Button>
+          </Stack>
+        </AuthPanel>
+        <FeedbackSnackbar notice={notice} onClose={() => setNotice(null)} />
+      </>
     );
   }
 
@@ -153,19 +181,21 @@ export default function App() {
     <Box sx={{ minHeight: '100vh' }}>
       <AppBar position="sticky" color="transparent" elevation={0} sx={{ bgcolor: 'background.default', borderBottom: 1, borderColor: 'divider' }}>
         <Container maxWidth="lg">
-          <Toolbar disableGutters sx={{ gap: { xs: 0.5, sm: 2 } }}>
+          <Toolbar disableGutters sx={{ minHeight: { xs: 56, sm: 64 }, gap: { xs: 0.5, sm: 2 } }}>
             <Stack direction="row" spacing={1} sx={{ mr: 'auto', alignItems: 'center' }}>
-              <AccountBalanceWalletRounded color="primary" />
+              <AccountBalanceWalletRounded sx={{ color: 'text.primary' }} />
               <Typography sx={{ display: { xs: 'none', sm: 'block' }, whiteSpace: 'nowrap', ...brandCopySx }}>
                 บัญชีครอบครัว
               </Typography>
             </Stack>
             <Tabs value={page} onChange={(_, value: Page) => setPage(value)} aria-label="เมนูหลัก">
-              <Tab value="reports" icon={<AssessmentRounded />} iconPosition="start" label="รายงาน" sx={{ minWidth: { xs: 52, sm: 104 }, '& .MuiTab-icon': { mr: { xs: 0, sm: 1 } } }} />
-              <Tab value="settings" icon={<SettingsRounded />} iconPosition="start" label="ตั้งค่า" sx={{ minWidth: { xs: 52, sm: 104 }, '& .MuiTab-icon': { mr: { xs: 0, sm: 1 } } }} />
+              <Tab value="reports" aria-label="รายงาน" icon={<AssessmentRounded />} iconPosition="start" label={<Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>รายงาน</Box>} sx={{ minWidth: { xs: 48, sm: 104 }, px: { xs: 1, sm: 2 }, '& .MuiTab-icon': { mr: { xs: 0, sm: 1 } } }} />
+              <Tab value="settings" aria-label="ตั้งค่า" icon={<SettingsRounded />} iconPosition="start" label={<Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>ตั้งค่า</Box>} sx={{ minWidth: { xs: 48, sm: 104 }, px: { xs: 1, sm: 2 }, '& .MuiTab-icon': { mr: { xs: 0, sm: 1 } } }} />
             </Tabs>
             <Tooltip title="ออกจากระบบ">
-              <IconButton color="inherit" aria-label="ออกจากระบบ" onClick={logout}><LogoutRounded /></IconButton>
+              <span>
+                <IconButton color="inherit" aria-label="ออกจากระบบ" onClick={logout} disabled={loggingOut}><LogoutRounded /></IconButton>
+              </span>
             </Tooltip>
           </Toolbar>
         </Container>
@@ -174,13 +204,37 @@ export default function App() {
       <Container component="main" maxWidth="lg" sx={{ py: { xs: 3, sm: 4 }, pb: 8 }}>
         {page === 'reports' && (
           <Box component="section" aria-labelledby="reports-heading">
-            <Typography component="h1" variant="h1" id="reports-heading">รายงาน</Typography>
+            <PageHeader
+              level={1}
+              id="reports-heading"
+              title="รายงาน"
+              description="ภาพรวมรายรับรายจ่ายจะพร้อมเมื่อเชื่อมบัญชีธนาคารและนำเข้า statement แล้ว"
+            />
+            <EmptyState
+              icon={<AssessmentRounded sx={{ fontSize: 40 }} />}
+              title="เริ่มต้นด้วยการเชื่อมบัญชีธนาคาร"
+              description="เพิ่มบัญชีและเลือกกล่องอีเมลที่รับ statement เพื่อให้ระบบนำเข้าข้อมูลและสร้างรายงานโดยอัตโนมัติ"
+              action={(
+                <Button
+                  variant="contained"
+                  startIcon={<SettingsRounded />}
+                  onClick={() => { setSettingsTab('accounts'); setPage('settings'); }}
+                >
+                  ไปตั้งค่าบัญชีธนาคาร
+                </Button>
+              )}
+            />
           </Box>
         )}
 
         {page === 'settings' && (
           <Box component="section" aria-labelledby="settings-heading">
-            <Typography component="h1" variant="h1" id="settings-heading">ตั้งค่า</Typography>
+            <PageHeader
+              level={1}
+              id="settings-heading"
+              title="ตั้งค่า"
+              description="จัดการแหล่งข้อมูล สมาชิก และการเชื่อมต่อที่ใช้สร้างบัญชีครอบครัว"
+            />
             <Tabs
               value={settingsTab}
               onChange={(_, value: SettingsTab) => setSettingsTab(value)}
@@ -200,6 +254,7 @@ export default function App() {
           </Box>
         )}
       </Container>
+      <FeedbackSnackbar notice={notice} onClose={() => setNotice(null)} />
     </Box>
   );
 }
