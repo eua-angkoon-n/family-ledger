@@ -14,9 +14,9 @@
       "expense": { "role": "tertiary", "displayName": "Coral Alert", "tonalRamp": ["#3b0000", "#600000", "#860000", "#ac1922", "#d34443", "#fa6863", "#ff8c84", "#ffb1a7"] }
     },
     "typographyMeta": {
-      "headline-large": { "displayName": "Headline Large · SOV BokThang", "purpose": "ชื่อหน้าหลักหนึ่งครั้งต่อ surface" },
-      "headline-medium": { "displayName": "Headline Medium · SOV BokThang", "purpose": "หัวข้อส่วนและ dialog" },
-      "description": { "displayName": "Description · SOV BokThang", "purpose": "คำอธิบายและ empty-state copy ที่ไม่ใช่ข้อมูล" },
+      "headline-large": { "displayName": "Headline Large · iannnnn-DOG", "purpose": "ชื่อหน้าหลักหนึ่งครั้งต่อ surface" },
+      "headline-medium": { "displayName": "Headline Medium · iannnnn-DOG", "purpose": "หัวข้อส่วนและ dialog" },
+      "description": { "displayName": "Description · iannnnn-DOG", "purpose": "คำอธิบายและ empty-state copy ที่ไม่ใช่ข้อมูล" },
       "body": { "displayName": "Body / Data · system-ui", "purpose": "ข้อมูล ตาราง ค่าในช่องกรอก และเนื้อหาที่ต้องอ่านตัวเลขแม่นยำ" },
       "label": { "displayName": "Label", "purpose": "ปุ่ม tab และ table header" }
     },
@@ -84,7 +84,7 @@
       "refersTo": "surface-outlined",
       "description": "Container สำหรับ auth, ตาราง และกลุ่มข้อมูล",
       "html": "<section class=\"ds-surface\"><h2>บัญชีธนาคารของฉัน</h2><p>จัดการบัญชีที่ใช้รับข้อมูลจาก statement</p></section>",
-      "css": "@font-face { font-family: 'SOV BokThang'; src: url('/fonts/SOV_BokThang.ttf') format('truetype'); font-display: swap; font-weight: 400; } .ds-surface { max-width: 420px; padding: 24px; border: 1px solid #32364d; border-radius: 10px; background: #1a1e30; color: #e9ebf2; font: 400 1rem/1.5 system-ui, 'Noto Sans Thai', sans-serif; } .ds-surface h2 { margin: 0; font: 400 1.25rem/1.4 'SOV BokThang', 'Noto Sans Thai', system-ui, sans-serif; } .ds-surface p { margin: 8px 0 0; color: #9498a5; font: 400 1rem/1.6 'SOV BokThang', 'Noto Sans Thai', system-ui, sans-serif; letter-spacing: .01em; }"
+      "css": "@font-face { font-family: 'iannnnn-DOG'; src: url('/fonts/iannnnn-DOG-Regular.ttf') format('truetype'); font-display: swap; font-weight: 400; } .ds-surface { max-width: 420px; padding: 24px; border: 1px solid #32364d; border-radius: 10px; background: #1a1e30; color: #e9ebf2; font: 400 1rem/1.5 system-ui, 'Noto Sans Thai', sans-serif; } .ds-surface h2 { margin: 0; font: 400 1.25rem/1.4 'iannnnn-DOG', 'Noto Sans Thai', system-ui, sans-serif; } .ds-surface p { margin: 8px 0 0; color: #9498a5; font: 400 1rem/1.6 'iannnnn-DOG', 'Noto Sans Thai', system-ui, sans-serif; letter-spacing: .01em; }"
     }
   ],
   "narrative": {
@@ -101,7 +101,7 @@
       { "name": "The Hyacine Identity Rule", "body": "ใช้ layout ของ KBank เป็นข้อมูลอ้างอิงได้ แต่ห้ามนำสีเขียวประจำแบรนด์หรืออัตลักษณ์ของ KBank มาใช้เป็นสีหลัก สีเขียวสงวนไว้สำหรับ income และสถานะสำเร็จเท่านั้น", "section": "colors" },
       { "name": "The Semantic Color Rule", "body": "สีสถานะต้องมาพร้อมข้อความหรือไอคอนเสมอ ห้ามสื่อความหมายด้วยสีเพียงอย่างเดียว", "section": "colors" },
       { "name": "The Restrained Accent Rule", "body": "Hyacinthia Sky มีไว้สำหรับ action, focus และ selection ไม่ใช่สีตกแต่งทั่วไป", "section": "colors" },
-      { "name": "The Two-Lane Type Rule", "body": "ใช้ SOV BokThang เฉพาะชื่อหน้า หัวข้อ แบรนด์ และข้อความอธิบาย ส่วนข้อมูลและ controls ใช้ system-ui", "section": "typography" },
+      { "name": "The Two-Lane Type Rule", "body": "ใช้ iannnnn-DOG เฉพาะชื่อหน้า หัวข้อ แบรนด์ และข้อความอธิบาย ส่วนข้อมูลและ controls ใช้ system-ui", "section": "typography" },
       { "name": "The Financial Clarity Rule", "body": "ตัวเลข จำนวนเงิน เลขบัญชี อีเมล และข้อมูลเทคนิคใช้ system-ui หรือ monospace พร้อม tabular-nums เมื่อมีตัวเลขที่ต้องเทียบแนว", "section": "typography" },
       { "name": "The Earned Shadow Rule", "body": "ทุกเงาต้องอธิบายการซ้อนชั้นหรือ interaction state ได้ ถ้าเอาเงาออกแล้วความหมายไม่เปลี่ยน เงานั้นไม่จำเป็น", "section": "elevation" }
     ],
@@ -118,7 +118,7 @@
       "Don't ลอกหน้าตาของ KBank โดยตรง การอ้างอิงจำกัดอยู่ที่แนวทาง layout เท่านั้น",
       "Don't ใช้ accent เป็นสีตกแต่งทั่วทั้งหน้าจอหรือใช้สีโดยไม่มี label/icon อธิบาย",
       "Don't ซ้อน card ภายใน card หรือใส่เงาให้ทุก container",
-      "Don't ใช้ SOV BokThang หรือ display/pixel font กับตัวเลขการเงิน, input, button, tab หรือ table",
+      "Don't ใช้ iannnnn-DOG หรือ display/pixel font กับตัวเลขการเงิน, input, button, tab หรือ table",
       "Don't เปลี่ยนรูปแบบปุ่ม, input, dialog หรือ icon ระหว่างหน้าจอโดยไม่มีเหตุผลเชิงงาน"
     ]
   }

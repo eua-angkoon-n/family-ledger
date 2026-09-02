@@ -1,7 +1,7 @@
 ---
 version: alpha
 name: Hyacinthia Ledger
-description: สมุดบัญชีครบวงจรที่สงบ น่าเชื่อถือ และเป็นมิตรสำหรับทุกคนในครอบครัว
+description: บัญชีรายรับ-จ่าย ที่เป็นมิตรสำหรับทุกคน
 colors:
   background: "#0e101f"
   surface: "#1a1e30"
@@ -13,17 +13,17 @@ colors:
   expense: "#f3625d"
 typography:
   headline-large:
-    fontFamily: "SOV BokThang, Noto Sans Thai, system-ui, sans-serif"
+    fontFamily: "iannnnn-DOG, Noto Sans Thai, system-ui, sans-serif"
     fontSize: "1.75rem"
     fontWeight: 400
     lineHeight: 1.3
   headline-medium:
-    fontFamily: "SOV BokThang, Noto Sans Thai, system-ui, sans-serif"
+    fontFamily: "iannnnn-DOG, Noto Sans Thai, system-ui, sans-serif"
     fontSize: "1.25rem"
     fontWeight: 400
     lineHeight: 1.4
   description:
-    fontFamily: "SOV BokThang, Noto Sans Thai, system-ui, sans-serif"
+    fontFamily: "iannnnn-DOG, Noto Sans Thai, system-ui, sans-serif"
     fontSize: "1rem"
     fontWeight: 400
     lineHeight: 1.6
@@ -138,25 +138,25 @@ Hyacinthia Ledger คือสมุดบัญชีครอบครัว�
 
 ## Typography
 
-**Display Font:** SOV BokThang จาก `docs/font/SOV_BokThang.zip` พร้อม Noto Sans Thai และ system-ui fallback
-**Description Font:** SOV BokThang สำหรับชื่อหน้า หัวข้อ แบรนด์ และข้อความอธิบายที่ไม่ใช่ข้อมูล
+**Display Font:** iannnnn-DOG จาก `docs/font/iannnnn-DOG.zip` พร้อม Noto Sans Thai และ system-ui fallback
+**Description Font:** iannnnn-DOG สำหรับชื่อหน้า หัวข้อ แบรนด์ และข้อความอธิบายที่ไม่ใช่ข้อมูล
 **Data/UI Font:** system-ui พร้อม Noto Sans Thai fallback สำหรับตัวเลข จำนวนเงิน ตาราง input ปุ่ม tab label อีเมล เลขบัญชี และข้อมูลเทคนิค; monospace ใช้เฉพาะ identifier ที่ควรแยกรูปทรงอักขระ
 
-**Character:** SOV BokThang เติมบุคลิกไทยให้คำอธิบาย ขณะที่ฟอนต์ระบบรักษาความแม่นยำและความคุ้นเคยของข้อมูลการเงินและ controls
+**Character:** iannnnn-DOG เติมบุคลิกไทยให้คำอธิบาย ขณะที่ฟอนต์ระบบรักษาความแม่นยำและความคุ้นเคยของข้อมูลการเงินและ controls
 
 ### Hierarchy
 
-- **Headline Large** (SOV BokThang 400, 1.75rem, 1.3): ชื่อหน้าหลัก ใช้หนึ่งครั้งต่อ surface
-- **Headline Medium** (SOV BokThang 400, 1.25rem, 1.4): หัวข้อส่วน, dialog และกลุ่มข้อมูล
-- **Description** (SOV BokThang 400, 1rem, 1.6): ข้อความอธิบายและ empty-state copy จำกัดความยาวประมาณ 65–75 ตัวอักษรต่อบรรทัด
+- **Headline Large** (iannnnn-DOG 400, 1.75rem, 1.3): ชื่อหน้าหลัก ใช้หนึ่งครั้งต่อ surface
+- **Headline Medium** (iannnnn-DOG 400, 1.25rem, 1.4): หัวข้อส่วน, dialog และกลุ่มข้อมูล
+- **Description** (iannnnn-DOG 400, 1rem, 1.6): ข้อความอธิบายและ empty-state copy จำกัดความยาวประมาณ 65–75 ตัวอักษรต่อบรรทัด
 - **Body/Data** (system-ui 400, 1rem, 1.5): ข้อมูล ตาราง ค่าในช่องกรอก และเนื้อหาที่ต้องอ่านตัวเลขแม่นยำ
 - **Label** (650, 0.875rem, 1.75): ปุ่ม, tab, table header และข้อความควบคุม ใช้ตัวพิมพ์ตามภาษาปกติ ไม่ใช้ uppercase แบบเว้นระยะกว้าง
 
 ### Named Rules
 
-**The Two-Lane Type Rule.** ใช้ SOV BokThang เฉพาะชื่อหน้า หัวข้อ แบรนด์ และข้อความอธิบาย ส่วนข้อมูลและ controls ใช้ system-ui; ห้ามสลับบทบาทระหว่างสองชุดโดยไม่มีเหตุผลเชิงความหมาย
+**The Two-Lane Type Rule.** ใช้ iannnnn-DOG เฉพาะชื่อหน้า หัวข้อ แบรนด์ และข้อความอธิบาย ส่วนข้อมูลและ controls ใช้ system-ui; ห้ามสลับบทบาทระหว่างสองชุดโดยไม่มีเหตุผลเชิงความหมาย
 
-**The Financial Clarity Rule.** ตัวเลข จำนวนเงิน เลขบัญชี อีเมล และข้อมูลเทคนิคใช้ system-ui หรือ monospace พร้อม `tabular-nums` เมื่อมีตัวเลขที่ต้องเทียบแนว ห้ามใช้ SOV BokThang กับข้อมูลสำคัญ
+**The Financial Clarity Rule.** ตัวเลข จำนวนเงิน เลขบัญชี อีเมล และข้อมูลเทคนิคใช้ system-ui หรือ monospace พร้อม `tabular-nums` เมื่อมีตัวเลขที่ต้องเทียบแนว ห้ามใช้ iannnnn-DOG กับข้อมูลสำคัญ
 
 ## Elevation
 
@@ -231,5 +231,5 @@ Component vocabulary คือ **คุ้นเคย มั่นใจ แล
 - **Don't** ลอกหน้าตาของ KBank โดยตรง การอ้างอิงจำกัดอยู่ที่แนวทาง layout เท่านั้น
 - **Don't** ใช้ accent เป็นสีตกแต่งทั่วทั้งหน้าจอหรือใช้สีโดยไม่มี label/icon อธิบาย
 - **Don't** ซ้อน card ภายใน card หรือใส่เงาให้ทุก container
-- **Don't** ใช้ SOV BokThang หรือ display/pixel font กับตัวเลขการเงิน, input, button, tab หรือ table
+- **Don't** ใช้ iannnnn-DOG หรือ display/pixel font กับตัวเลขการเงิน, input, button, tab หรือ table
 - **Don't** เปลี่ยนรูปแบบปุ่ม, input, dialog หรือ icon ระหว่างหน้าจอโดยไม่มีเหตุผลเชิงงาน

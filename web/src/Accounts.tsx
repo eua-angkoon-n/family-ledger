@@ -87,8 +87,10 @@ export default function Accounts() {
   };
 
   return (
-    <Box sx={{ mt: 4 }}>
+    <Box>
       <PageHeader
+        level={1}
+        id="accounts-heading"
         title="บัญชีธนาคารของฉัน"
         description="จัดการบัญชีและกล่องอีเมลที่ระบบใช้รับข้อมูลจาก statement"
         action={<Button ref={addButtonRef} variant="contained" startIcon={<AddRounded />} onClick={openAdd} sx={{ whiteSpace: 'nowrap' }}>เพิ่มบัญชี</Button>}

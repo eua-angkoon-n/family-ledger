@@ -17,6 +17,7 @@ import {
   Typography,
 } from '@mui/material';
 import AccountBalanceWalletRounded from '@mui/icons-material/AccountBalanceWalletRounded';
+import AccountBalanceRounded from '@mui/icons-material/AccountBalanceRounded';
 import AssessmentRounded from '@mui/icons-material/AssessmentRounded';
 import BlockRounded from '@mui/icons-material/BlockRounded';
 import HourglassTopRounded from '@mui/icons-material/HourglassTopRounded';
@@ -29,8 +30,8 @@ import Admin from './Admin.js';
 import { brandCopySx, dataTextSx, descriptionSx } from './theme.js';
 import { EmptyState, FeedbackSnackbar, PageHeader, type Notice } from './ui.js';
 
-type Page = 'reports' | 'settings';
-type SettingsTab = 'accounts' | 'banks' | 'users';
+type Page = 'reports' | 'accounts' | 'settings';
+type SettingsTab = 'banks' | 'users';
 
 function AuthPanel({ children }: { children: ReactNode }) {
   return (
@@ -46,7 +47,7 @@ export default function App() {
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const [signupInviteRequired, setSignupInviteRequired] = useState(false);
   const [page, setPage] = useState<Page>('reports');
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>('accounts');
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('banks');
   const [invite, setInvite] = useState('');
   const [inviteError, setInviteError] = useState('');
   const [submittingInvite, setSubmittingInvite] = useState(false);
@@ -137,7 +138,7 @@ export default function App() {
             <AccountBalanceWalletRounded sx={{ fontSize: 34 }} />
           </Box>
           <Box>
-            <Typography variant="h1">บัญชีครอบครัว</Typography>
+            <Typography variant="h1">Hyacinthia Ledger</Typography>
             <Typography color="text.secondary" sx={{ mt: 1, ...descriptionSx }}>
               เปลี่ยน statement จากธนาคารให้เป็นภาพรวมการเงินที่ถูกต้องและดูแลง่าย
             </Typography>
@@ -185,12 +186,13 @@ export default function App() {
             <Stack direction="row" spacing={1} sx={{ mr: 'auto', alignItems: 'center' }}>
               <AccountBalanceWalletRounded sx={{ color: 'text.primary' }} />
               <Typography sx={{ display: { xs: 'none', sm: 'block' }, whiteSpace: 'nowrap', ...brandCopySx }}>
-                บัญชีครอบครัว
+                Hyacinthia Ledger
               </Typography>
             </Stack>
             <Tabs value={page} onChange={(_, value: Page) => setPage(value)} aria-label="เมนูหลัก">
               <Tab value="reports" aria-label="รายงาน" icon={<AssessmentRounded />} iconPosition="start" label={<Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>รายงาน</Box>} sx={{ minWidth: { xs: 48, sm: 104 }, px: { xs: 1, sm: 2 }, '& .MuiTab-icon': { mr: { xs: 0, sm: 1 } } }} />
-              <Tab value="settings" aria-label="ตั้งค่า" icon={<SettingsRounded />} iconPosition="start" label={<Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>ตั้งค่า</Box>} sx={{ minWidth: { xs: 48, sm: 104 }, px: { xs: 1, sm: 2 }, '& .MuiTab-icon': { mr: { xs: 0, sm: 1 } } }} />
+              <Tab value="accounts" aria-label="บัญชีของฉัน" icon={<AccountBalanceRounded />} iconPosition="start" label={<Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>บัญชีของฉัน</Box>} sx={{ minWidth: { xs: 48, sm: 104 }, px: { xs: 1, sm: 2 }, '& .MuiTab-icon': { mr: { xs: 0, sm: 1 } } }} />
+              {user.is_admin && <Tab value="settings" aria-label="ตั้งค่า" icon={<SettingsRounded />} iconPosition="start" label={<Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>ตั้งค่า</Box>} sx={{ minWidth: { xs: 48, sm: 104 }, px: { xs: 1, sm: 2 }, '& .MuiTab-icon': { mr: { xs: 0, sm: 1 } } }} />}
             </Tabs>
             <Tooltip title="ออกจากระบบ">
               <span>
@@ -217,23 +219,29 @@ export default function App() {
               action={(
                 <Button
                   variant="contained"
-                  startIcon={<SettingsRounded />}
-                  onClick={() => { setSettingsTab('accounts'); setPage('settings'); }}
+                  startIcon={<AccountBalanceRounded />}
+                  onClick={() => setPage('accounts')}
                 >
-                  ไปตั้งค่าบัญชีธนาคาร
+                  ไปบัญชีของฉัน
                 </Button>
               )}
             />
           </Box>
         )}
 
-        {page === 'settings' && (
+        {page === 'accounts' && (
+          <Box component="section" aria-labelledby="accounts-heading">
+            <Accounts />
+          </Box>
+        )}
+
+        {page === 'settings' && user.is_admin && (
           <Box component="section" aria-labelledby="settings-heading">
             <PageHeader
               level={1}
               id="settings-heading"
               title="ตั้งค่า"
-              description="จัดการแหล่งข้อมูล สมาชิก และการเชื่อมต่อที่ใช้สร้างบัญชีครอบครัว"
+              description="จัดการแหล่งข้อมูล สมาชิก และการเชื่อมต่อของ Hyacinthia Ledger"
             />
             <Tabs
               value={settingsTab}
@@ -243,12 +251,10 @@ export default function App() {
               aria-label="เมนูตั้งค่า"
               sx={{ mt: 2, borderBottom: 1, borderColor: 'divider' }}
             >
-              <Tab value="accounts" label="บัญชีธนาคารของฉัน" />
-              {user.is_admin && <Tab value="banks" label="ธนาคาร (แอดมิน)" />}
-              {user.is_admin && <Tab value="users" label="ผู้ใช้ (แอดมิน)" />}
+              <Tab value="banks" label="ธนาคาร (แอดมิน)" />
+              <Tab value="users" label="ผู้ใช้ (แอดมิน)" />
             </Tabs>
 
-            {settingsTab === 'accounts' && <Accounts />}
             {settingsTab === 'banks' && <Admin.Banks />}
             {settingsTab === 'users' && <Admin.Users currentUserId={user.id} />}
           </Box>

@@ -12,7 +12,7 @@ export const colors = {
 } as const;
 
 export const fontFamilies = {
-  copy: '"SOV BokThang", "Noto Sans Thai", system-ui, sans-serif',
+  copy: '"iannnnn-DOG", "Noto Sans Thai", system-ui, sans-serif',
   data: 'system-ui, "Noto Sans Thai", sans-serif',
 } as const;
 
