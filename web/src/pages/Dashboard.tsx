@@ -224,8 +224,11 @@ export default function Dashboard() {
                 icon={<EventRepeatRounded fontSize="small" />}
                 value={<Money satang={plan?.totals.planned_available_satang ?? 0} tone={(plan?.totals.planned_available_satang ?? 0) < 0 ? 'expense' : 'income'} />}
                 caption="รายได้เต็ม − รายการหัก − รายจ่ายตามแผน − เงินกันไว้"
-                disabled={plan == null}
-                disabledReason="ยังไม่มีข้อมูลแผนของเดือนนี้"
+                // GET /monthly-plans/:month สร้างแถวแผนให้เองแบบ lazy เพราะฉะนั้น plan ไม่เคยเป็น null
+                // สำหรับเดือนที่เปิดดูได้ — เช็ค items.length ด้วย ไม่งั้นเดือนที่ไม่มีแผนเลยจะโชว์ ฿0.00
+                // ซึ่งแยกไม่ออกจาก "วางแผนไว้พอดีเป็นศูนย์" (การ์ดข้าง ๆ เช็ค total_count === 0 อยู่แล้ว)
+                disabled={plan == null || plan.items.length === 0}
+                disabledReason="ยังไม่มีแผนของเดือนนี้"
                 onClick={() => navigate(`/planning?month=${month}`)}
               />
               <SummaryCard
