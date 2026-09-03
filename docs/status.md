@@ -123,6 +123,12 @@
 
 - Tax Invoice / `TaxInvoiceRecord` (Slice 7)
 - audit log การเข้าถึงและแก้ไขข้อมูล (Slice 8)
+- **KBank parser** — `docs/plans/personalfinancesystemplan.md` (หัวข้อ scope ตอน launch) วางไว้ว่า launch ด้วย KBank ก่อน แต่ของจริง
+  ทำ SCB ก่อน — `src/parsers/index.ts` มีเฉพาะ `scb` ยังไม่มี Slice ไหนรองรับ สองผลที่ตามมา:
+  - ต้องได้จากผู้ใช้ก่อนเขียน parser: **statement PDF ตัวอย่าง 2 เดือนติดกัน + รหัสผ่าน + หัวข้ออีเมลจริง**
+    (ทั้งแบบรายเดือนและแบบขอเอง) — เขียน parser โดยไม่เห็นตัวอย่างจริงคือการเดาบน money path
+  - ถ้าใน DB มีแถว `bank.parser_key='kbank'` ค้างอยู่ (admin เคยเพิ่มไว้) จะแก้ฟิลด์ใดก็ไม่ได้
+    เพราะ `web/src/Admin.tsx` PATCH ส่งทั้งฟอร์มแล้ว validation reject ทั้งก้อน
 
 ## UI design guideline — ปิดแล้ว
 
