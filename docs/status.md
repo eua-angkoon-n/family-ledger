@@ -1,4 +1,4 @@
-# สถานะงาน — 2026-09-03
+# สถานะงาน — 2026-09-04
 
 ข้อบังคับและท่อข้อมูลอยู่ที่ `CONTEXT.md` · การตัดสินใจอยู่ที่ `docs/adr/0001-statement-pdf-ingestion.md`
 และ `docs/adr/0002-imported-transactions-monthly-planning-and-reconciliation.md`
@@ -97,8 +97,10 @@
   design guideline" ด้านล่าง — เอกสารนั้นเป็นประวัติ ไม่ใช้ตัดสินงานอีกต่อไป)
 - `ledger-reviewer` ผ่าน 2 รอบ (backend diff, UI diff) ทุก major finding แก้แล้ว — 92/92 test ผ่าน,
   `npm run build` สะอาด
-- **ยกไป Slice 5/7 โดยตั้งใจ** (placeholder ปิดอยู่ในหน้า UI พร้อมป้าย "รอ Slice 5/7"):
-  Planning + Payment Status card (§8.2), คอลัมน์ Monthly Plan Item (§8.3), filter Tax Entity/Tax Document (§8.4)
+- **ยกไป Slice 5/7 โดยตั้งใจ**: Planning + Payment Status card (§8.2 — placeholder ปิดอยู่จริงในโค้ด
+  และ **Slice 5 เปิดใช้แล้ว**), filter Tax Entity/Tax Document (§8.4)
+  หมายเหตุแก้ของเดิม: บรรทัดนี้เคยเขียนว่าคอลัมน์ Monthly Plan Item (§8.3) มี placeholder อยู่ใน UI
+  — ไม่จริง `TransactionTable.tsx` ไม่เคยมีคอลัมน์นั้นหรือป้ายบอกเลย (grep แล้วไม่พบ) ยังไม่ได้ทำถึงตอนนี้
 - **ข้อจำกัดที่รู้ตัว** (ตั้งใจไม่แก้ในเฟสนี้):
   - `classification='excluded'` reconcile ไม่ได้ระหว่างรายงานกับรายการ: รายงานตัด `excluded` ออก
     แต่ `GET /api/transactions` (และ `TXN_FILTER_SQL`) ไม่มี filter ของมัน — drill-down จากการ์ด/กราฟ
@@ -117,7 +119,100 @@
 - **ยังไม่ผ่านการทดสอบด้วยตา/browser จริง** — environment นี้ไม่มี browser automation tool และต้องใช้
   Google OAuth session จริง `npm run test:db` (92/92) และ `npm run build` (สะอาด) ยืนยันว่า compile/logic
   ถูกต้อง แต่ไม่ยืนยัน layout, การ render กราฟ, หรือว่าคลิก drill-down แล้ว navigate ไปถูกจริงในเบราว์เซอร์
-- ถัดไป: Slice 5 ตามลำดับใน `docs/plans/phases/README.md`
+## Slice 5 — Monthly Planning: เสร็จแล้ว
+
+เอกสารเฟส: `docs/plans/phases/5-monthly-planning.md` · migration `006_monthly_planning.sql`
+
+- 4 ตารางตาม §7.2 (`monthly_plan`, `recurring_rule`, `monthly_plan_item`, `monthly_item_payment`)
+  + `monthly_plan.closed_snapshot jsonb` แทนตาราง "monthly close snapshot" ที่ §13 ระบุไว้แต่ §7.2 ไม่ให้ schema
+- invariant สำคัญบังคับที่ DB ไม่ใช่ application: `month_start` ต้องเป็นวันที่ 1,
+  `monthly_plan_item_rule_uniq (monthly_plan_id, recurring_rule_id, occurrence_date)` = idempotency ของการ generate,
+  `monthly_item_payment_txn_matched_uniq (txn_id) where status='matched'` = §9.5 เกณฑ์ข้อ 5,
+  `check (status <> 'matched' or txn_id is not null)`,
+  `check (recurring_rule_id is null or occurrence_date is not null)`
+- service: `recurring-generation.ts` (`occurrencesInMonth` pure + generate แบบ **insert-only**),
+  `plan-query.ts` (`PAYMENT_STATE_SQL`/`planTotals`/`paymentStatusSummary`/`loadOwnedItem`/`assertOwnedRefs`),
+  `payment-reconciliation.ts` (เกณฑ์ §9.5 ครบ auto-match เฉพาะ candidate เดียว)
+- route: `monthly-plans.ts` (GET เดือน + items + copy-previous + skip + payments + close/reopen +
+  PATCH payment) และ `recurring-rules.ts` (CRUD + archive) — `reconcilePayments` ต่อสายทั้งใน
+  `worker.ts:doSync` และใน `POST /monthly-plan-items/:id/payments`
+- web: `web/src/pages/MonthlyPlan.tsx` (`/planning?month=`), `PaymentStatusChip.tsx`,
+  `MonthPicker` รับ `maxMonth` เพื่อเลือกเดือนอนาคตได้, การ์ด "เงินเหลือใช้ตามแผน" และ
+  "สถานะการจ่ายบิล" ใน `Dashboard.tsx` เปิดใช้จริงแล้ว (คลิกไป `/planning`)
+- error handler กลางใน `server.ts` แปลง `23514` (CHECK constraint) เป็น 400 แทน 500
+- **125/125 test ผ่าน** (`npm run test:db`) เพิ่มจาก 92: `test/recurring.test.ts` (pure ไม่ต้อง DB),
+  `test/monthly-plans.test.ts`, `test/authz.test.ts` ข้อ 17–24, `test/migrate.test.ts` subtest ของ 006
+  · `npm run build` สะอาด
+
+### บั๊กที่ `ledger-reviewer` จับได้และแก้แล้วในเฟสนี้
+
+- **`due_date` เป็นคีย์กันซ้ำของ generation ไม่ได้** (finding รุนแรงสุด) — §9.3 ให้ผู้ใช้เลื่อน due_date
+  เฉพาะเดือนนี้ได้ แต่ตอนนั้น unique index ใช้ due_date เป็นคีย์ เลื่อนแล้ว (หรือเซ็ต null ซึ่ง NULL
+  ไม่ชน unique index) GET รอบหน้าจะ insert แถวเดิมกลับมาที่วันเดิม → รายการซ้ำ ยอดตามแผนเด้งเป็นสองเท่า
+  และถ้า skip ไว้ก่อนก็ถูกย้อนเงียบ ๆ **แก้โดยแยก `occurrence_date`** ที่ generation เป็นเจ้าของและ
+  ผู้ใช้แก้ไม่ได้ ให้เป็นคีย์ ส่วน `due_date` ยังเลื่อนได้ตามสเปก
+- **insert-only ไม่พอกันการแก้กฎย้อนอดีต** — กันการ *แก้* แถวเดิมได้ แต่ไม่กันการ *เพิ่ม* แถวใหม่
+  แก้ `anchor_day` 5 → 20 แล้วเปิดดูเดือนที่แล้วที่ยัง open จะได้ทั้งวันที่ 5 และ 20
+  แก้โดย `generateMonthlyItems` ไม่ generate เดือนที่ผ่านไปแล้วเลย
+- **`planned_amount_satang = 0` ขึ้นว่า verified** จาก `0 >= 0` — เติม `matched_satang > 0` ในสาขานั้น
+- **ยืนยันคู่ด้วยมือตรวจแค่ "เป็นบัญชีของ user"** ผูก payment 100,000 กับ txn 10 บาทได้แล้วขึ้นว่ายืนยันแล้ว
+  (`matched_satang` นับยอดของ payment) — เพิ่มการตรวจยอดและทิศทางให้ครบเหมือน auto-match
+- **reconcile ดูด txn ไปจองให้รายการที่ skip/cancel แล้ว** ทำให้ payment ที่ถูกต้องจับ txn ตัวนั้นไม่ได้อีก
+  — เพิ่ม `and i.explicit_status = 'active'`
+- **`satang()` ไม่มีเพดาน** `1e300` ผ่าน `Number.isInteger` แล้ว pg ส่ง `"1e+300"` เป็น bigint → 500
+  (คลาสเดียวกับที่พบเองว่า `isoDate` รับ `2026-02-31` แล้วได้ 500)
+- **`run()` ฝั่งเว็บกลืน error ของปุ่มบนแถบเครื่องมือ** (คัดลอกเดือนก่อน/ปิด-เปิดเดือน/ข้าม/เลิกใช้)
+  เพราะ `formError` render อยู่ใน modal เท่านั้น — ไม่มี modal เปิดให้ส่งเข้า snackbar
+- UI อื่นที่แก้: `PaymentStatusChip` เลิกใช้สี `warning` (ไม่มีใน `theme.ts`) และ `primary`
+  (สงวนไว้สำหรับ action ตาม Restrained Accent Rule) เปลี่ยนไปใช้ไอคอนแยกความหมายแบบ `DataFreshness.tsx`;
+  กล่องเลือกคู่ค้น candidate ในกรอบ ±3 วันให้ตรงกับเกณฑ์ที่ระบบใช้จริง (เดิมใช้ "เดือนของ paid_date"
+  ซึ่งกลางเดือนเสนอ txn ห่าง 30 วัน และต้นเดือนซ่อน candidate ปลายเดือนก่อน) + guard response
+  ที่มาไม่เรียงลำดับ + สถานะกำลังโหลด; ปุ่มล็อกเดือนรอ `plan` ของเดือนนั้นก่อนจึงกดได้;
+  กล่องจ่ายแสดงรายการที่ประกาศไว้พร้อมปุ่มยกเลิก และปุ่ม "ข้าม" สลับเป็น "เอากลับเข้าแผน"
+  (สอง endpoint นี้มีใน API อยู่แล้วแต่ UI เดิมเข้าไม่ถึง); "เลิกใช้" รายการประจำถามยืนยันก่อน
+  เพราะไม่มี unarchive; validate `frequency_interval`/`anchor_day` ก่อนส่ง (เดิม NaN → null →
+  กลายเป็น "ทุก 1" เงียบ ๆ); คืน focus หลัง dialog ที่ปุ่มต้นทางหายไป
+
+### การตัดสินใจที่ต้องรู้ก่อนแก้ต่อ
+
+- **`closed_snapshot` เป็น audit เท่านั้น** ทั้งหน้าแผนและการ์ด Dashboard อ่านสถานะสดจาก
+  `PAYMENT_STATE_SQL` เสมอไม่ว่าเดือนจะ open หรือ closed — ถ้าเปลี่ยนไป render จาก snapshot
+  statement ที่มาช้าแล้วจับคู่สำเร็จจะไม่ปรากฏบนจอเลย
+- **reconcile จับคู่เข้าเดือนที่ปิดแล้วได้** (ตัดสินใจร่วมกับเจ้าของงาน) เพราะไม่เปลี่ยนตัวเลขตามแผน
+  ที่ล็อกคือการแก้ของผู้ใช้ ผ่าน `loadOwnedItem(..., { requireOpen: true })`
+- **generation เป็น insert-only** (`on conflict do nothing`) ห้ามเปลี่ยนเป็น upsert เด็ดขาด —
+  เป็นกลไกเดียวที่ทำให้การแก้ `recurring_rule` ไม่ย้อนแก้เดือนที่ปิดแล้ว (§16 ข้อ 16)
+  ผลตามมา: item ที่ `skipped`/`cancelled` ห้ามลบ แถวต้องอยู่เพื่อกัน re-insert จึงไม่มี DELETE endpoint
+- **`occurrence_date` ห้ามให้ผู้ใช้แก้** เป็นคีย์กันสร้างซ้ำ ถ้าวันไหนเปิดให้ PATCH ได้ บั๊กแถวซ้ำ
+  ที่แก้ไปแล้วจะกลับมาทันที
+- **ยืนยันคู่ด้วยมือบังคับยอด/ทิศทาง/บัญชี แต่ไม่บังคับกรอบ ±3 วัน** — ขั้นตอนนี้คือให้คนตัดสินสิ่งที่
+  ระบบตัดสินไม่ได้ วันที่คลาดกันได้จริงเวลาธนาคารลงรายการช้า แต่ยอดกับทิศทางเป็นข้อเท็จจริงที่ต่อรองไม่ได้
+  (UI ค้น candidate ในกรอบ ±3 วันเพื่อให้ตรงกับที่ระบบพิจารณา)
+- **`reconcilePayments` รับเฉพาะ `Pool` ไม่ใช่ `Queryable`** เพราะกลืน 23505 ต่อแถวแล้วไปต่อ ซึ่งถูกต้อง
+  เฉพาะเมื่อแต่ละ update เป็น transaction ของตัวเอง — ถ้าเรียกด้วย `PoolClient` ใน `tx()` error แรก
+  จะ abort ทั้ง transaction แล้ว query ที่เหลือพังด้วย 25P02 เงียบ ๆ
+- **ทิศทาง txn ตอนจับคู่ขยายจากสเปก**: §9.5 ข้อ 2 เขียน "เป็น Debit" (คิดถึงบิล) โค้ดใช้ `credit`
+  สำหรับ item `kind='income'` และ `debit` สำหรับที่เหลือ
+- `installment_due_id` เป็น `bigint` เปล่าไม่มี FK ตาม precedent `tax_entity_id` ใน 005 — Slice 6 ค่อยใส่ FK
+
+### ข้อจำกัดที่รู้ตัว (ตั้งใจไม่แก้ในเฟสนี้)
+
+- **ยังไม่เคยเปิดดูในเบราว์เซอร์จริง** — environment นี้ไม่มี browser automation และต้องมี Google OAuth
+  session จริง `npm run test:db` + `npm run build` ยืนยัน compile/logic ไม่ยืนยัน layout หรือการคลิกจริง
+- คอลัมน์ Monthly Plan Item ในตารางธุรกรรม (§8.3) และกราฟ Planned vs Actual (§8.5 ลำดับ 4) ยกไปเฟสหลัง
+- ไม่มี confidence scoring (§9.5 ข้อ 6): `txn.counterparty` เป็น NULL ตลอด และ §7.2 ไม่มีคอลัมน์
+  confidence บน `monthly_item_payment` ให้เก็บ — auto-match ยึดเงื่อนไข "candidate เดียว" อย่างเดียว
+- `GET /api/monthly-plans/:month` มี side effect (สร้างแถวแผน + กางรายการประจำ) เพราะ §11 ไม่มี endpoint
+  generate แยก ผลคือการเปิดดูเดือนย้อนหลัง (รวมจาก Dashboard) สร้างแถวแผน**เปล่า**ของเดือนนั้นขึ้นมา —
+  idempotent และมีเพดาน 12 เดือนข้างหน้า แต่ไม่มีเพดานฝั่งอดีต
+- **เดือนที่ผ่านไปแล้วไม่มีรายการประจำให้** เพราะ generation ไม่ backfill ย้อนหลัง (ตามที่ §9.2 บังคับว่า
+  การแก้กฎมีผลเฉพาะอนาคต) ผลที่ยอมรับ: ตั้งค่ารายการประจำวันนี้แล้วเปิดดูเดือนก่อน ๆ จะเห็นแผนว่าง
+  ถ้าวันหนึ่งต้องกรอกแผนย้อนหลังจริง ให้เพิ่มเป็นรายการเฉพาะเดือนหรือใช้ปุ่มคัดลอกเดือนก่อน
+- ไม่มีปุ่มเปิดใช้กฎที่ archive แล้วกลับ (`is_active = false` ทางเดียว) ต้องสร้างกฎใหม่
+- `copy-previous` กันซ้ำด้วย `(kind, name)` เท่านั้น เดือนก่อนมีสองรายการชื่อเดียวกันจะ copy มาใบเดียว
+- รายการประจำความถี่ `day` interval 1 สร้าง ~30 แถวต่อเดือนตามสเปก ไม่มีเพดานจำนวนแถวต่อเดือน
+- ยังไม่มี endpoint ลบ `recurring_rule` (archive เท่านั้น) และไม่มี unarchive ทั้งของ rule และ bank account
+- ถัดไป: Slice 6 (Income & Installment) ตามลำดับใน `docs/plans/phases/README.md`
 
 ## Requirement ที่ยังไม่มี Slice รองรับ (ก่อน 4A)
 

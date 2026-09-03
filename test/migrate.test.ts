@@ -145,4 +145,85 @@ test('migrate() roll-forward', async (t) => {
     );
     await assert.rejects(secondConfirmedForSameDebit);
   });
+
+  // 006: month_start ต้องเป็นวันที่ 1, generate รายการประจำซ้ำไม่ได้, txn ผูก payment ที่ matched ได้คู่เดียว
+  await t.test('006 enforces monthly planning constraints', async () => {
+    const account = (
+      await db.pool.query<{ user_id: number }>('select user_id from bank_account where id = $1', [seededBankAccountId])
+    ).rows[0]!;
+
+    await assert.rejects(
+      db.pool.query(`insert into monthly_plan (user_id, month_start) values ($1, '2026-08-15')`, [account.user_id]),
+    );
+
+    const planId = (
+      await db.pool.query<{ id: number }>(
+        `insert into monthly_plan (user_id, month_start) values ($1, '2026-08-01') returning id`,
+        [account.user_id],
+      )
+    ).rows[0]!.id;
+    await assert.rejects(
+      db.pool.query(`insert into monthly_plan (user_id, month_start) values ($1, '2026-08-01')`, [account.user_id]),
+    );
+
+    const ruleId = (
+      await db.pool.query<{ id: number }>(
+        `insert into recurring_rule (user_id, name, kind, amount_satang, frequency_unit, start_date)
+         values ($1, 'ค่าเช่า', 'expense', 100000, 'month', '2026-08-01') returning id`,
+        [account.user_id],
+      )
+    ).rows[0]!.id;
+    const insertGenerated = () =>
+      db.pool.query(
+        `insert into monthly_plan_item
+           (monthly_plan_id, recurring_rule_id, kind, name, planned_amount_satang, occurrence_date, due_date)
+         values ($1, $2, 'expense', 'ค่าเช่า', 100000, '2026-08-05', '2026-08-05')`,
+        [planId, ruleId],
+      );
+    await insertGenerated();
+    await assert.rejects(insertGenerated());
+
+    await assert.rejects(
+      db.pool.query(
+        `insert into recurring_rule (user_id, name, kind, amount_satang, frequency_unit, start_date, end_date)
+         values ($1, 'ย้อนเวลา', 'expense', 1, 'month', '2026-08-01', '2026-07-01')`,
+        [account.user_id],
+      ),
+    );
+
+    const itemId = (
+      await db.pool.query<{ id: number }>(
+        `insert into monthly_plan_item (monthly_plan_id, kind, name, planned_amount_satang)
+         values ($1, 'expense', 'ค่าน้ำ', 5000) returning id`,
+        [planId],
+      )
+    ).rows[0]!.id;
+    const matchPayment = () =>
+      db.pool.query(
+        `insert into monthly_item_payment
+           (monthly_plan_item_id, amount_satang, paid_date, bank_account_id, txn_id, status, verified_at)
+         values ($1, 5000, '2026-08-15', $2, $3, 'matched', now())`,
+        [itemId, seededBankAccountId, seededTxnId],
+      );
+    await matchPayment();
+    await assert.rejects(matchPayment());
+
+    // แถวที่มาจากกฎต้องมี occurrence_date เสมอ ไม่งั้นหลุด unique index ไปสร้างซ้ำได้
+    await assert.rejects(
+      db.pool.query(
+        `insert into monthly_plan_item (monthly_plan_id, recurring_rule_id, kind, name, planned_amount_satang)
+         values ($1, $2, 'expense', 'ไม่มี occurrence', 1)`,
+        [planId, ruleId],
+      ),
+    );
+
+    // status='matched' ต้องมี txn_id เสมอ
+    await assert.rejects(
+      db.pool.query(
+        `insert into monthly_item_payment (monthly_plan_item_id, amount_satang, paid_date, bank_account_id, status)
+         values ($1, 5000, '2026-08-16', $2, 'matched')`,
+        [itemId, seededBankAccountId],
+      ),
+    );
+  });
 });

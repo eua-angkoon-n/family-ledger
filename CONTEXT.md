@@ -28,6 +28,8 @@ Gmail (poll ชั่วโมงละครั้ง)
 - **รหัสผ่าน PDF และ refresh token เข้ารหัส AES-256-GCM เสมอ** (`src/crypto.ts`) คีย์อยู่ใน `.env` ห้ามเข้า git
   **คีย์หาย = ถอดข้อมูลเก่าไม่ได้อีกเลย** ต้องมีสำเนานอกเครื่อง
 - **รหัสผ่าน PDF ส่งผ่าน stdin ไม่ใช่ argv** และ **PDF ที่ถอดรหัสแล้วห้ามลงดิสก์**
+- **Planning ห้ามสร้างหรือแก้ `txn`** (ADR-0002) — mark paid สร้าง `monthly_item_payment` สถานะ `declared`
+  แล้วรอ statement จริงมาจับคู่เป็น `matched` เท่านั้น ห้ามปั้น `txn` ให้ตัวเลขบนจอดูครบก่อนเวลา
 - **`txn.txn_date` = วันที่ในบรรทัดของ statement** ไม่ใช่วันที่อีเมลมาถึง (ไม่งั้นปีภาษีเพี้ยน)
 - **checksum ไม่ผ่าน = ไม่เขียนสักแถว** ตั้ง `status='checksum_failed'` แล้วแจ้งเตือน
 - **fixture ที่ commit ได้ = ข้อความที่สกัดแล้วและ redact แล้วเท่านั้น** ห้าม commit ไฟล์ PDF หรือ `.eml` จริง
@@ -48,14 +50,18 @@ Gmail (poll ชั่วโมงละครั้ง)
 | `src/worker.ts` | worker ชั่วโมงละครั้ง: sync กล่องอีเมล → ถอดรหัส PDF → parse → เขียน statement/txn แบบ atomic |
 | `src/api.ts` | ประกอบ router ย่อย + `/me` |
 | `src/http.ts` | `HttpError` และ helper ตรวจ body ที่ router ใช้ร่วมกัน |
-| `src/routes/*.ts` | handler REST แยกตามโดเมน (banks, admin, email-accounts, accounts, categories, transactions, transfer-matches, reports) |
+| `src/routes/*.ts` | handler REST แยกตามโดเมน (banks, admin, email-accounts, accounts, categories, transactions, transfer-matches, reports, recurring-rules, monthly-plans) |
 | `src/services/transfer-matching.ts` | หา candidate คู่โอนภายในให้ user (logic ข้ามตารางแยกจาก route ตาม ADR-0002) |
 | `src/services/report-query.ts` | SQL fragment ร่วมของรายงาน/รายการธุรกรรม (`OWNED_TXN_FROM`, `TXN_FILTER_SQL`, `parseRange`, `accountCoverage`) |
+| `src/services/plan-query.ts` | SQL fragment ร่วมของแผนรายเดือน (`PAYMENT_STATE_SQL`, `planTotals`, `loadOwnedItem`) — หน้าแผนและการ์ด Dashboard ต้องใช้ตัวเดียวกัน |
+| `src/services/recurring-generation.ts` | กางรายการประจำเป็นวันครบกำหนด (`occurrencesInMonth` เป็น pure ไม่แตะ DB) insert-only จึงไม่ย้อนแก้เดือนเก่า |
+| `src/services/payment-reconciliation.ts` | จับคู่ Payment Declaration กับ `txn` จริงตามเกณฑ์ §9.5 — auto-match เฉพาะ candidate เดียว |
 | `src/parsers/index.ts` | registry `parser_key` → ฟังก์ชัน parse (ใช้ร่วมกันทั้ง `src/routes/banks.ts` และ `src/worker.ts`) |
 | `web/` | React (Vite), router คือ `react-router-dom` (`App.tsx` ครอบ auth gate ไว้ข้างนอก `<Routes>`) |
 | `web/src/pages/Dashboard.tsx` | สรุปเงินเข้า/ออก/คงเหลือ + 3 กราฟ (`@mui/x-charts`) ต่อเดือน คลิก segment ไป `/transactions` ตาม contract ใน `report-query.ts` |
 | `web/src/pages/Transactions.tsx` | ตารางธุรกรรม filter ผ่าน URL (`useSearchParams`), เปิด `ReviewDrawer` ต่อแถว |
-| `web/src/components/` | ส่วนใช้ร่วมของ Dashboard/Transactions — `Money`/`MonthPicker`/`SummaryCard`/`ChartCard`/`TransactionTable`/`DataFreshness`/`ReviewDrawer` |
+| `web/src/pages/MonthlyPlan.tsx` | แผนรายเดือน (`/planning?month=`) — รายการประจำ/เฉพาะเดือน, mark paid, ปิด-เปิดเดือน |
+| `web/src/components/` | ส่วนใช้ร่วม — `Money`/`MonthPicker`/`SummaryCard`/`ChartCard`/`TransactionTable`/`DataFreshness`/`ReviewDrawer`/`PaymentStatusChip` |
 
 ## สั่งงาน
 
@@ -63,11 +69,13 @@ Gmail (poll ชั่วโมงละครั้ง)
 npm run migrate     # รัน migration (แอปรันให้เองตอนบูตอยู่แล้ว)
 npm run dev:api     # API ที่ :3000
 npm run dev:web     # Vite ที่ :5173 (proxy /api และ /auth ไป :3000)
-npm test            # node:test — unit เท่านั้น (crypto, account-match, gmail, SCB parser/checksum)
-npm run test:db     # เหมือนกัน + migration roll-forward, ledger classification API, cross-user
-                    # authorization — ต่อ Postgres จริงผ่าน docker-compose.test.yml (127.0.0.1:5433)
-                    # ไม่มีคำสั่งนี้ = 4 suite นี้ถูก skip เงียบ ๆ ใน `npm test` ห้ามถือว่า
-                    # "test ผ่านหมด" จนกว่าจะรัน test:db แล้วเขียวจริง
+npm test            # node:test — unit เท่านั้น (crypto, account-match, gmail, SCB parser/checksum,
+                    # recurring occurrence)
+npm run test:db     # เหมือนกัน + migration roll-forward, ledger classification API, reports,
+                    # accounts, admin, monthly planning, cross-user authorization — ต่อ Postgres จริง
+                    # ผ่าน docker-compose.test.yml (127.0.0.1:5433)
+                    # ไม่มีคำสั่งนี้ = 7 ไฟล์ test นี้ถูก skip เงียบ ๆ ใน `npm test` (t.skip ไม่ error)
+                    # ห้ามถือว่า "test ผ่านหมด" จนกว่าจะรัน test:db แล้วเขียวจริง
 npm run build       # tsc + vite build
 ```
 

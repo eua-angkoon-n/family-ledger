@@ -13,7 +13,7 @@ export const IS_INTERNAL_TRANSFER_SQL = "(t.is_internal_transfer or coalesce(an.
 // แต่ list ธุรกรรม (TXN_FILTER_SQL) ต้องไม่ใช้ตัวนี้ ผู้ใช้ต้องยังเห็น internal transfer ในตารางได้ (§8.3/§8.4)
 export const EXCLUDED_FROM_FLOW_SQL = `(${IS_INTERNAL_TRANSFER_SQL} or coalesce(an.classification, '') = 'excluded')`;
 
-const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+export const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function pad2(n: number): string {

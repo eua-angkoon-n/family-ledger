@@ -22,6 +22,7 @@ import {
 } from './gmail.js';
 import { parsers } from './parsers/index.js';
 import type { ScbStatement } from './parsers/scb.js';
+import { reconcilePayments } from './services/payment-reconciliation.js';
 import { suggestTransferMatches } from './services/transfer-matching.js';
 
 type Bank = {
@@ -117,6 +118,14 @@ async function doSync(emailAccountId: number, requestFull: boolean): Promise<Syn
     await suggestTransferMatches(pool, account.user_id);
   } catch (e) {
     console.error(`[worker] mailbox=${emailAccountId} suggestTransferMatches ล้มเหลว:`, e);
+  }
+
+  // §9.5: statement มาถึงแล้วจึงหา candidate ให้ Payment Declaration ที่ยังรออยู่ — idempotent
+  // เหมือนกัน และแยก try/catch ของตัวเอง ไม่ให้ความล้มเหลวของอันหนึ่งกินอีกอันหรือล้ม sync ทั้งรอบ
+  try {
+    await reconcilePayments(pool, account.user_id);
+  } catch (e) {
+    console.error(`[worker] mailbox=${emailAccountId} reconcilePayments ล้มเหลว:`, e);
   }
 
   return summary;

@@ -10,7 +10,9 @@ import CallMadeRounded from '@mui/icons-material/CallMadeRounded';
 import CategoryRounded from '@mui/icons-material/CategoryRounded';
 import ErrorOutlineRounded from '@mui/icons-material/ErrorOutlineRounded';
 import EventBusyRounded from '@mui/icons-material/EventBusyRounded';
+import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded';
 import FactCheckRounded from '@mui/icons-material/FactCheckRounded';
+import PaidRounded from '@mui/icons-material/PaidRounded';
 import SwapHorizRounded from '@mui/icons-material/SwapHorizRounded';
 import TrendingUpRounded from '@mui/icons-material/TrendingUpRounded';
 import {
@@ -19,6 +21,7 @@ import {
   type AccountCoverage,
   type CashFlow,
   type CategoryBreakdown,
+  type MonthlyPlan,
   type ReportSummary,
 } from '../api.js';
 import ChartCard from '../components/ChartCard.js';
@@ -50,6 +53,7 @@ export default function Dashboard() {
   const [cashFlow, setCashFlow] = useState<CashFlow | null>(null);
   const [balances, setBalances] = useState<AccountBalances | null>(null);
   const [coverage, setCoverage] = useState<AccountCoverage[]>([]);
+  const [plan, setPlan] = useState<MonthlyPlan | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const requestIdRef = useRef(0);
@@ -63,17 +67,20 @@ export default function Dashboard() {
     setCashFlow(null);
     setBalances(null);
     setCoverage([]);
+    setPlan(null);
     setLoading(true);
     setError('');
     void (async () => {
       const { from } = monthsBack(month, 6);
       const { to } = monthsBack(month, 1);
-      const [summaryR, breakdownR, cashFlowR, balancesR, coverageR] = await Promise.allSettled([
+      const [summaryR, breakdownR, cashFlowR, balancesR, coverageR, planR] = await Promise.allSettled([
         req<ReportSummary>(`/api/reports/summary?month=${month}`),
         req<CategoryBreakdown>(`/api/reports/category-breakdown?month=${month}`),
         req<CashFlow>(`/api/reports/cash-flow?from=${from}&to=${to}`),
         req<AccountBalances>(`/api/reports/account-balances?month=${month}`),
         req<{ rows: AccountCoverage[] }>('/api/reports/data-coverage'),
+        // การ์ดวางแผนอ่านจาก endpoint เดียวกับหน้า /planning เพื่อไม่ให้ตัวเลขสองที่คำนวณคนละสูตร
+        req<MonthlyPlan>(`/api/monthly-plans/${month}`),
       ]);
       if (requestId !== requestIdRef.current) return; // เปลี่ยนเดือนไปแล้วระหว่างรอ — ทิ้งผลลัพธ์ที่มาช้า
       const failures: string[] = [];
@@ -82,6 +89,7 @@ export default function Dashboard() {
       if (cashFlowR.status === 'fulfilled') setCashFlow(cashFlowR.value); else failures.push('แนวโน้มรายรับรายจ่าย');
       if (balancesR.status === 'fulfilled') setBalances(balancesR.value); else failures.push('แนวโน้มยอดคงเหลือ');
       if (coverageR.status === 'fulfilled') setCoverage(coverageR.value.rows); else failures.push('ความสดของข้อมูล');
+      if (planR.status === 'fulfilled') setPlan(planR.value); else failures.push('แผนรายเดือน');
       if (failures.length > 0) setError(`โหลดไม่สำเร็จ: ${failures.join(', ')}`);
       setLoading(false);
     })();
@@ -208,11 +216,38 @@ export default function Dashboard() {
             )}
           </Box>
 
-          <Box component="section" aria-labelledby="planning-heading">
-            <Typography variant="h2" id="planning-heading" sx={{ fontSize: '1.25rem', mb: 1.5 }}>การวางแผนรายเดือน</Typography>
+          <Box component="section" aria-labelledby="dashboard-planning-heading">
+            <Typography variant="h2" id="dashboard-planning-heading" sx={{ fontSize: '1.25rem', mb: 1.5 }}>การวางแผนรายเดือน</Typography>
             <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
-              <SummaryCard title="เงินเหลือใช้ตามแผน" value="" disabled disabledReason="รอ Slice 5 (วางแผนรายเดือน)" />
-              <SummaryCard title="สถานะการจ่ายบิล" value="" disabled disabledReason="รอ Slice 5 (วางแผนรายเดือน)" />
+              <SummaryCard
+                title="เงินเหลือใช้ตามแผน"
+                icon={<EventRepeatRounded fontSize="small" />}
+                value={<Money satang={plan?.totals.planned_available_satang ?? 0} tone={(plan?.totals.planned_available_satang ?? 0) < 0 ? 'expense' : 'income'} />}
+                caption="รายได้เต็ม − รายการหัก − รายจ่ายตามแผน − เงินกันไว้"
+                disabled={plan == null}
+                disabledReason="ยังไม่มีข้อมูลแผนของเดือนนี้"
+                onClick={() => navigate(`/planning?month=${month}`)}
+              />
+              <SummaryCard
+                title="สถานะการจ่ายบิล"
+                icon={<PaidRounded fontSize="small" />}
+                value={
+                  <>
+                    {(plan?.payment_status.verified_count ?? 0) + (plan?.payment_status.declared_count ?? 0)}
+                    <Box component="span" sx={{ color: 'text.secondary', fontSize: '1rem' }}>
+                      {` / ${plan?.payment_status.total_count ?? 0} รายการ`}
+                    </Box>
+                  </>
+                }
+                caption={
+                  plan == null
+                    ? undefined
+                    : `เกินกำหนด ${plan.payment_status.overdue_count} · จ่ายบางส่วน ${plan.payment_status.partial_count} · รอ statement ${plan.payment_status.declared_count}`
+                }
+                disabled={plan == null || plan.payment_status.total_count === 0}
+                disabledReason="ยังไม่มีรายการที่ต้องจ่ายในเดือนนี้"
+                onClick={() => navigate(`/planning?month=${month}`)}
+              />
             </Box>
           </Box>
 

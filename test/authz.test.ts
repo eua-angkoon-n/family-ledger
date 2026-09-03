@@ -443,4 +443,179 @@ test('cross-user authorization: Slice 4A endpoints', async (t) => {
     const body = (await res.json()) as { id: number };
     assert.equal(body.id, txnA);
   });
+
+  // ---- Slice 5: monthly planning / recurring rules — ADR-0002 ข้อ 7 บังคับให้ทุก endpoint ใหม่มี test นี้ ----
+  const post = (init: Record<string, unknown> = {}) => ({
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(init),
+  });
+  const now = new Date();
+  const PLAN_MONTH = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const PLAN_MONTH_START = `${PLAN_MONTH}-01`;
+
+  const planB = (
+    await db.pool.query<{ id: number }>(
+      `insert into monthly_plan (user_id, month_start) values ($1, $2) returning id`,
+      [userB, PLAN_MONTH_START],
+    )
+  ).rows[0]!.id;
+  const itemB = (
+    await db.pool.query<{ id: number }>(
+      `insert into monthly_plan_item (monthly_plan_id, kind, name, planned_amount_satang, category_id)
+       values ($1, 'expense', 'ค่าไฟของ B', 50000, $2) returning id`,
+      [planB, categoryB],
+    )
+  ).rows[0]!.id;
+  const paymentB = (
+    await db.pool.query<{ id: number }>(
+      `insert into monthly_item_payment (monthly_plan_item_id, amount_satang, paid_date, bank_account_id)
+       values ($1, 50000, $2, $3) returning id`,
+      [itemB, `${PLAN_MONTH}-05`, accountB],
+    )
+  ).rows[0]!.id;
+  const ruleB = (
+    await db.pool.query<{ id: number }>(
+      `insert into recurring_rule (user_id, name, kind, amount_satang, frequency_unit, start_date)
+       values ($1, 'ค่าเช่าของ B', 'expense', 100000, 'month', $2) returning id`,
+      [userB, PLAN_MONTH_START],
+    )
+  ).rows[0]!.id;
+
+  await t.test('17. GET /api/monthly-plans/:month — A ไม่เห็นแผนหรือรายการของ B แม้เดือนเดียวกัน', async () => {
+    await loginAs(userA);
+    const res = await request(`/api/monthly-plans/${PLAN_MONTH}?user_id=${userB}`);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { items: { id: number }[]; totals: { planned_expense_satang: number } };
+    assert.ok(!body.items.some((i) => i.id === itemB));
+    assert.equal(body.totals.planned_expense_satang, 0);
+  });
+
+  await t.test('18. POST /api/monthly-plans/:month/items — รายการใหม่เข้าแผนของผู้ login ไม่ใช่ของ B', async () => {
+    await loginAs(userA);
+    const res = await request(
+      `/api/monthly-plans/${PLAN_MONTH}/items`,
+      post({ kind: 'expense', name: 'ของ A', planned_amount_satang: 1000, monthly_plan_id: planB, user_id: userB }),
+    );
+    assert.equal(res.status, 201);
+    const created = (await res.json()) as { monthly_plan_id: number };
+    assert.notEqual(created.monthly_plan_id, planB);
+    const bItems = await db.pool.query<{ n: number }>(
+      'select count(*)::int as n from monthly_plan_item where monthly_plan_id = $1',
+      [planB],
+    );
+    assert.equal(bItems.rows[0]!.n, 1);
+  });
+
+  await t.test('19. PATCH/skip/payments บน monthly_plan_item ของ B — A แตะไม่ได้ (404)', async () => {
+    await loginAs(userA);
+    assert.equal((await request(`/api/monthly-plan-items/${itemB}`, json({ name: 'แก้ของ B' }))).status, 404);
+    assert.equal((await request(`/api/monthly-plan-items/${itemB}/skip`, post())).status, 404);
+    assert.equal(
+      (
+        await request(
+          `/api/monthly-plan-items/${itemB}/payments`,
+          post({ amount_satang: 100, paid_date: `${PLAN_MONTH}-06`, bank_account_id: accountA }),
+        )
+      ).status,
+      404,
+    );
+    const untouched = await db.pool.query<{ name: string; explicit_status: string }>(
+      'select name, explicit_status from monthly_plan_item where id = $1',
+      [itemB],
+    );
+    assert.equal(untouched.rows[0]!.name, 'ค่าไฟของ B');
+    assert.equal(untouched.rows[0]!.explicit_status, 'active');
+  });
+
+  await t.test('20. mark paid ด้วย bank_account ของ B บนรายการของตัวเองไม่ได้ (400 — กัน IDOR)', async () => {
+    await loginAs(userA);
+    const ownItem = (await request(
+      `/api/monthly-plans/${PLAN_MONTH}/items`,
+      post({ kind: 'expense', name: 'ค่าไฟของ A', planned_amount_satang: 50000 }),
+    ).then((r) => r.json())) as { id: number };
+    const res = await request(
+      `/api/monthly-plan-items/${ownItem.id}/payments`,
+      post({ amount_satang: 50000, paid_date: `${PLAN_MONTH}-05`, bank_account_id: accountB }),
+    );
+    assert.equal(res.status, 400);
+    const leaked = await db.pool.query<{ n: number }>(
+      'select count(*)::int as n from monthly_item_payment where bank_account_id = $1',
+      [accountB],
+    );
+    assert.equal(leaked.rows[0]!.n, 1); // มีแต่ paymentB ที่ seed ไว้
+  });
+
+  await t.test('21. PATCH /api/monthly-item-payments/:id — ของ B แตะไม่ได้ และผูก txn ของ B ไม่ได้', async () => {
+    await loginAs(userA);
+    assert.equal((await request(`/api/monthly-item-payments/${paymentB}`, json({ status: 'cancelled' }))).status, 404);
+    assert.equal((await request(`/api/monthly-item-payments/${paymentB}`, json({ txn_id: txnB }))).status, 404);
+
+    const ownItem = (await request(
+      `/api/monthly-plans/${PLAN_MONTH}/items`,
+      post({ kind: 'expense', name: 'ค่าน้ำของ A', planned_amount_satang: 20000 }),
+    ).then((r) => r.json())) as { id: number };
+    const ownPayment = (await request(
+      `/api/monthly-plan-items/${ownItem.id}/payments`,
+      post({ amount_satang: 20000, paid_date: `${PLAN_MONTH}-07`, bank_account_id: accountA }),
+    ).then((r) => r.json())) as { id: number };
+    // txn ของ B ยอดเท่ากันพอดี (20000) — ต้องถูกปฏิเสธเพราะเป็นของคนอื่นและอยู่คนละบัญชี
+    assert.equal((await request(`/api/monthly-item-payments/${ownPayment.id}`, json({ txn_id: txnB }))).status, 400);
+    const stillUnmatched = await db.pool.query<{ status: string; txn_id: number | null }>(
+      'select status, txn_id from monthly_item_payment where id = $1',
+      [ownPayment.id],
+    );
+    assert.equal(stillUnmatched.rows[0]!.txn_id, null);
+  });
+
+  await t.test('22. reconcilePayments ของ A ไม่แตะ payment ของ B ที่ยอด/วันตรงกับ txn ของ B', async () => {
+    const { reconcilePayments } = await import('../src/services/payment-reconciliation.js');
+    const { pool } = await import('../src/db.js');
+    // txnB เป็น debit 20000 วันที่ 2026-08-15 — ปรับ payment ของ B ให้ตรงเป๊ะ เพื่อให้จับคู่ได้ถ้า scope รั่ว
+    await db.pool.query(
+      `update monthly_item_payment set amount_satang = 20000, paid_date = '2026-08-15' where id = $1`,
+      [paymentB],
+    );
+    await reconcilePayments(pool, userA);
+    const b = await db.pool.query<{ status: string; txn_id: number | null }>(
+      'select status, txn_id from monthly_item_payment where id = $1',
+      [paymentB],
+    );
+    assert.equal(b.rows[0]!.status, 'declared');
+    assert.equal(b.rows[0]!.txn_id, null);
+  });
+
+  await t.test('23. close/reopen มีผลเฉพาะแผนของผู้ login', async () => {
+    await loginAs(userA);
+    assert.equal((await request(`/api/monthly-plans/${PLAN_MONTH}/close`, post())).status, 200);
+    const bStatus = await db.pool.query<{ status: string }>('select status from monthly_plan where id = $1', [planB]);
+    assert.equal(bStatus.rows[0]!.status, 'open');
+    assert.equal((await request(`/api/monthly-plans/${PLAN_MONTH}/reopen`, post())).status, 200);
+  });
+
+  await t.test('24. recurring rules — A ไม่เห็น/แก้/archive ของ B และอ้างบัญชีหรือหมวดของ B ไม่ได้', async () => {
+    await loginAs(userA);
+    const list = (await request('/api/recurring-rules').then((r) => r.json())) as { id: number }[];
+    assert.ok(!list.some((r) => r.id === ruleB));
+    assert.equal((await request(`/api/recurring-rules/${ruleB}`, json({ name: 'แก้ของ B' }))).status, 404);
+    assert.equal((await request(`/api/recurring-rules/${ruleB}/archive`, post())).status, 404);
+
+    const base = { kind: 'expense', amount_satang: 100, frequency_unit: 'month', start_date: PLAN_MONTH_START };
+    assert.equal(
+      (await request('/api/recurring-rules', post({ ...base, name: 'อ้างบัญชีคนอื่น', default_account_id: accountB })))
+        .status,
+      400,
+    );
+    assert.equal(
+      (await request('/api/recurring-rules', post({ ...base, name: 'อ้างหมวดคนอื่น', category_id: categoryB }))).status,
+      400,
+    );
+
+    const untouched = await db.pool.query<{ name: string; is_active: boolean }>(
+      'select name, is_active from recurring_rule where id = $1',
+      [ruleB],
+    );
+    assert.equal(untouched.rows[0]!.name, 'ค่าเช่าของ B');
+    assert.equal(untouched.rows[0]!.is_active, true);
+  });
 });

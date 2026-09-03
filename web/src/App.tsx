@@ -20,6 +20,7 @@ import {
 import AccountBalanceWalletRounded from '@mui/icons-material/AccountBalanceWalletRounded';
 import AccountBalanceRounded from '@mui/icons-material/AccountBalanceRounded';
 import AssessmentRounded from '@mui/icons-material/AssessmentRounded';
+import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded';
 import BlockRounded from '@mui/icons-material/BlockRounded';
 import HourglassTopRounded from '@mui/icons-material/HourglassTopRounded';
 import LoginRounded from '@mui/icons-material/LoginRounded';
@@ -35,12 +36,14 @@ import { FeedbackSnackbar, PageHeader, TableSkeleton, type Notice } from './ui.j
 // แยก chunk เฉพาะ Dashboard — เป็นหน้าเดียวที่ดึง @mui/x-charts (~600KB) เข้ามา หน้าอื่นไม่ต้องรอโหลดมันด้วย
 const Dashboard = lazy(() => import('./pages/Dashboard.js'));
 const Transactions = lazy(() => import('./pages/Transactions.js'));
+const MonthlyPlan = lazy(() => import('./pages/MonthlyPlan.js'));
 
 type SettingsTab = 'banks' | 'users';
 
 const NAV_ITEMS = [
   { path: '/dashboard', label: 'แดชบอร์ด', icon: <AssessmentRounded /> },
   { path: '/transactions', label: 'ธุรกรรม', icon: <ReceiptLongRounded /> },
+  { path: '/planning', label: 'วางแผน', icon: <EventRepeatRounded /> },
   { path: '/accounts', label: 'บัญชีของฉัน', icon: <AccountBalanceRounded /> },
 ] as const;
 
@@ -277,6 +280,7 @@ export default function App() {
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Box component="section" aria-labelledby="dashboard-heading"><Dashboard /></Box>} />
             <Route path="/transactions" element={<Box component="section" aria-labelledby="transactions-heading"><Transactions /></Box>} />
+            <Route path="/planning" element={<Box component="section" aria-labelledby="planning-heading"><MonthlyPlan /></Box>} />
             <Route path="/accounts" element={<Box component="section" aria-labelledby="accounts-heading"><Accounts /></Box>} />
             {user.is_admin && <Route path="/settings" element={<SettingsPage userId={user.id} />} />}
             <Route path="*" element={<Navigate to="/dashboard" replace />} />

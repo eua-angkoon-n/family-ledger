@@ -8,17 +8,19 @@ export function currentMonth(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
-function shiftMonth(month: string, delta: number): string {
+export function shiftMonth(month: string, delta: number): string {
   const [y, m] = month.split('-').map(Number);
   const d = new Date(Date.UTC(y!, m! - 1 + delta, 1));
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
-type MonthPickerProps = { value: string; onChange: (month: string) => void };
+// maxMonth: หน้าแดชบอร์ด/ธุรกรรมดูได้ถึงเดือนปัจจุบัน (ไม่มีข้อมูลจริงของอนาคต) แต่หน้าวางแผน
+// ต้องเลือกเดือนข้างหน้าได้ (API จำกัดไว้ 12 เดือน) จึงส่งค่ามาทับได้
+type MonthPickerProps = { value: string; onChange: (month: string) => void; maxMonth?: string };
 
 // input[type=month] ของเบราว์เซอร์เอง — ไม่ต้องพึ่ง date picker library (§8.1: เปิดที่เดือนปัจจุบัน เลือกย้อนหลังได้)
-export default function MonthPicker({ value, onChange }: MonthPickerProps) {
-  const max = currentMonth();
+export default function MonthPicker({ value, onChange, maxMonth }: MonthPickerProps) {
+  const max = maxMonth ?? currentMonth();
   return (
     <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
       <Tooltip title="เดือนก่อนหน้า">

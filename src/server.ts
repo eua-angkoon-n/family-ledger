@@ -48,6 +48,9 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   const code = (err as { code?: string }).code;
   if (code === '23505') return void res.status(409).json({ error: 'ข้อมูลซ้ำกับที่มีอยู่แล้ว' });
   if (code === '23503') return void res.status(409).json({ error: 'ยังมีข้อมูลอื่นอ้างถึงอยู่ ลบไม่ได้' });
+  // CHECK constraint ที่ DB บังคับ (เช่น end_date < start_date, month_start ไม่ใช่วันที่ 1) เป็นข้อมูล
+  // ที่ผู้ใช้ส่งมาผิด ไม่ใช่บั๊กของระบบ — 400 ไม่ใช่ 500 route ที่มีข้อความเฉพาะเจาะจงกว่านี้ตรวจเองก่อนอยู่แล้ว
+  if (code === '23514') return void res.status(400).json({ error: 'ข้อมูลไม่ผ่านเงื่อนไขของระบบ' });
   console.error(err);
   res.status(500).json({ error: 'เกิดข้อผิดพลาดในระบบ' });
 });

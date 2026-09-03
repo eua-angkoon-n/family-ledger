@@ -209,3 +209,89 @@ export type AccountBalanceRow = { bank_account_id: number; account_nickname: str
 export type AccountBalances = { from: string; to: string; rows: AccountBalanceRow[]; data_coverage_note: string };
 
 export type DataCoverage = { rows: AccountCoverage[]; data_coverage_note: string };
+
+export type PlanKind = 'income' | 'payroll_deduction' | 'expense' | 'reserve';
+export type PaymentState = 'unpaid' | 'overdue' | 'partial' | 'declared' | 'verified' | 'skipped' | 'cancelled';
+export type PaymentRowStatus = 'declared' | 'matched' | 'needs_review' | 'cancelled';
+
+export type PlanItemPayment = {
+  id: number;
+  amount_satang: number;
+  paid_date: string;
+  bank_account_id: number;
+  account_nickname: string;
+  txn_id: number | null;
+  status: PaymentRowStatus;
+  verified_at: string | null;
+};
+
+export type PlanItem = {
+  id: number;
+  recurring_rule_id: number | null;
+  installment_due_id: number | null;
+  kind: PlanKind;
+  name: string;
+  category_id: number | null;
+  category_name: string | null;
+  planned_amount_satang: number;
+  due_date: string | null;
+  explicit_status: 'active' | 'skipped' | 'cancelled';
+  note: string | null;
+  paid_satang: number;
+  matched_satang: number;
+  needs_review_count: number;
+  payment_state: PaymentState;
+  payments: PlanItemPayment[];
+};
+
+export type PlanTotals = {
+  planned_income_satang: number;
+  planned_deduction_satang: number;
+  planned_expense_satang: number;
+  planned_reserve_satang: number;
+  planned_available_satang: number;
+};
+
+export type PaymentStatusSummary = {
+  total_count: number;
+  total_due_satang: number;
+  paid_satang: number;
+  unpaid_count: number;
+  overdue_count: number;
+  partial_count: number;
+  declared_count: number;
+  verified_count: number;
+  needs_review_count: number;
+};
+
+export type MonthlyPlan = {
+  month: string;
+  month_start: string;
+  status: 'open' | 'closed';
+  closed_at: string | null;
+  // ภาพ ณ วันปิดเดือน เก็บไว้เพื่อ audit เท่านั้น — หน้าจออ่าน totals/payment_status/items ที่คำนวณสดเสมอ
+  closed_snapshot: { totals: PlanTotals; payment_status: PaymentStatusSummary } | null;
+  generated_item_count: number;
+  totals: PlanTotals;
+  payment_status: PaymentStatusSummary;
+  items: PlanItem[];
+  data_coverage_note: string;
+};
+
+export type RecurringRule = {
+  id: number;
+  name: string;
+  kind: PlanKind;
+  amount_mode: 'fixed' | 'estimated';
+  amount_satang: number;
+  frequency_unit: 'day' | 'week' | 'month' | 'year';
+  frequency_interval: number;
+  anchor_day: number | null;
+  start_date: string;
+  end_date: string | null;
+  default_account_id: number | null;
+  default_account_nickname: string | null;
+  category_id: number | null;
+  category_name: string | null;
+  is_active: boolean;
+};
