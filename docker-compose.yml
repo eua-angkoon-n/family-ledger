@@ -6,6 +6,9 @@ services:
       POSTGRES_DB: ledger
       POSTGRES_USER: ledger
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?ต้องตั้งใน .env}
+      # ponytail: ทั้งบ้านอยู่โซนเวลาเดียว current_date จึงยึด Asia/Bangkok ตรงนี้พอ
+      # ถ้าวันไหนมีผู้ใช้ต่างโซนเวลา ค่อยเปลี่ยนไปเก็บ tz ต่อ user + at time zone ในคิวรีแทน
+      TZ: Asia/Bangkok
     volumes:
       - pgdata:/var/lib/postgresql/data
     # ไม่ publish port ออกมาเลย — เข้าถึงได้จากเครือข่าย compose เท่านั้น
@@ -23,6 +26,8 @@ services:
       DATABASE_URL: postgres://ledger:${POSTGRES_PASSWORD}@db:5432/ledger
       NODE_ENV: development
       PDF_STORAGE_DIR: /app/data/pdf
+      # ponytail: เดียวกับ db — ครอบครัวเดียวโซนเวลาเดียวพอ, per-user tz ค่อยทำถ้าจำเป็นจริง
+      TZ: Asia/Bangkok
     # ผูกกับ loopback เท่านั้น — iptables ของ Docker ข้าม UFW ถ้าเผลอ publish 0.0.0.0 จะเปิดสู่อินเทอร์เน็ต
     ports:
       - "127.0.0.1:3001:3000"

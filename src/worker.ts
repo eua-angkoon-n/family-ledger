@@ -4,7 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { findMaskedAccountCandidates, resolveAccount } from './account-match.js';
 import { decrypt } from './crypto.js';
-import { query, tx } from './db.js';
+import { pool, query, tx } from './db.js';
 import { env } from './env.js';
 import {
   GmailHistoryStaleError,
@@ -20,7 +20,9 @@ import {
   refreshAccessToken,
   type GmailPayload,
 } from './gmail.js';
-import { parseScbStatement, type ScbStatement } from './parsers/scb.js';
+import { parsers } from './parsers/index.js';
+import type { ScbStatement } from './parsers/scb.js';
+import { suggestTransferMatches } from './services/transfer-matching.js';
 
 type Bank = {
   id: number;
@@ -65,8 +67,8 @@ async function fullSync(accessToken: string, banks: Bank[]): Promise<{ messageId
 async function doSync(emailAccountId: number, requestFull: boolean): Promise<SyncSummary> {
   const summary: SyncSummary = { messages_scanned: 0, statements_inserted: 0, skipped: 0 };
 
-  const { rows } = await query<{ id: number; refresh_token_enc: string; history_id: string | null }>(
-    'select id, refresh_token_enc, history_id from email_account where id = $1',
+  const { rows } = await query<{ id: number; user_id: number; refresh_token_enc: string; history_id: string | null }>(
+    'select id, user_id, refresh_token_enc, history_id from email_account where id = $1',
     [emailAccountId],
   );
   const account = rows[0];
@@ -108,6 +110,15 @@ async function doSync(emailAccountId: number, requestFull: boolean): Promise<Syn
     emailAccountId,
     sync.historyId,
   ]);
+
+  // หา candidate คู่โอนภายในหลังเขียน txn ของรอบนี้เสร็จ — idempotent (กัน insert ซ้ำเองใน query)
+  // ไม่ผูกกับ tx() ของ statement ไหนโดยเฉพาะ พังแล้วไม่ควรทำให้ sync รอบนี้ fail ทั้งรอบ
+  try {
+    await suggestTransferMatches(pool, account.user_id);
+  } catch (e) {
+    console.error(`[worker] mailbox=${emailAccountId} suggestTransferMatches ล้มเหลว:`, e);
+  }
+
   return summary;
 }
 
@@ -266,14 +277,15 @@ async function writeScbStatement(
     for (const transaction of parsed.transactions) {
       const result = await client.query(
         `insert into txn (
-           statement_id, bank_account_id, txn_date, description, channel,
+           statement_id, bank_account_id, txn_date, txn_time, description, channel,
            amount_satang, direction, running_balance_satang
-         ) values ($1, $2, $3, $4, $5, $6, $7, $8)
+         ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          on conflict (bank_account_id, txn_date, amount_satang, running_balance_satang) do nothing`,
         [
           statementId,
           bankAccountId,
           transaction.txnDate,
+          transaction.txnTime,
           transaction.description,
           transaction.channel,
           transaction.amountSatang,
@@ -320,7 +332,8 @@ async function processMessage(
 
   const candidates = (
     await query<BankAccountCandidate>(
-      'select id, bank_id, account_number, pdf_password_enc from bank_account where email_account_id = $1 and bank_id = $2',
+      // archived_at is not null = ผู้ใช้เก็บบัญชีเข้าคลังแล้ว หยุดรับ statement ใหม่ (ประวัติเดิมยังอยู่ครบ)
+      'select id, bank_id, account_number, pdf_password_enc from bank_account where email_account_id = $1 and bank_id = $2 and archived_at is null',
       [emailAccountId, bank.id],
     )
   ).rows;
@@ -362,10 +375,11 @@ async function processMessage(
         continue;
       }
 
-      if (bank.parser_key === 'scb') {
+      const parseFn = parsers[bank.parser_key as keyof typeof parsers];
+      if (parseFn) {
         let parsed: ScbStatement;
         try {
-          parsed = parseScbStatement(extracted.text);
+          parsed = parseFn(extracted.text);
         } catch (error) {
           const filenameAccount = resolveAccount(candidates, attachment.filename);
           const failedAccount = candidates.length === 1 ? account : filenameAccount;

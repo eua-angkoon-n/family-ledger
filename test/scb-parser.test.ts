@@ -26,11 +26,19 @@ function assertJuneStatement(parsed: ReturnType<typeof parseScbStatement>): void
   );
 }
 
+function assertJuneTxnTimes(parsed: ReturnType<typeof parseScbStatement>, expected: (string | null)[]): void {
+  assert.deepEqual(
+    parsed.transactions.map((t) => t.txnTime),
+    expected,
+  );
+}
+
 test('SCB รายเดือน: แกะปี พ.ศ. บัญชีปิดบัง และคอลัมน์ถอน/ฝาก', () => {
   const parsed = parseScbStatement(monthly);
   assert.equal(parsed.accountNumber, 'XXXX567890');
   assert.equal(parsed.layout, 'monthly');
   assertJuneStatement(parsed);
+  assertJuneTxnTimes(parsed, ['00:00:00', '10:22:00', '10:36:00']);
 });
 
 test('SCB ย้อนหลัง: แกะช่วงเวลา บัญชีเต็ม และอนุมาน debit/credit จาก running balance', () => {
@@ -38,6 +46,7 @@ test('SCB ย้อนหลัง: แกะช่วงเวลา บัญ�
   assert.equal(parsed.accountNumber, '123-456789-0');
   assert.equal(parsed.layout, 'ondemand');
   assertJuneStatement(parsed);
+  assertJuneTxnTimes(parsed, ['00:00', '10:22', '10:36']);
 });
 
 test('SCB checksum: ตัวเลขรายการผิดหนึ่งสตางค์ต้องไม่ผ่าน gate', () => {
@@ -65,6 +74,7 @@ test('SCB ย้อนหลังรุ่นเก่า: code/channel อย�
   assert.equal(parsed.accountNumber, '123-456789-0');
   assert.equal(parsed.transactions.length, 2);
   assert.deepEqual(parsed.transactions.map((txn) => txn.direction), ['credit', 'debit']);
+  assert.deepEqual(parsed.transactions.map((txn) => txn.txnTime), ['17:43', '17:56']);
   assert.equal(parsed.checksumValid, true);
 });
 

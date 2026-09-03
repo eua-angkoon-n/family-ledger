@@ -46,8 +46,16 @@ Gmail (poll ชั่วโมงละครั้ง)
 | `src/gmail.ts` | Gmail REST (`fetch` ดิบ) + ด่าน DKIM + เลือกไฟล์แนบ PDF |
 | `src/parsers/scb.ts` | แกะ SCB statement ทั้งแบบรายเดือนและย้อนหลัง + checksum gate |
 | `src/worker.ts` | worker ชั่วโมงละครั้ง: sync กล่องอีเมล → ถอดรหัส PDF → parse → เขียน statement/txn แบบ atomic |
-| `src/api.ts` | REST ทั้งหมด |
-| `web/` | React (Vite) — แท็บบัญชีของฉัน / ธนาคาร (แอดมิน) / ผู้ใช้ (แอดมิน) |
+| `src/api.ts` | ประกอบ router ย่อย + `/me` |
+| `src/http.ts` | `HttpError` และ helper ตรวจ body ที่ router ใช้ร่วมกัน |
+| `src/routes/*.ts` | handler REST แยกตามโดเมน (banks, admin, email-accounts, accounts, categories, transactions, transfer-matches, reports) |
+| `src/services/transfer-matching.ts` | หา candidate คู่โอนภายในให้ user (logic ข้ามตารางแยกจาก route ตาม ADR-0002) |
+| `src/services/report-query.ts` | SQL fragment ร่วมของรายงาน/รายการธุรกรรม (`OWNED_TXN_FROM`, `TXN_FILTER_SQL`, `parseRange`, `accountCoverage`) |
+| `src/parsers/index.ts` | registry `parser_key` → ฟังก์ชัน parse (ใช้ร่วมกันทั้ง `src/routes/banks.ts` และ `src/worker.ts`) |
+| `web/` | React (Vite), router คือ `react-router-dom` (`App.tsx` ครอบ auth gate ไว้ข้างนอก `<Routes>`) |
+| `web/src/pages/Dashboard.tsx` | สรุปเงินเข้า/ออก/คงเหลือ + 3 กราฟ (`@mui/x-charts`) ต่อเดือน คลิก segment ไป `/transactions` ตาม contract ใน `report-query.ts` |
+| `web/src/pages/Transactions.tsx` | ตารางธุรกรรม filter ผ่าน URL (`useSearchParams`), เปิด `ReviewDrawer` ต่อแถว |
+| `web/src/components/` | ส่วนใช้ร่วมของ Dashboard/Transactions — `Money`/`MonthPicker`/`SummaryCard`/`ChartCard`/`TransactionTable`/`DataFreshness`/`ReviewDrawer` |
 
 ## สั่งงาน
 
@@ -55,7 +63,11 @@ Gmail (poll ชั่วโมงละครั้ง)
 npm run migrate     # รัน migration (แอปรันให้เองตอนบูตอยู่แล้ว)
 npm run dev:api     # API ที่ :3000
 npm run dev:web     # Vite ที่ :5173 (proxy /api และ /auth ไป :3000)
-npm test            # node:test — crypto + account-match + gmail + SCB parser/checksum
+npm test            # node:test — unit เท่านั้น (crypto, account-match, gmail, SCB parser/checksum)
+npm run test:db     # เหมือนกัน + migration roll-forward, ledger classification API, cross-user
+                    # authorization — ต่อ Postgres จริงผ่าน docker-compose.test.yml (127.0.0.1:5433)
+                    # ไม่มีคำสั่งนี้ = 4 suite นี้ถูก skip เงียบ ๆ ใน `npm test` ห้ามถือว่า
+                    # "test ผ่านหมด" จนกว่าจะรัน test:db แล้วเขียวจริง
 npm run build       # tsc + vite build
 ```
 

@@ -3,10 +3,11 @@ import { dirname, join } from 'node:path';
 import connectPgSimple from 'connect-pg-simple';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import session from 'express-session';
-import { api, HttpError } from './api.js';
+import { api } from './api.js';
 import { authRouter } from './auth.js';
 import { pool } from './db.js';
 import { env } from './env.js';
+import { HttpError } from './http.js';
 import { migrate } from './migrate.js';
 import { startWorker } from './worker.js';
 

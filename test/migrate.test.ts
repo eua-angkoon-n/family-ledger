@@ -1,0 +1,148 @@
+import assert from 'node:assert/strict';
+import { readdir } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import test from 'node:test';
+import { createTestDb } from './helpers/db.js';
+
+const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'migrations');
+
+async function migrationFiles(): Promise<string[]> {
+  return (await readdir(MIGRATIONS_DIR)).filter((f) => f.endsWith('.sql')).sort();
+}
+
+// §13: ทุก migration ต้อง roll-forward ได้ทั้งบน DB ใหม่และ DB ที่มีข้อมูลเดิมอยู่แล้ว
+test('migrate() roll-forward', async (t) => {
+  const db = await createTestDb();
+  if (db.skip) {
+    t.skip(db.reason);
+    return;
+  }
+  t.after(db.cleanup);
+
+  let seededBankAccountId: number;
+  let seededTxnId: number;
+
+  await t.test('applies every migration file on a brand-new database', async () => {
+    const files = await migrationFiles();
+    const applied = await db.migrate();
+    assert.deepEqual(applied, files);
+
+    const { rows } = await db.pool.query('select filename from schema_migration order by filename');
+    assert.deepEqual(rows.map((r) => r.filename), files);
+  });
+
+  await t.test('continues from a mid-point database that already has real data', async () => {
+    // กลับไปเป็น DB ว่างสนิทอีกครั้ง (ยังใช้ pool/scratch database เดิม — ดู comment ใน helpers/db.ts)
+    await db.pool.query('drop schema public cascade; create schema public;');
+
+    const upTo = '004_statement_pdf_fingerprint.sql';
+    const files = await migrationFiles();
+    const partial = await db.migrate({ upTo });
+    assert.deepEqual(partial, files.filter((f) => f <= upTo));
+
+    // seed ข้อมูลจริงลงตารางที่มีอยู่แล้ว ก่อนรัน migration ที่เหลือ (005+ เมื่อมีในอนาคต)
+    const user = await db.pool.query<{ id: number }>(
+      `insert into app_user (google_sub, email, display_name, is_admin, status)
+       values ('google-sub-1', 'member@example.com', 'Family Member', false, 'approved')
+       returning id`,
+    );
+    const userId = user.rows[0]!.id;
+
+    const emailAccount = await db.pool.query<{ id: number }>(
+      `insert into email_account (user_id, email, refresh_token_enc)
+       values ($1, 'member@example.com', 'enc:refresh-token')
+       returning id`,
+      [userId],
+    );
+    const emailAccountId = emailAccount.rows[0]!.id;
+
+    // migration 003 มาพร้อมแถวธนาคาร SCB ให้อยู่แล้ว (bank_name_uniq กันชื่อซ้ำ) — ใช้แถวนั้นแทนการ insert ใหม่
+    const bank = await db.pool.query<{ id: number }>(`select id from bank where lower(name) = 'scb'`);
+    const bankId = bank.rows[0]!.id;
+
+    const bankAccount = await db.pool.query<{ id: number }>(
+      `insert into bank_account (user_id, bank_id, email_account_id, nickname, account_number, pdf_password_enc)
+       values ($1, $2, $3, 'บัญชีหลัก', 'xxx-x-x6231-x', 'enc:pdf-password')
+       returning id`,
+      [userId, bankId, emailAccountId],
+    );
+    const bankAccountId = bankAccount.rows[0]!.id;
+    seededBankAccountId = bankAccountId;
+
+    const statement = await db.pool.query<{ id: number }>(
+      `insert into statement (bank_account_id, gmail_message_id, gmail_attachment_id, period_start, period_end, status)
+       values ($1, 'gmail-msg-1', 'gmail-att-1', '2026-08-01', '2026-08-31', 'parsed')
+       returning id`,
+      [bankAccountId],
+    );
+    const statementId = statement.rows[0]!.id;
+
+    const txn = await db.pool.query<{ id: number }>(
+      `insert into txn (statement_id, bank_account_id, txn_date, description, amount_satang, direction, running_balance_satang)
+       values ($1, $2, '2026-08-15', 'โอนเงินเข้า', 10000, 'credit', 500000)
+       returning id`,
+      [statementId, bankAccountId],
+    );
+    seededTxnId = txn.rows[0]!.id;
+
+    const rest = await db.migrate();
+    assert.deepEqual(rest, files.filter((f) => f > upTo));
+
+    // ข้อมูลที่ seed ไว้ต้องยังอยู่ครบหลัง migrate ต่อจากจุดกลางทาง
+    const txnCount = await db.pool.query('select count(*)::int as n from txn');
+    assert.equal(txnCount.rows[0]!.n, 1);
+  });
+
+  // 005: หมวดระบบต้องถูก seed, archive แล้วเพิ่มเลขบัญชีเดิมซ้ำได้, confirmed transfer ต่อ txn ได้แค่คู่เดียว
+  await t.test('005 seeds categories and enforces its new constraints', async () => {
+    const categories = await db.pool.query<{ n: number }>(
+      "select count(*)::int as n from category where is_system = true and user_id is null",
+    );
+    assert.equal(categories.rows[0]!.n, 13);
+
+    const account = (
+      await db.pool.query<{ user_id: number; bank_id: number; email_account_id: number; account_number: string }>(
+        'select user_id, bank_id, email_account_id, account_number from bank_account where id = $1',
+        [seededBankAccountId],
+      )
+    ).rows[0]!;
+
+    const duplicateWhileActive = db.pool.query(
+      `insert into bank_account (user_id, bank_id, email_account_id, nickname, account_number, pdf_password_enc)
+       values ($1, $2, $3, 'ซ้ำ', $4, 'enc:x')`,
+      [account.user_id, account.bank_id, account.email_account_id, account.account_number],
+    );
+    await assert.rejects(duplicateWhileActive);
+
+    await db.pool.query('update bank_account set archived_at = now() where id = $1', [seededBankAccountId]);
+
+    const reinserted = await db.pool.query<{ id: number }>(
+      `insert into bank_account (user_id, bank_id, email_account_id, nickname, account_number, pdf_password_enc)
+       values ($1, $2, $3, 'บัญชีใหม่', $4, 'enc:y') returning id`,
+      [account.user_id, account.bank_id, account.email_account_id, account.account_number],
+    );
+    assert.ok(reinserted.rows[0]!.id > 0);
+
+    const otherTxn = await db.pool.query<{ id: number }>(
+      `insert into txn (statement_id, bank_account_id, txn_date, description, amount_satang, direction, running_balance_satang)
+       values ((select statement_id from txn where id = $1), $2, '2026-08-16', 'โอนออกภายใน', 20000, 'debit', 480000)
+       returning id`,
+      [seededTxnId, seededBankAccountId],
+    );
+    const otherTxnId = otherTxn.rows[0]!.id;
+
+    await db.pool.query(
+      `insert into transfer_match (user_id, debit_txn_id, credit_txn_id, status, matched_by)
+       values ($1, $2, $3, 'confirmed', 'system')`,
+      [account.user_id, otherTxnId, seededTxnId],
+    );
+
+    const secondConfirmedForSameDebit = db.pool.query(
+      `insert into transfer_match (user_id, debit_txn_id, credit_txn_id, status, matched_by)
+       values ($1, $2, $3, 'confirmed', 'user')`,
+      [account.user_id, otherTxnId, seededTxnId],
+    );
+    await assert.rejects(secondConfirmedForSameDebit);
+  });
+});

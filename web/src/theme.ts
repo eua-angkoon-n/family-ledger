@@ -11,6 +11,22 @@ export const colors = {
   expense: '#f3625d',
 } as const;
 
+// palette เชิงหมวดหมู่สำหรับกราฟที่มีหลายอนุกรม (เช่น สัดส่วนค่าใช้จ่ายต่อหมวด) — accent/income/expense สงวนไว้
+// สำหรับความหมายของมันเองตาม DESIGN.md เท่านั้น (Restrained Accent Rule) เลี่ยง hue ของทั้งสามค่านี้
+// ±20° เสมอ (accent H≈255, income H≈155, expense H≈25 — คำนวณจาก DESIGN.md ผ่าน OKLCH) คงค่า L/C
+// ให้เท่ากันแล้วหมุนแค่ hue เพื่อความกลมกลืนเชิงการรับรู้ (colorize.md) ทุก slice ยังต้องมี label กำกับเสมอ
+// (Semantic Color Rule) สีเดี่ยว ๆ ไม่เคยสื่อความหมายพอในตัวเอง
+export const categoryPalette = [
+  'oklch(72% 0.14 65)',
+  'oklch(72% 0.14 95)',
+  'oklch(72% 0.14 125)',
+  'oklch(72% 0.14 190)',
+  'oklch(72% 0.14 215)',
+  'oklch(72% 0.14 295)',
+  'oklch(72% 0.14 320)',
+  'oklch(72% 0.14 345)',
+] as const;
+
 export const fontFamilies = {
   copy: '"iannnnn-DOG", "Noto Sans Thai", system-ui, sans-serif',
   data: 'system-ui, "Noto Sans Thai", sans-serif',

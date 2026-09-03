@@ -5,6 +5,10 @@ import { env } from './env.js';
 // ponytail: เพดานคือ ~90 ล้านล้านบาท ถ้าวันไหนถึง ค่อยเปลี่ยนไปใช้ BigInt ทั้งเส้น
 pg.types.setTypeParser(pg.types.builtins.INT8, (v) => Number(v));
 
+// pg คืน DATE เป็น JS Date เที่ยงคืน local time โดย default — JSON.stringify แปลงเป็น UTC ทำ
+// txn_date เพี้ยนไปหนึ่งวันบนเครื่องโซนเวลา Bangkok (UTC+7) คืนเป็น string ดิบ 'YYYY-MM-DD' แทน
+pg.types.setTypeParser(pg.types.builtins.DATE, (v) => v);
+
 export const pool = new pg.Pool({ connectionString: env.databaseUrl });
 
 export function query<T extends pg.QueryResultRow = pg.QueryResultRow>(

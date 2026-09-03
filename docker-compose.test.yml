@@ -1,0 +1,11 @@
+name: family-ledger-test
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: test
+    # เฉพาะ test เท่านั้น ไม่มี volume (ข้อมูลทิ้งได้เสมอ) — bind loopback กันเข้าถึงจากนอกเครื่อง
+    ports:
+      - "127.0.0.1:5433:5432"

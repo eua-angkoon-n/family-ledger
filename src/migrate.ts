@@ -7,7 +7,12 @@ import { pool } from './db.js';
 const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'migrations');
 const LOCK_ID = 8317_2026; // ตัวเลขอะไรก็ได้ ขอแค่คงที่ทั้งระบบ
 
-export async function migrate(): Promise<string[]> {
+export interface MigrateOptions {
+  /** จำกัดให้รันเฉพาะไฟล์ที่ชื่อ (ตามลำดับ sort) <= ค่านี้ — ใช้ทดสอบ roll-forward แบบมีข้อมูลเดิม */
+  upTo?: string;
+}
+
+export async function migrate(options: MigrateOptions = {}): Promise<string[]> {
   const c = await pool.connect();
   try {
     // instance หลายตัวบูตพร้อมกันได้ ตัวที่สองจะรอแล้วเห็นว่าไม่เหลืออะไรให้รัน
@@ -20,7 +25,10 @@ export async function migrate(): Promise<string[]> {
     const done = new Set(
       (await c.query<{ filename: string }>('select filename from schema_migration')).rows.map((r) => r.filename),
     );
-    const files = (await readdir(MIGRATIONS_DIR)).filter((f) => f.endsWith('.sql')).sort();
+    const files = (await readdir(MIGRATIONS_DIR))
+      .filter((f) => f.endsWith('.sql'))
+      .filter((f) => !options.upTo || f <= options.upTo)
+      .sort();
     const applied: string[] = [];
 
     for (const f of files) {

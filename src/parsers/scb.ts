@@ -1,5 +1,6 @@
 export type ScbTransaction = {
   txnDate: string;
+  txnTime: string | null;
   description: string;
   channel: string;
   amountSatang: number;
@@ -110,6 +111,7 @@ function parseMonthly(text: string): ScbStatement {
       if (signedAmount === 0) continue;
       transactions.push({
         txnDate: parseDate(row[1]!),
+        txnTime: row[2]!,
         description: row[5]!.slice(0, amountToken.index).trim(),
         channel: row[4]!,
         amountSatang: Math.abs(signedAmount),
@@ -171,6 +173,7 @@ function parseOnDemand(text: string): ScbStatement {
       if (Math.abs(delta) !== amount || delta === 0) transitionsValid = false;
       transactions.push({
         txnDate: parseDate(row[1]!),
+        txnTime: row[2]!,
         description: descIndex < 0 ? '' : row[5]!.slice(descIndex).replace(/^\s*DESC\s*:\s*/, '').trim(),
         channel: row[4]!,
         amountSatang: amount,
@@ -211,7 +214,9 @@ function parseLegacyOnDemand(text: string): ScbStatement {
   let totalDebit: number | null = null;
   let totalCredit: number | null = null;
 
-  for (const line of text.split(/\r?\n/)) {
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
     const row = line.match(/^\s*(\d{2}\/\d{2}\/\d{2})\s+(\S+\/\S+)\s+(.*)$/);
     if (row) {
       const descIndex = row[3]!.search(/\sDESC\s*:/);
@@ -223,8 +228,11 @@ function parseLegacyOnDemand(text: string): ScbStatement {
       if (amount === 0 && balance === previousBalance) continue;
       const delta = balance - previousBalance;
       if (Math.abs(delta) !== amount || delta === 0) transitionsValid = false;
+      // เวลาอยู่คนละบรรทัดกับวันที่ในรูปแบบเก่า เช่น "17:42 NOTE : -"
+      const timeMatch = lines[i + 1]?.match(/^\s*(\d{2}:\d{2})\s+NOTE\s*:/);
       transactions.push({
         txnDate: parseDate(row[1]!),
+        txnTime: timeMatch ? timeMatch[1]! : null,
         description: descIndex < 0 ? '' : row[3]!.slice(descIndex).replace(/^\s*DESC\s*:\s*/, '').trim(),
         channel: row[2]!.split('/').at(-1)!,
         amountSatang: amount,

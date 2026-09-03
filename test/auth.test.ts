@@ -89,6 +89,10 @@ test('new Google user is asked for the invite code only after OAuth', async (t) 
   const initialMe = await app.request('/api/me');
   assert.deepEqual(await initialMe.json(), { user: null, signupInviteRequired: false });
 
+  // ไม่ล็อกอิน + endpoint ที่ย้ายไป src/routes/admin.ts ต้องยัง mount อยู่จริง (401 ไม่ใช่ 404 จาก fallback)
+  const parserKeys = await app.request('/api/admin/parser-keys');
+  assert.equal(parserKeys.status, 401);
+
   const callback = await completeGoogleLogin(app.request);
   assert.equal(callback.status, 302);
   assert.equal(callback.headers.get('location'), '/');

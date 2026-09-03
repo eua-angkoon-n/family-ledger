@@ -19,7 +19,7 @@ import {
 } from '@mui/material';
 import AccountBalanceRounded from '@mui/icons-material/AccountBalanceRounded';
 import AddRounded from '@mui/icons-material/AddRounded';
-import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
+import ArchiveOutlined from '@mui/icons-material/ArchiveOutlined';
 import EditRounded from '@mui/icons-material/EditRounded';
 import { del, patch, post, req, type Account, type Bank, type EmailAccount } from './api.js';
 import { createFormFieldChangeHandler } from './form.js';
@@ -135,10 +135,10 @@ export default function Accounts() {
                       <Button
                         size="small"
                         color="error"
-                        startIcon={<DeleteOutlineRounded />}
+                        startIcon={<ArchiveOutlined />}
                         onClick={() => setDeletingAccount(account)}
                       >
-                        ลบ
+                        เก็บเข้าคลัง
                       </Button>
                     </Stack>
                   </TableCell>
@@ -223,10 +223,10 @@ export default function Accounts() {
       </Modal>
       <ConfirmDialog
         open={Boolean(deletingAccount)}
-        title="ลบบัญชีธนาคาร"
-        description={`ลบบัญชี “${deletingAccount?.nickname ?? ''}” และรายการทั้งหมดของบัญชีนี้หรือไม่? การดำเนินการนี้ย้อนกลับไม่ได้`}
-        confirmLabel="ลบบัญชี"
-        confirmColor="error"
+        title="เก็บบัญชีธนาคารเข้าคลัง"
+        description={`เก็บบัญชี “${deletingAccount?.nickname ?? ''}” เข้าคลังหรือไม่? บัญชีจะหยุดรับ statement ใหม่ แต่ประวัติ statement และรายการเดิมยังอยู่ครบ`}
+        confirmLabel="เก็บเข้าคลัง"
+        confirmColor="warning"
         busy={submitting}
         onClose={() => setDeletingAccount(null)}
         onConfirm={async () => {
@@ -235,11 +235,11 @@ export default function Accounts() {
           try {
             await del(`/api/accounts/${deletingAccount.id}`);
             setDeletingAccount(null);
-            setNotice({ message: 'ลบบัญชีธนาคารแล้ว', severity: 'success' });
+            setNotice({ message: 'เก็บบัญชีธนาคารเข้าคลังแล้ว', severity: 'success' });
             await reload();
             addButtonRef.current?.focus();
           } catch (deleteError) {
-            setError(deleteError instanceof Error ? deleteError.message : 'ลบบัญชีไม่สำเร็จ');
+            setError(deleteError instanceof Error ? deleteError.message : 'เก็บบัญชีเข้าคลังไม่สำเร็จ');
             setDeletingAccount(null);
           } finally {
             setSubmitting(false);

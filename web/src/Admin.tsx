@@ -35,11 +35,12 @@ const EMPTY = {
   subject_monthly: '',
   subject_ondemand: '',
   attachment_filename_pattern: '\\.pdf$',
-  parser_key: 'kbank',
+  parser_key: '',
 };
 
 function Banks() {
   const [banks, setBanks] = useState<Bank[]>([]);
+  const [parserKeys, setParserKeys] = useState<string[]>([]);
   const [form, setForm] = useState(EMPTY);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -63,12 +64,15 @@ function Banks() {
     }
   };
   useEffect(() => { void reload(); }, []);
+  useEffect(() => {
+    req<{ keys: string[] }>('/api/admin/parser-keys').then((r) => setParserKeys(r.keys)).catch(() => {});
+  }, []);
 
   const setFormField = createFormFieldChangeHandler(setForm);
 
   const openAdd = () => {
     setEditingId(null);
-    setForm(EMPTY);
+    setForm({ ...EMPTY, parser_key: parserKeys[0] ?? '' });
     setError('');
     setModalOpen(true);
   };
@@ -203,9 +207,8 @@ function Banks() {
               <FormLabel component="legend" sx={{ mb: 1.5, color: 'text.primary', fontWeight: 650 }}>ข้อมูลธนาคาร</FormLabel>
               <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 18rem), 1fr))' }}>
                 <TextField label="ชื่อธนาคาร" helperText="ชื่อที่แสดงในหน้าตั้งค่าบัญชี" value={form.name} onChange={setFormField('name')} required autoFocus />
-                <TextField select label="ตัวแกะข้อมูล" helperText="เลือก parser ที่ตรงกับรูปแบบ statement" value={form.parser_key} onChange={setFormField('parser_key')}>
-                  <MenuItem value="kbank">kbank</MenuItem>
-                  <MenuItem value="scb">scb</MenuItem>
+                <TextField select label="ตัวแกะข้อมูล" helperText="เลือก parser ที่ตรงกับรูปแบบ statement" value={form.parser_key} onChange={setFormField('parser_key')} required>
+                  {parserKeys.map((key) => <MenuItem key={key} value={key}>{key}</MenuItem>)}
                 </TextField>
               </Box>
             </Box>

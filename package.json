@@ -2,24 +2,29 @@
   "name": "family-ledger",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "migrate": "node --env-file=.env --import tsx src/migrate.ts",
     "dev:api": "node --env-file=.env --import tsx --watch src/server.ts",
     "dev:web": "vite",
     "build": "tsc -p tsconfig.json && tsc -p web/tsconfig.json && vite build",
     "start": "node dist/server.js",
-    "test": "node --test --import tsx \"test/**/*.test.ts\""
+    "test": "node --test --import tsx \"test/**/*.test.ts\"",
+    "test:db": "docker compose -f docker-compose.test.yml up -d && node --env-file=.env.test --test --import tsx \"test/**/*.test.ts\""
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
     "@mui/icons-material": "^9.4.0",
     "@mui/material": "^9.4.0",
+    "@mui/x-charts": "^9.12.0",
     "connect-pg-simple": "^10.0.0",
     "express": "^4.21.2",
     "express-session": "^1.18.1",
-    "pg": "^8.13.1"
+    "pg": "^8.13.1",
+    "react-router-dom": "^7.18.3"
   },
   "devDependencies": {
     "@types/connect-pg-simple": "^7.0.3",
