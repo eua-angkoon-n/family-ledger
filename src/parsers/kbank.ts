@@ -89,7 +89,7 @@ export function parseKbankStatement(text: string): ParsedStatement {
 
   const layout = /ออกโดย\s+PERIODIC/.test(text)
     ? 'monthly'
-    : /ออกโดย\s+K PLUS/.test(text)
+    : /ออกโดย\s+(?:K PLUS|777)\b/.test(text)
       ? 'ondemand'
       : null;
   if (!layout) throw new Error('ไม่พบชนิด KBank statement');

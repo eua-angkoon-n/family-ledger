@@ -44,6 +44,13 @@ test('KBank แบบร้องขอ: เก็บหลายเดือน
   assert.equal(parsed.checksumValid, true);
 });
 
+test('KBank แบบร้องขอที่ออกโดย 777 ใช้ layout ondemand', () => {
+  const parsed = parseKbankStatement(request.replace('ออกโดย K PLUS', 'ออกโดย 777'));
+
+  assert.equal(parsed.layout, 'ondemand');
+  assert.equal(parsed.checksumValid, true);
+});
+
 test('KBank statement ไม่มีรายการผ่าน checksum เมื่อยอดและจำนวนสอดคล้อง', () => {
   const parsed = parseKbankStatement(empty);
 
