@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { requireUser } from '../auth.js';
 import { query } from '../db.js';
 import {
+  EFFECTIVE_REVIEW_STATUS_SQL,
   EXCLUDED_FROM_FLOW_SQL,
   IS_INTERNAL_TRANSFER_SQL,
   OWNED_TXN_FROM,
@@ -49,7 +50,7 @@ reportsRouter.get('/reports/summary', requireUser(async (req, res, user) => {
      quality as (
        select
          count(*) filter (where not exists (select 1 from txn_split s where s.txn_id = t.id)) as uncategorised_count,
-         count(*) filter (where coalesce(an.review_status, 'unreviewed') = 'unreviewed') as unreviewed_count
+         count(*) filter (where ${EFFECTIVE_REVIEW_STATUS_SQL} = 'unreviewed') as unreviewed_count
        ${OWNED_TXN_FROM}
        where a.user_id = $1 and t.txn_date >= $2 and t.txn_date < $3
          and not (${EXCLUDED_FROM_FLOW_SQL})

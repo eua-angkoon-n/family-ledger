@@ -95,12 +95,28 @@ test('ledger classification API: category / annotation / split / transfer-match'
   async function seedTxn(
     statementId: number,
     bankAccountId: number,
-    opts: { txnDate: string; amount: number; direction: 'credit' | 'debit'; runningBalance: number },
+    opts: {
+      txnDate: string;
+      txnTime?: string;
+      description?: string;
+      amount: number;
+      direction: 'credit' | 'debit';
+      runningBalance: number;
+    },
   ): Promise<number> {
     const row = await db.pool.query<{ id: number }>(
-      `insert into txn (statement_id, bank_account_id, txn_date, description, amount_satang, direction, running_balance_satang)
-       values ($1, $2, $3, '', $4, $5, $6) returning id`,
-      [statementId, bankAccountId, opts.txnDate, opts.amount, opts.direction, opts.runningBalance],
+      `insert into txn (statement_id, bank_account_id, txn_date, txn_time, description, amount_satang, direction, running_balance_satang)
+       values ($1, $2, $3, $4, $5, $6, $7, $8) returning id`,
+      [
+        statementId,
+        bankAccountId,
+        opts.txnDate,
+        opts.txnTime ?? null,
+        opts.description ?? '',
+        opts.amount,
+        opts.direction,
+        opts.runningBalance,
+      ],
     );
     return row.rows[0]!.id;
   }
@@ -271,12 +287,16 @@ test('ledger classification API: category / annotation / split / transfer-match'
 
     const debitTxn = await seedTxn(stmtA, accountA, {
       txnDate: '2026-08-07',
+      txnTime: '10:00:00',
+      description: 'โอนเงินไปบัญชีตนเอง',
       amount: 20000,
       direction: 'debit',
       runningBalance: 100000,
     });
     const creditTxn = await seedTxn(stmtB, accountB, {
       txnDate: '2026-08-07',
+      txnTime: '10:02:00',
+      description: 'รับโอนเงิน',
       amount: 20000,
       direction: 'credit',
       runningBalance: 300000,
@@ -319,6 +339,37 @@ test('ledger classification API: category / annotation / split / transfer-match'
     // otherMatch ผูก debitTxn เดิมที่ confirm ไปแล้วกับคู่แรก — list ต้องกรองออก ไม่งั้นกดแล้วเจอ 409 ซ้ำ
     const list = (await (await request('/api/transfer-matches?status=suggested')).json()) as { id: number }[];
     assert.ok(!list.some((m) => m.id === otherMatch.rows[0]!.id));
+  });
+
+  await t.test('transfer-match: ยอดบังเอิญตรงกันแต่ไม่มีสัญญาณการโอนต้องไม่ auto-confirm', async () => {
+    const accountA = await seedAccount('343-4-34343-4');
+    const accountB = await seedAccount('454-5-45454-5');
+    const stmtA = await seedStatement(accountA, 'msg-weak-a');
+    const stmtB = await seedStatement(accountB, 'msg-weak-b');
+    const debitTxn = await seedTxn(stmtA, accountA, {
+      txnDate: '2026-08-20',
+      txnTime: '12:00:00',
+      description: 'ซื้อของใช้',
+      amount: 23456,
+      direction: 'debit',
+      runningBalance: 76544,
+    });
+    const creditTxn = await seedTxn(stmtB, accountB, {
+      txnDate: '2026-08-20',
+      txnTime: '12:01:00',
+      description: 'เงินเดือน',
+      amount: 23456,
+      direction: 'credit',
+      runningBalance: 123456,
+    });
+
+    const result = await reconcileTransfers(db.pool, userId);
+    assert.equal(result.confirmed, 0);
+    const match = await db.pool.query<{ status: string }>(
+      'select status from transfer_match where debit_txn_id = $1 and credit_txn_id = $2',
+      [debitTxn, creditTxn],
+    );
+    assert.equal(match.rows[0]!.status, 'suggested');
   });
 
   await t.test('transfer-match: reject ไม่แตะ is_internal_transfer', async () => {

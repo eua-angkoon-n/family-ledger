@@ -5,12 +5,14 @@ type Candidate = {
   credit_txn_id: number;
   debit_candidate_count: number;
   credit_candidate_count: number;
+  time_gap_seconds: number | null;
+  has_transfer_hint: boolean;
 };
 
 export type TransferReconciliation = { confirmed: number; suggested: number };
 
-// คู่ที่ยอดเท่ากัน, ต่างบัญชี, วันห่างไม่เกิน 1 วัน และเป็นตัวเลือกเดียวของทั้งสองขา
-// ถือว่าชัดพอให้ยืนยันอัตโนมัติ ส่วนกรณีหลายต่อหนึ่ง/หนึ่งต่อหลายเก็บเป็น suggestion ให้ผู้ใช้เลือกเอง
+// คู่ที่ยอดเท่ากัน, ต่างบัญชี, เวลาใกล้กัน, มีข้อความบ่งชี้การโอน และเป็นตัวเลือกเดียวของทั้งสองขา
+// ถือว่าชัดพอให้ยืนยันอัตโนมัติ ส่วน candidate ที่หลักฐานไม่ครบเก็บเป็น suggestion ให้ผู้ใช้เลือกเอง
 export async function reconcileTransfers(db: Pool, userId: number): Promise<TransferReconciliation> {
   const client = await db.connect();
   try {
@@ -22,7 +24,12 @@ export async function reconcileTransfers(db: Pool, userId: number): Promise<Tran
 
     const { rows } = await client.query<Candidate>(
       `with candidates as (
-         select distinct d.id as debit_txn_id, c.id as credit_txn_id
+         select distinct d.id as debit_txn_id, c.id as credit_txn_id,
+                case when d.txn_time is not null and c.txn_time is not null then
+                  abs(extract(epoch from ((c.txn_date + c.txn_time) - (d.txn_date + d.txn_time))))::float8
+                end as time_gap_seconds,
+                (d.description ~* '(โอน|transfer|promptpay)' or c.description ~* '(โอน|transfer|promptpay)')
+                  as has_transfer_hint
          from txn d
          join bank_account da on da.id = d.bank_account_id
          join txn c on c.direction = 'credit'
@@ -44,7 +51,7 @@ export async function reconcileTransfers(db: Pool, userId: number): Promise<Tran
                and rejected.debit_txn_id = d.id and rejected.credit_txn_id = c.id
            )
        )
-       select debit_txn_id, credit_txn_id,
+       select debit_txn_id, credit_txn_id, time_gap_seconds, has_transfer_hint,
               count(*) over (partition by debit_txn_id)::int as debit_candidate_count,
               count(*) over (partition by credit_txn_id)::int as credit_candidate_count
        from candidates`,
@@ -55,10 +62,15 @@ export async function reconcileTransfers(db: Pool, userId: number): Promise<Tran
     let suggested = 0;
     for (const candidate of rows) {
       const params = [userId, candidate.debit_txn_id, candidate.credit_txn_id];
-      const unambiguous = candidate.debit_candidate_count === 1 && candidate.credit_candidate_count === 1;
+      const unambiguous =
+        candidate.debit_candidate_count === 1 &&
+        candidate.credit_candidate_count === 1 &&
+        candidate.time_gap_seconds !== null &&
+        candidate.time_gap_seconds <= 5 * 60 &&
+        candidate.has_transfer_hint;
       if (unambiguous) {
         const promoted = await client.query(
-          `update transfer_match set status = 'confirmed', matched_by = 'system', confidence = 1
+          `update transfer_match set status = 'confirmed', matched_by = 'system', confidence = 0.95
            where user_id = $1 and debit_txn_id = $2 and credit_txn_id = $3 and status = 'suggested'
            returning id`,
           params,
@@ -66,7 +78,7 @@ export async function reconcileTransfers(db: Pool, userId: number): Promise<Tran
         if (!promoted.rowCount) {
           await client.query(
             `insert into transfer_match (user_id, debit_txn_id, credit_txn_id, status, matched_by, confidence)
-             values ($1, $2, $3, 'confirmed', 'system', 1)`,
+             values ($1, $2, $3, 'confirmed', 'system', 0.95)`,
             params,
           );
         }
