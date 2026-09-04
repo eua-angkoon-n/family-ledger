@@ -1,23 +1,4 @@
-export type ScbTransaction = {
-  txnDate: string;
-  txnTime: string | null;
-  description: string;
-  channel: string;
-  amountSatang: number;
-  direction: 'credit' | 'debit';
-  runningBalanceSatang: number;
-};
-
-export type ScbStatement = {
-  layout: 'monthly' | 'ondemand';
-  accountNumber: string;
-  periodStart: string;
-  periodEnd: string;
-  openingBalanceSatang: number;
-  closingBalanceSatang: number;
-  transactions: ScbTransaction[];
-  checksumValid: boolean;
-};
+import type { ParsedStatement, ParsedTransaction } from './types.js';
 
 const MONEY_RE = /[+-]?\d[\d,]*\.\d{2}/g;
 const THAI_MONTHS: Record<string, number> = {
@@ -64,7 +45,7 @@ function moneyTokens(value: string): RegExpMatchArray[] {
 }
 
 function checksum(
-  transactions: ScbTransaction[],
+  transactions: ParsedTransaction[],
   opening: number,
   closing: number,
   totalDebit: number,
@@ -87,7 +68,7 @@ function checksum(
   return transitionsValid && debits === totalDebit && credits === totalCredit && balance === closing;
 }
 
-function parseMonthly(text: string): ScbStatement {
+function parseMonthly(text: string): ParsedStatement {
   const period = text.match(/เดือน\s+(\S+)\s+(\d{4})/);
   const account = text.match(/เลขที่บัญชี\s+([Xx\d-]+)/);
   if (!period || !account) throw new Error('ไม่พบเดือนหรือเลขบัญชีใน SCB รายเดือน');
@@ -96,7 +77,7 @@ function parseMonthly(text: string): ScbStatement {
   const year = Number(period[2]) - 543;
   const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
 
-  const transactions: ScbTransaction[] = [];
+  const transactions: ParsedTransaction[] = [];
   let totalDebit: number | null = null;
   let totalCredit: number | null = null;
   for (const line of text.split(/\r?\n/)) {
@@ -146,14 +127,14 @@ function parseMonthly(text: string): ScbStatement {
   };
 }
 
-function parseOnDemand(text: string): ScbStatement {
+function parseOnDemand(text: string): ParsedStatement {
   const period = text.match(/วันที่\s+(\d{2}\/\d{2}\/\d{4})\s*-\s*(\d{2}\/\d{2}\/\d{4})/);
   const account = text.match(/เลขที่บัญชี\s+([\d-]+)/);
   const openingMatch = text.match(/BALANCE BROUGHT FORWARD\)\s+([+-]?\d[\d,]*\.\d{2})/);
   if (!period || !account) throw new Error('หัว SCB ย้อนหลังไม่ครบ');
   const openingKnown = openingMatch != null;
   const opening = openingMatch ? moneySatang(openingMatch[1]!) : 0;
-  const transactions: ScbTransaction[] = [];
+  const transactions: ParsedTransaction[] = [];
   let previousBalance = opening;
   let transitionsValid = true;
   let totalDebit: number | null = null;
@@ -202,13 +183,13 @@ function parseOnDemand(text: string): ScbStatement {
   };
 }
 
-function parseLegacyOnDemand(text: string): ScbStatement {
+function parseLegacyOnDemand(text: string): ParsedStatement {
   const header = text.match(/(\d{3}-\d{6}-\d)\s+(\d{2}\/\d{2}\/\d{4})\s*-\s*(\d{2}\/\d{2}\/\d{4})/);
   const openingMatch = text.match(/Balance brought forward\)\s+\**([+-]?\d[\d,]*\.\d{2})/i);
   if (!header) throw new Error('หัว SCB ย้อนหลังรุ่นเก่าไม่ครบ');
   const openingKnown = openingMatch != null;
   const opening = openingMatch ? moneySatang(openingMatch[1]!) : 0;
-  const transactions: ScbTransaction[] = [];
+  const transactions: ParsedTransaction[] = [];
   let previousBalance = opening;
   let transitionsValid = true;
   let totalDebit: number | null = null;
@@ -266,7 +247,7 @@ function parseLegacyOnDemand(text: string): ScbStatement {
   };
 }
 
-export function parseScbStatement(text: string): ScbStatement {
+export function parseScbStatement(text: string): ParsedStatement {
   if (text.includes('ACCOUNT STATEMENT WITH NOTES')) return parseLegacyOnDemand(text);
   if (text.includes('STATEMENT OF SAVING ACCOUNT') || text.includes('BALANCE BROUGHT FORWARD')) return parseOnDemand(text);
   return parseMonthly(text);

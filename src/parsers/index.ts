@@ -1,9 +1,14 @@
-import { parseScbStatement, type ScbStatement } from './scb.js';
+import { parseKbankStatement } from './kbank.js';
+import { parseScbStatement } from './scb.js';
+import type { ParsedStatement } from './types.js';
 
 /** registry กลาง — เพิ่มธนาคารใหม่ที่นี่ที่เดียว ไม่ต้องแก้ทั้ง api.ts และ worker.ts */
 export const parsers = {
   scb: parseScbStatement,
-} satisfies Record<string, (text: string) => ScbStatement>;
+  kbank: parseKbankStatement,
+} satisfies Record<string, (text: string) => ParsedStatement>;
+
+export type { ParsedStatement, ParsedTransaction } from './types.js';
 
 export type ParserKey = keyof typeof parsers;
 

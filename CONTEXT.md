@@ -46,7 +46,7 @@ Gmail (poll ชั่วโมงละครั้ง)
 | `src/account-match.ts` | จับคู่เลขบัญชีที่ statement ปิดบังไว้ กับเลขเต็มที่ผู้ใช้กรอก |
 | `src/auth.ts` | Google OAuth, session, ด่าน `requireUser` / `requireAdmin` |
 | `src/gmail.ts` | Gmail REST (`fetch` ดิบ) + ด่าน DKIM + เลือกไฟล์แนบ PDF |
-| `src/parsers/scb.ts` | แกะ SCB statement ทั้งแบบรายเดือนและย้อนหลัง + checksum gate |
+| `src/parsers/*.ts` | แกะ SCB/KBank statement ทั้งแบบรายเดือนและย้อนหลัง + checksum gate |
 | `src/worker.ts` | worker ชั่วโมงละครั้ง: sync กล่องอีเมล → ถอดรหัส PDF → parse → เขียน statement/txn แบบ atomic |
 | `src/api.ts` | ประกอบ router ย่อย + `/me` |
 | `src/http.ts` | `HttpError` และ helper ตรวจ body ที่ router ใช้ร่วมกัน |

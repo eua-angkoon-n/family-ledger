@@ -30,6 +30,27 @@ test('migrate() roll-forward', async (t) => {
 
     const { rows } = await db.pool.query('select filename from schema_migration order by filename');
     assert.deepEqual(rows.map((r) => r.filename), files);
+
+    const kbank = await db.pool.query<{
+      sender_email: string;
+      sender_domain: string;
+      subject_monthly: string;
+      subject_ondemand: string;
+      attachment_filename_pattern: string;
+      parser_key: string;
+    }>(
+      `select sender_email, sender_domain, subject_monthly, subject_ondemand,
+              attachment_filename_pattern, parser_key
+       from bank where lower(name) = 'kbank'`,
+    );
+    assert.deepEqual(kbank.rows[0], {
+      sender_email: 'K-ElectronicDocument@kasikornbank.com',
+      sender_domain: 'kasikornbank.com',
+      subject_monthly: '^E-statement for saving account no\\. [Xx\\d-]+ \\[\\d+\\]$',
+      subject_ondemand: '^E-statement for saving account no\\. [Xx\\d-]+ \\[\\d+\\]$',
+      attachment_filename_pattern: '^STM_SA\\d{4}_\\d{2}[A-Z]{3}\\d{2}_\\d{2}[A-Z]{3}\\d{2}\\.pdf$',
+      parser_key: 'kbank',
+    });
   });
 
   await t.test('continues from a mid-point database that already has real data', async () => {
@@ -40,6 +61,13 @@ test('migrate() roll-forward', async (t) => {
     const files = await migrationFiles();
     const partial = await db.migrate({ upTo });
     assert.deepEqual(partial, files.filter((f) => f <= upTo));
+
+    await db.pool.query(
+      `insert into bank (
+         name, sender_email, sender_domain, subject_monthly, subject_ondemand,
+         attachment_filename_pattern, parser_key, is_active
+       ) values ('KBank', 'custom@example.com', 'example.com', '^custom-monthly$', '^custom-request$', '^custom\\.pdf$', 'legacy-kbank', false)`,
+    );
 
     // seed ข้อมูลจริงลงตารางที่มีอยู่แล้ว ก่อนรัน migration ที่เหลือ (005+ เมื่อมีในอนาคต)
     const user = await db.pool.query<{ id: number }>(
@@ -88,6 +116,15 @@ test('migrate() roll-forward', async (t) => {
 
     const rest = await db.migrate();
     assert.deepEqual(rest, files.filter((f) => f > upTo));
+
+    const preservedKbank = await db.pool.query<{ sender_email: string; parser_key: string; is_active: boolean }>(
+      "select sender_email, parser_key, is_active from bank where lower(name) = 'kbank'",
+    );
+    assert.deepEqual(preservedKbank.rows[0], {
+      sender_email: 'custom@example.com',
+      parser_key: 'legacy-kbank',
+      is_active: false,
+    });
 
     // ข้อมูลที่ seed ไว้ต้องยังอยู่ครบหลัง migrate ต่อจากจุดกลางทาง
     const txnCount = await db.pool.query('select count(*)::int as n from txn');

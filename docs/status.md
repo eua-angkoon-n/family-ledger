@@ -59,6 +59,16 @@
 - `/auth/google?add=1` สำหรับกล่องอีเมลใบที่สอง
 - หลายบัญชี SCB ในกล่องเดียวกันแบบ E2E (โค้ดจับคู่เลขบัญชีเต็ม/ปิดบังรองรับแล้ว)
 
+## KBank parser: เสร็จและผ่านไฟล์จริง
+
+- รองรับบัญชีออมทรัพย์ทั้ง statement รายเดือนและ statement ตามช่วงเวลาที่ร้องขอ
+- ไฟล์ร้องขอหลายเดือนเก็บเป็น statement เดียว และ dedup กับไฟล์รายเดือนด้วยกลไกเดิม
+- ตรวจยอดยกมา/ยอดยกไป ยอดรวมและจำนวนรายการถอน-ฝาก และ running balance ทุกแถว/ทุกหน้า
+- เลือกเฉพาะไฟล์ `STM_SA…pdf` จึงไม่หยิบคู่มือ `channel_bankuse.pdf`
+- fixture ที่ commit เป็นข้อมูลสังเคราะห์; PDF/EML จริงและรหัสผ่านไม่เข้า git
+- ตรวจไฟล์จริงแล้ว: รายเดือน 90 รายการ, แบบร้องขอ 191 รายการ และ checksum ผ่านทั้งคู่
+- หลัง deploy บัญชี KBank เดิมต้องสั่ง Full sync หนึ่งครั้ง; บัญชีที่สร้างใหม่ใช้ backfill เดิมอัตโนมัติ
+
 ## ตั้งค่า local ที่ต้องแก้ก่อน deploy
 
 `docker-compose.yml` ใช้ `NODE_ENV: development` เพื่อทดสอบผ่าน HTTP localhost ก่อน deploy หลัง Caddy/HTTPS
@@ -224,12 +234,6 @@
 
 - Tax Invoice / `TaxInvoiceRecord` (Slice 7)
 - audit log การเข้าถึงและแก้ไขข้อมูล (Slice 8)
-- **KBank parser** — `docs/plans/personalfinancesystemplan.md` (หัวข้อ scope ตอน launch) วางไว้ว่า launch ด้วย KBank ก่อน แต่ของจริง
-  ทำ SCB ก่อน — `src/parsers/index.ts` มีเฉพาะ `scb` ยังไม่มี Slice ไหนรองรับ สองผลที่ตามมา:
-  - ต้องได้จากผู้ใช้ก่อนเขียน parser: **statement PDF ตัวอย่าง 2 เดือนติดกัน + รหัสผ่าน + หัวข้ออีเมลจริง**
-    (ทั้งแบบรายเดือนและแบบขอเอง) — เขียน parser โดยไม่เห็นตัวอย่างจริงคือการเดาบน money path
-  - ถ้าใน DB มีแถว `bank.parser_key='kbank'` ค้างอยู่ (admin เคยเพิ่มไว้) จะแก้ฟิลด์ใดก็ไม่ได้
-    เพราะ `web/src/Admin.tsx` PATCH ส่งทั้งฟอร์มแล้ว validation reject ทั้งก้อน
 
 ## UI design guideline — ปิดแล้ว
 

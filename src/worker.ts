@@ -21,7 +21,7 @@ import {
   type GmailPayload,
 } from './gmail.js';
 import { parsers } from './parsers/index.js';
-import type { ScbStatement } from './parsers/scb.js';
+import type { ParsedStatement } from './parsers/types.js';
 import { reconcilePayments } from './services/payment-reconciliation.js';
 import { suggestTransferMatches } from './services/transfer-matching.js';
 
@@ -236,13 +236,13 @@ async function writePending(
   return result.rowCount === 1;
 }
 
-async function writeScbStatement(
+async function writeParsedStatement(
   bankAccountId: number,
   messageId: string,
   attachmentId: string,
   pdfSha256: string,
   rawPdfPath: string,
-  parsed: ScbStatement,
+  parsed: ParsedStatement,
 ): Promise<boolean> {
   return tx(async (client) => {
     const status = parsed.checksumValid ? 'parsed' : 'checksum_failed';
@@ -386,7 +386,7 @@ async function processMessage(
 
       const parseFn = parsers[bank.parser_key as keyof typeof parsers];
       if (parseFn) {
-        let parsed: ScbStatement;
+        let parsed: ParsedStatement;
         try {
           parsed = parseFn(extracted.text);
         } catch (error) {
@@ -404,10 +404,10 @@ async function processMessage(
         }
         const resolved = resolveAccount(candidates, parsed.accountNumber);
         if (!resolved) {
-          console.warn(`[worker] เลขบัญชีใน SCB statement ไม่ตรงหรือกำกวม mailbox=${emailAccountId} message=${messageId}`);
+          console.warn(`[worker] เลขบัญชีใน statement ไม่ตรงหรือกำกวม mailbox=${emailAccountId} message=${messageId}`);
           break;
         }
-        if (await writeScbStatement(resolved.id, messageId, attachment.attachmentId, pdfSha256, pdfPath, parsed)) inserted++;
+        if (await writeParsedStatement(resolved.id, messageId, attachment.attachmentId, pdfSha256, pdfPath, parsed)) inserted++;
         break;
       }
 

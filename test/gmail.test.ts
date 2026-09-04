@@ -130,3 +130,17 @@ test('pickPdfAttachments: multipart ซ้อนกันหลายชั้�
   };
   assert.deepEqual(pickPdfAttachments(payload, PDF_PATTERN), [{ attachmentId: 'nested1', filename: 'statement.pdf' }]);
 });
+
+test('pickPdfAttachments: KBank รับ statement หลักและตัดคู่มือ channel_bankuse.pdf', () => {
+  const payload: GmailPayload = {
+    parts: [
+      { mimeType: 'application/pdf', filename: 'STM_SA2319_01AUG26_31AUG26.pdf', body: { attachmentId: 'statement' } },
+      { mimeType: 'application/pdf', filename: 'channel_bankuse.pdf', body: { attachmentId: 'guide' } },
+    ],
+  };
+
+  assert.deepEqual(
+    pickPdfAttachments(payload, '^STM_SA\\d{4}_\\d{2}[A-Z]{3}\\d{2}_\\d{2}[A-Z]{3}\\d{2}\\.pdf$'),
+    [{ attachmentId: 'statement', filename: 'STM_SA2319_01AUG26_31AUG26.pdf' }],
+  );
+});
