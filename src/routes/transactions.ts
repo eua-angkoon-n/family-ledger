@@ -2,7 +2,14 @@ import { Router } from 'express';
 import { requireUser } from '../auth.js';
 import { query, tx } from '../db.js';
 import { HttpError, id, optionalStr, pathId, str, type Body } from '../http.js';
-import { OWNED_TXN_FROM, TXN_FILTER_SQL, parseTxnFilters, txnFilterParams } from '../services/report-query.js';
+import {
+  EFFECTIVE_CLASSIFICATION_SQL,
+  EFFECTIVE_REVIEW_STATUS_SQL,
+  OWNED_TXN_FROM,
+  TXN_FILTER_SQL,
+  parseTxnFilters,
+  txnFilterParams,
+} from '../services/report-query.js';
 
 export const transactionsRouter = Router();
 
@@ -24,7 +31,7 @@ transactionsRouter.get('/transactions', requireUser(async (req, res, user) => {
             t.is_internal_transfer,
             a.id as bank_account_id, a.nickname as account_nickname, a.account_purpose,
             b.id as bank_id, b.name as bank_name,
-            an.classification, coalesce(an.review_status, 'unreviewed') as review_status,
+            ${EFFECTIVE_CLASSIFICATION_SQL} as classification, ${EFFECTIVE_REVIEW_STATUS_SQL} as review_status,
             coalesce(sp.categories, '[]'::json) as categories,
             coalesce(sp.split_count, 0) as split_count,
             count(*) over () as total_count
@@ -69,7 +76,8 @@ transactionsRouter.get('/transactions/:id', requireUser(async (req, res, user) =
             t.running_balance_satang, t.is_internal_transfer, t.created_at,
             a.id as bank_account_id, a.nickname as account_nickname, a.account_purpose,
             b.id as bank_id, b.name as bank_name,
-            an.classification, coalesce(an.review_status, 'unreviewed') as review_status, an.note as annotation_note,
+            ${EFFECTIVE_CLASSIFICATION_SQL} as classification, ${EFFECTIVE_REVIEW_STATUS_SQL} as review_status,
+            an.note as annotation_note,
             st.id as statement_id, st.period_start, st.period_end
      from txn t
      join bank_account a on a.id = t.bank_account_id

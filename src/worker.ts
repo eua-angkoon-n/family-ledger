@@ -23,7 +23,7 @@ import {
 import { parsers } from './parsers/index.js';
 import type { ParsedStatement } from './parsers/types.js';
 import { reconcilePayments } from './services/payment-reconciliation.js';
-import { suggestTransferMatches } from './services/transfer-matching.js';
+import { reconcileTransfers } from './services/transfer-matching.js';
 
 type Bank = {
   id: number;
@@ -112,12 +112,12 @@ async function doSync(emailAccountId: number, requestFull: boolean): Promise<Syn
     sync.historyId,
   ]);
 
-  // หา candidate คู่โอนภายในหลังเขียน txn ของรอบนี้เสร็จ — idempotent (กัน insert ซ้ำเองใน query)
+  // จับคู่โอนภายในหลังเขียน txn ของรอบนี้เสร็จ — คู่ชัดเจนยืนยันเอง กรณีคลุมเครือเก็บเป็น suggestion
   // ไม่ผูกกับ tx() ของ statement ไหนโดยเฉพาะ พังแล้วไม่ควรทำให้ sync รอบนี้ fail ทั้งรอบ
   try {
-    await suggestTransferMatches(pool, account.user_id);
+    await reconcileTransfers(pool, account.user_id);
   } catch (e) {
-    console.error(`[worker] mailbox=${emailAccountId} suggestTransferMatches ล้มเหลว:`, e);
+    console.error(`[worker] mailbox=${emailAccountId} reconcileTransfers ล้มเหลว:`, e);
   }
 
   // §9.5: statement มาถึงแล้วจึงหา candidate ให้ Payment Declaration ที่ยังรออยู่ — idempotent

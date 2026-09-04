@@ -18,7 +18,7 @@ test('ledger classification API: category / annotation / split / transfer-match'
   await db.migrate();
 
   const { api, HttpError } = await import('../src/api.js');
-  const { suggestTransferMatches } = await import('../src/services/transfer-matching.js');
+  const { reconcileTransfers } = await import('../src/services/transfer-matching.js');
 
   const app = express();
   app.use(express.json());
@@ -147,6 +147,36 @@ test('ledger classification API: category / annotation / split / transfer-match'
     assert.equal(invalid.status, 400);
   });
 
+  await t.test('transaction: จำแนก credit/debit เป็นรายรับ/รายจ่ายและถือว่าตรวจแล้วโดยอัตโนมัติ', async () => {
+    const accountId = await seedAccount('121-2-12121-2');
+    const statementId = await seedStatement(accountId, 'msg-auto-classify');
+    const creditTxn = await seedTxn(statementId, accountId, {
+      txnDate: '2026-08-05',
+      amount: 11001,
+      direction: 'credit',
+      runningBalance: 111001,
+    });
+    const debitTxn = await seedTxn(statementId, accountId, {
+      txnDate: '2026-08-06',
+      amount: 12002,
+      direction: 'debit',
+      runningBalance: 98999,
+    });
+
+    const income = (await (await request(`/api/transactions/${creditTxn}`)).json()) as {
+      classification: string;
+      review_status: string;
+    };
+    const expense = (await (await request(`/api/transactions/${debitTxn}`)).json()) as {
+      classification: string;
+      review_status: string;
+    };
+    assert.equal(income.classification, 'income');
+    assert.equal(income.review_status, 'reviewed');
+    assert.equal(expense.classification, 'expense');
+    assert.equal(expense.review_status, 'reviewed');
+  });
+
   await t.test('category: system + own, สร้างของตัวเองได้, PATCH is_active กรองได้', async () => {
     const list = await request('/api/categories');
     assert.equal(list.status, 200);
@@ -233,7 +263,7 @@ test('ledger classification API: category / annotation / split / transfer-match'
     assert.equal(afterClear.rows[0]!.n, 0);
   });
 
-  await t.test('transfer-match: confirm พลิก is_internal_transfer ทั้งสองฝั่ง, ยืนยันคู่ที่สองชน txn เดิม → 409', async () => {
+  await t.test('transfer-match: คู่หนึ่งต่อหนึ่งถูกยืนยันอัตโนมัติและพลิก is_internal_transfer ทั้งสองฝั่ง', async () => {
     const accountA = await seedAccount('333-3-33333-3');
     const accountB = await seedAccount('444-4-44444-4');
     const stmtA = await seedStatement(accountA, 'msg-tx-a');
@@ -252,25 +282,24 @@ test('ledger classification API: category / annotation / split / transfer-match'
       runningBalance: 300000,
     });
 
-    const suggested = await suggestTransferMatches(db.pool, userId);
-    assert.equal(suggested, 1);
-    // เรียกซ้ำต้องไม่ insert คู่เดิมซ้ำ
-    assert.equal(await suggestTransferMatches(db.pool, userId), 0);
+    assert.deepEqual(await reconcileTransfers(db.pool, userId), { confirmed: 1, suggested: 0 });
+    // เรียกซ้ำต้องไม่ insert หรือยืนยันคู่เดิมซ้ำ
+    assert.deepEqual(await reconcileTransfers(db.pool, userId), { confirmed: 0, suggested: 0 });
 
-    const matchRow = await db.pool.query<{ id: number }>(
-      'select id from transfer_match where debit_txn_id = $1 and credit_txn_id = $2',
+    const matchRow = await db.pool.query<{ id: number; status: string }>(
+      'select id, status from transfer_match where debit_txn_id = $1 and credit_txn_id = $2',
       [debitTxn, creditTxn],
     );
-    const matchId = matchRow.rows[0]!.id;
-
-    const confirmed = await request(`/api/transfer-matches/${matchId}/confirm`, { method: 'POST' });
-    assert.equal(confirmed.status, 200);
+    assert.equal(matchRow.rows[0]!.status, 'confirmed');
 
     const flipped = await db.pool.query<{ is_internal_transfer: boolean }>(
       'select is_internal_transfer from txn where id = any($1)',
       [[debitTxn, creditTxn]],
     );
     assert.ok(flipped.rows.every((r) => r.is_internal_transfer === true));
+
+    const detail = (await (await request(`/api/transactions/${debitTxn}`)).json()) as { classification: string };
+    assert.equal(detail.classification, 'internal_transfer');
 
     // คู่ที่สองผูก debitTxn เดิมกับ credit อีกใบ — ยืนยันแล้วต้องชน partial unique index (23505) → 409
     const otherCreditTxn = await seedTxn(stmtB, accountB, {
@@ -377,8 +406,10 @@ test('ledger classification API: category / annotation / split / transfer-match'
   await t.test('transfer-match: GET ?status=suggested คืน shape ทั้งสองฝั่ง และ txn_date เป็น string ธรรมดา', async () => {
     const accountC = await seedAccount('999-9-99999-9');
     const accountD = await seedAccount('000-0-00000-0');
+    const accountE = await seedAccount('010-1-01010-1');
     const stmtC = await seedStatement(accountC, 'msg-list-c');
     const stmtD = await seedStatement(accountD, 'msg-list-d');
+    const stmtE = await seedStatement(accountE, 'msg-list-e');
     const debitTxn = await seedTxn(stmtC, accountC, {
       txnDate: '2026-08-11',
       amount: 50000,
@@ -391,10 +422,15 @@ test('ledger classification API: category / annotation / split / transfer-match'
       direction: 'credit',
       runningBalance: 500000,
     });
+    await seedTxn(stmtE, accountE, {
+      txnDate: '2026-08-11',
+      amount: 50000,
+      direction: 'credit',
+      runningBalance: 550000,
+    });
 
-    // >= 1 แทน === 1: จำนวนคู่ที่ suggest ขึ้นกับสิ่งที่ subtest ก่อนหน้าใน describe เดียวกัน seed ไว้ —
-    // การยืนยันจริงคือ .find() ด้านล่างเจอคู่ที่เพิ่ง insert
-    assert.ok((await suggestTransferMatches(db.pool, userId)) >= 1);
+    // debit เดียวมี credit ที่เป็นไปได้สองรายการ จึงยังไม่ auto-confirm และส่งให้ผู้ใช้ตัดสินใจ
+    assert.ok((await reconcileTransfers(db.pool, userId)).suggested >= 2);
 
     const res = await request('/api/transfer-matches?status=suggested');
     assert.equal(res.status, 200);

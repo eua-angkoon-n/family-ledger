@@ -80,7 +80,7 @@ export type TxnListRow = {
   account_purpose: 'personal' | 'business';
   bank_id: number;
   bank_name: string;
-  classification: Classification | null;
+  classification: Classification;
   review_status: ReviewStatus;
   categories: TxnSplitInfo[];
   split_count: number;
@@ -127,7 +127,7 @@ export type TxnDetail = {
   account_purpose: 'personal' | 'business';
   bank_id: number;
   bank_name: string;
-  classification: Classification | null;
+  classification: Classification;
   review_status: ReviewStatus;
   annotation_note: string | null;
   statement_id: number;

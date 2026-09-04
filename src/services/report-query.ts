@@ -9,6 +9,16 @@ export const OWNED_TXN_FROM =
 // แล้วเทียบ classification ตรง ๆ จะได้ NULL แล้ว WHERE ตัดทิ้งเงียบ ๆ เกือบทั้งบัญชี
 export const IS_INTERNAL_TRANSFER_SQL = "(t.is_internal_transfer or coalesce(an.classification, '') = 'internal_transfer')";
 
+export const EFFECTIVE_CLASSIFICATION_SQL = `case
+  when ${IS_INTERNAL_TRANSFER_SQL} then 'internal_transfer'
+  when an.classification is not null then an.classification
+  when t.direction = 'credit' then 'income'
+  else 'expense'
+end`;
+
+// direction มาจาก statement ที่ผ่าน checksum แล้ว จึงจำแนกรายรับ/รายจ่ายพื้นฐานได้ทันทีโดยไม่ต้องรอคนกดตรวจ
+export const EFFECTIVE_REVIEW_STATUS_SQL = "coalesce(an.review_status, 'reviewed')";
+
 // รายงาน (summary/cash-flow/category-breakdown) ตัดทั้งคู่โอนภายในและรายการที่ผู้ใช้ excluded เอง —
 // แต่ list ธุรกรรม (TXN_FILTER_SQL) ต้องไม่ใช้ตัวนี้ ผู้ใช้ต้องยังเห็น internal transfer ในตารางได้ (§8.3/§8.4)
 export const EXCLUDED_FROM_FLOW_SQL = `(${IS_INTERNAL_TRANSFER_SQL} or coalesce(an.classification, '') = 'excluded')`;
@@ -164,7 +174,7 @@ export const TXN_FILTER_SQL = `
     and ($8::text is null or t.direction = $8)
     and ($9::text is null or a.account_purpose = $9)
     and ($10::boolean is null or (${IS_INTERNAL_TRANSFER_SQL}) = $10)
-    and ($11::text is null or coalesce(an.review_status, 'unreviewed') = $11)
+    and ($11::text is null or ${EFFECTIVE_REVIEW_STATUS_SQL} = $11)
     and ($12::bigint is null or t.amount_satang >= $12)
     and ($13::bigint is null or t.amount_satang <= $13)
     and ($14::text is null or t.description ilike '%' || $14 || '%')
