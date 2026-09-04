@@ -41,6 +41,12 @@ function splitsToRows(splits: TxnSplit[]): SplitRow[] {
   return splits.map((s) => ({ key: String(s.id), category_id: String(s.category_id), amountText: (s.amount_satang / 100).toFixed(2), note: s.note ?? '' }));
 }
 
+function initialClassification(detail: TxnDetail): Classification {
+  if (detail.is_internal_transfer) return 'internal_transfer';
+  if (detail.classification) return detail.classification;
+  return detail.direction === 'credit' ? 'income' : 'expense';
+}
+
 type ReviewDrawerProps = {
   txnId: number | null;
   categories: Category[];
@@ -72,7 +78,7 @@ export default function ReviewDrawer({ txnId, categories, onClose, onSaved, onNo
       const d = await req<TxnDetail>(`/api/transactions/${id}`);
       if (requestId !== requestIdRef.current) return;
       setDetail(d);
-      setClassification(d.classification ?? 'expense');
+      setClassification(initialClassification(d));
       setNote(d.annotation_note ?? '');
       setSplits(splitsToRows(d.splits));
     } catch (e) {
