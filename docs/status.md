@@ -6,8 +6,8 @@
 
 ## Git
 
-- บน `master` ล่าสุดคือ v1.2.3 — Slice 1–8 และงานหลังปิดสโคป (v1.1.0, v1.1.x–1.2.3) ดูหัวข้อด้านล่าง
-- งานเข้า `master` ผ่าน PR บน GitHub (`eua-angkoon-n/family-ledger`) · prod ที่ `ledger.tapestopnight.com` (`docs/deploy.md`)
+- บน `master` ล่าสุดคือ v1.2.3 — Slice 1–8 และงานหลังปิดสโคป (v1.1.0, 1.2.0–1.2.3) ดูหัวข้อด้านล่าง
+- โค้ดอยู่บน GitHub (`eua-angkoon-n/family-ledger`) · prod ที่ `ledger.tapestopnight.com` (`docs/deploy.md`)
 - หลัง Slice 1–3 มีงาน rebrand เป็น "Hyacinthia Ledger" และ redesign หน้าเว็บทั้งหมดด้วย MUI
   (โฟลเดอร์/`package.json` ยังชื่อ `family-ledger` — ยังไม่ได้ตามรีเนม)
 - PDF, `.eml`, `.env` และ `data/` ถูก ignore ไม่เข้า git
@@ -145,10 +145,10 @@
   `check (recurring_rule_id is null or occurrence_date is not null)`
 - service: `recurring-generation.ts` (`occurrencesInMonth` pure + generate แบบ **insert-only**),
   `plan-query.ts` (`PAYMENT_STATE_SQL`/`planTotals`/`paymentStatusSummary`/`loadOwnedItem`/`assertOwnedRefs`),
-  `payment-reconciliation.ts` (เกณฑ์ §9.5 ครบ auto-match เฉพาะ candidate เดียว) *(ถูกตัดออกใน 1.1.x — ดู ADR-0004)*
+  `payment-reconciliation.ts` (เกณฑ์ §9.5 ครบ auto-match เฉพาะ candidate เดียว) *(ถูกตัดออกก่อน 1.2.0 — ดู ADR-0004)*
 - route: `monthly-plans.ts` (GET เดือน + items + copy-previous + skip + payments + close/reopen +
   PATCH payment) และ `recurring-rules.ts` (CRUD + archive) — `reconcilePayments` ต่อสายทั้งใน
-  `worker.ts:doSync` และใน `POST /monthly-plan-items/:id/payments` *(ถูกตัดออกใน 1.1.x — ดู ADR-0004)*
+  `worker.ts:doSync` และใน `POST /monthly-plan-items/:id/payments` *(ถูกตัดออกก่อน 1.2.0 — ดู ADR-0004)*
 - web: `web/src/pages/MonthlyPlan.tsx` (`/planning?month=`), `PaymentStatusChip.tsx`,
   `MonthPicker` รับ `maxMonth` เพื่อเลือกเดือนอนาคตได้, การ์ด "เงินเหลือใช้ตามแผน" และ
   "สถานะการจ่ายบิล" ใน `Dashboard.tsx` เปิดใช้จริงแล้ว (คลิกไป `/planning`)
@@ -206,7 +206,7 @@
   ลบรายการของกฎออกหมด = กางใหม่ตามกฎปัจจุบัน และตอบ 409 ถ้ามี payment ที่ยังไม่ยกเลิก)*
 - **`occurrence_date` ห้ามให้ผู้ใช้แก้** เป็นคีย์กันสร้างซ้ำ ถ้าวันไหนเปิดให้ PATCH ได้ บั๊กแถวซ้ำ
   ที่แก้ไปแล้วจะกลับมาทันที
-- *(ถูกตัดออกใน 1.1.x — ดู ADR-0004)* สามข้อถัดไป (ยืนยันคู่ด้วยมือ, `reconcilePayments`, ทิศทาง txn ตอนจับคู่) เหลือไว้เป็นประวัติ
+- *(ถูกตัดออกก่อน 1.2.0 — ดู ADR-0004)* สามข้อถัดไป (ยืนยันคู่ด้วยมือ, `reconcilePayments`, ทิศทาง txn ตอนจับคู่) เหลือไว้เป็นประวัติ
 - **ยืนยันคู่ด้วยมือบังคับยอด/ทิศทาง/บัญชี แต่ไม่บังคับกรอบ ±3 วัน** — ขั้นตอนนี้คือให้คนตัดสินสิ่งที่
   ระบบตัดสินไม่ได้ วันที่คลาดกันได้จริงเวลาธนาคารลงรายการช้า แต่ยอดกับทิศทางเป็นข้อเท็จจริงที่ต่อรองไม่ได้
   (UI ค้น candidate ในกรอบ ±3 วันเพื่อให้ตรงกับที่ระบบพิจารณา)
@@ -240,7 +240,7 @@
 - Migration `008_income_and_installments.sql` — `income_record`, `income_deduction`, `installment_plan`, `installment_due`
   (เลื่อนจาก `007` เพราะ `007_kbank_statement_parser.sql` แทรกก่อนโดยไม่อยู่ในแผนเดิม)
 - ผูก income record เข้ากับ monthly plan item เดิม, จับคู่ยอดสุทธิกับ deposit จริงอัตโนมัติเมื่อยอดตรง
-  *(การจับคู่ deposit ถูกตัดออกใน 1.1.x — ดู ADR-0004)*
+  *(การจับคู่ deposit ถูกตัดออกก่อน 1.2.0 — ดู ADR-0004)*
 - Installment plan คำนวณงวด (anchor date, เงินดาวน์, เศษงวดสุดท้าย) และผูก due เข้า monthly plan item
   ผ่าน `monthly_plan_item_installment_due_fk` ที่ใส่ FK ทีหลังตาม precedent การเลื่อน FK ข้ามสไลซ์
 - หน้า `Installments.tsx` + `IncomeSection.tsx` ใน web
@@ -401,12 +401,14 @@ Slice 4A–8 เสร็จครบตามแผน — ตัดสิน�
 - `npm run test:db` — เพิ่ม `test/authz.test.ts` ข้อ 42–44 และ `test/guides.test.ts` (4 เทสต์, pure)
   · `npm run build` สะอาด
 - ~~`test/kbank-parser.test.ts` แถวลบบรรทัด "ยอดยกมา" fail อยู่บน `origin/master`~~ — 2026-09-28 `npm run test:db`
-  ผ่านครบ 249/249 แล้ว ไม่มีเทสต์ KBank ค้าง fail
+  ผ่านครบ 250/250 แล้ว ไม่มีเทสต์ KBank ค้าง fail
 - **ยังไม่เคยเปิดดูในเบราว์เซอร์จริง** เหมือนทุกเฟสก่อนหน้า — เรื่องที่ต้องใช้ตาคนดูมากที่สุดคือ tour:
   tsc/vite ยืนยันว่า compile ผ่าน แต่ไม่ยืนยันว่ากรอบไฮไลต์ตกที่ถูกตัว การ์ดไม่ล้นจอ 320px หรือ focus
   กลับถูกที่ (`test/guides.test.ts` ยืนยันได้แค่ว่า selector ยังมีอยู่จริงใน source)
 
-## หลัง v1.1.0 — v1.1.x ถึง 1.2.3 (เสร็จแล้ว)
+## หลัง v1.1.0 — 1.2.0 ถึง 1.2.3 (เสร็จแล้ว)
+
+งานแผนรายเดือนด้านล่างทำหลัง 1.1.0 โดยไม่ขยับเลข ขึ้นถึงผู้ใช้ครั้งแรกพร้อม 1.2.0
 
 **แผนรายเดือน**
 - `58563c7` เปลี่ยน `anchor_day` ของกฎแล้วรายการไม่ซ้ำอีก · เพิ่ม `DELETE /api/monthly-plan-items/:id` + ปุ่มลบ
@@ -433,10 +435,10 @@ Slice 4A–8 เสร็จครบตามแผน — ตัดสิน�
 **เครื่องมือพัฒนา**
 - เพิ่ม agent `ledger-web` (`.claude/agents/`) ดูแล `web/` + ดีไซน์ · `AGENTS.md` มีหัวข้อ Commands/Architecture
 - ลบ worktree/branch ที่ merge แล้วทั้งหมด (add-readme, deploy-production, legal-pages, version-guide-serverlog
-  และสาขา feat/fix ของ 1.1.x–1.2.x)
+  และสาขา feat/fix ของ 1.2.x — ลบเฉพาะ local บน origin ยังมีบาง branch ค้างอยู่)
 
 **การตรวจสอบ (1.2.3)**
-- `npm run test:db` 249/249 · `npm test` 109 pass / 10 skip (suite ที่ต้องใช้ DB) · `npm run build` สะอาด
+- `npm run test:db` 250/250 · `npm test` 110 pass / 10 skip (suite ที่ต้องใช้ DB) · `npm run build` สะอาด
 - ยังไม่ได้เปิดดูในเบราว์เซอร์จริง เหมือนทุกเฟสก่อนหน้า
 
 ## UI design guideline — ปิดแล้ว

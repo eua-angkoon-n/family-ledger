@@ -34,7 +34,7 @@ import SettingsRounded from '@mui/icons-material/SettingsRounded';
 import { req, type User } from './api.js';
 import Accounts from './Accounts.js';
 import Admin from './Admin.js';
-import { isPageEnabled, TAX_PAGES_ENABLED } from './features.js';
+import { isPageEnabled } from './features.js';
 import { brandCopySx, dataTextSx, descriptionSx } from './theme.js';
 import { FeedbackSnackbar, PageHeader, TableSkeleton, VersionBadge, type Notice } from './ui.js';
 
@@ -266,8 +266,8 @@ export default function App() {
             <Route path="/installments" element={<Installments />} />
             <Route path="/installments/:id" element={<Installments />} />
             <Route path="/student-loan" element={<Box component="section" aria-labelledby="student-loan-heading"><StudentLoan /></Box>} />
-            {TAX_PAGES_ENABLED && <Route path="/tax-documents" element={<Box component="section" aria-labelledby="tax-documents-heading"><TaxDocuments /></Box>} />}
-            {TAX_PAGES_ENABLED && <Route path="/tax" element={<Box component="section" aria-labelledby="tax-summary-heading"><TaxSummary /></Box>} />}
+            {isPageEnabled('/tax-documents') && <Route path="/tax-documents" element={<Box component="section" aria-labelledby="tax-documents-heading"><TaxDocuments /></Box>} />}
+            {isPageEnabled('/tax') && <Route path="/tax" element={<Box component="section" aria-labelledby="tax-summary-heading"><TaxSummary /></Box>} />}
             <Route path="/audit" element={<Box component="section" aria-labelledby="audit-log-heading"><AuditLog /></Box>} />
             <Route path="/help" element={<Box component="section" aria-labelledby="help-heading"><Help /></Box>} />
             <Route path="/accounts" element={<Box component="section" aria-labelledby="accounts-heading"><Accounts /></Box>} />

@@ -2,7 +2,7 @@
 name: ledger-backend
 description: >
   API, auth, DB and migration work in this repo: `src/api.ts`, `src/auth.ts`,
-  `src/db.ts`, `src/crypto.ts`, `src/env.ts`, `src/http.ts`, `src/server.ts`,
+  `src/db.ts`, `src/crypto.ts`, `src/env.ts`, `src/http.ts`, `src/migrate.ts`, `src/server.ts`,
   `src/worker.ts`, `src/routes/*`, `src/services/*`, `migrations/*.sql`. Use for new endpoints, permission/session changes, schema
   changes, or backend test failures. Do NOT use for Gmail/PDF parsing (that is
   ledger-ingestion) or for React/MUI work under `web/`.

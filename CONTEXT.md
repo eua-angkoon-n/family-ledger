@@ -70,7 +70,7 @@ Gmail (poll ชั่วโมงละครั้ง)
 | `web/src/pages/MonthlyPlan.tsx` | แผนรายเดือน (`/planning?month=`) — รายการประจำ/เฉพาะเดือน, ยอดประมาณการ, mark paid, ลบรายการ, ปิด-เปิดเดือน |
 | `web/src/pages/Installments.tsx` · `AuditLog.tsx` · `Help.tsx` | งวดผ่อน (`/installments`, เข้าจากหน้าวางแผน), ประวัติการแก้ไข (`/audit`), คู่มือรวม (`/help`) |
 | `web/src/pages/TaxDocuments.tsx` · `TaxSummary.tsx` | คลังเอกสารภาษี / ประมาณการภาษี — **ปิดชั่วคราว** ตาม `web/src/features.ts` (โค้ดและ API ยังอยู่) |
-| `web/src/features.ts` | flag เปิด/ปิดหน้า — กรองทั้งเมนู route และหน้า `/help` จากที่เดียว |
+| `web/src/features.ts` | `isPageEnabled(path)` กรองเมนู route และหน้า `/help` จากรายการเดียว · `TAX_PAGES_ENABLED` คุมข้อความที่อ้างถึงหน้าภาษี |
 | `web/src/guide/` | เนื้อหาคู่มือ (`guides.ts`) ใช้ทั้ง tour ในหน้าและ `/help` — `test/guides.test.ts` ตรวจว่า selector ยังมีจริง |
 | `web/src/ui.tsx` · `theme.ts` · `format.ts` | primitive ร่วม (`PageHeader`, `EmptyState`, …), design token ตาม `DESIGN.md`, `formatBaht`/`formatDate` |
 | `web/src/components/` | ส่วนใช้ร่วม — `Money`/`MonthPicker`/`SummaryCard`/`ChartCard`/`TransactionTable`/`DataFreshness`/`ReviewDrawer`/`PaymentStatusChip`/`IncomeSection` และชิ้นส่วนหน้าภาษี |

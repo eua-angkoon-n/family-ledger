@@ -29,13 +29,15 @@ Same root `package.json` as the server; `web/tsconfig.json` is strict and cannot
 - Reuse `web/src/ui.tsx` (`PageHeader`, `EmptyState`, `LoadError`, `TableSkeleton`,
   `ConfirmDialog`, `FeedbackSnackbar`). Hard-to-undo actions need a confirm, and toolbar
   errors go to the snackbar. Border before shadow, and no card inside a card.
-- Each route in `App.tsx` is wrapped in `<Box component="section" aria-labelledby="<x>-heading">`,
-  and the page's `PageHeader id` must match. Imports use `.js` extensions.
+- A new route in `App.tsx` is wrapped in `<Box component="section" aria-labelledby="<x>-heading">`,
+  and the page's `PageHeader id` must match (`/installments` and `/settings` are older
+  exceptions). Imports use `.js` extensions.
 - `web/src/guide/guides.ts` points at elements by selector. If you rename or remove an `id`,
   `aria-label` or `data-tour`, update the guide as well. `test/guides.test.ts` fails otherwise,
   and it also requires every guide path to have a route in `App.tsx`.
-- To hide or re-enable a page, change `web/src/features.ts`, which filters the menu, the routes
-  and `/help`. Do not delete the page.
+- To hide or re-enable a page, use `web/src/features.ts`. `isPageEnabled(path)` filters the menu,
+  the routes and `/help`, and `TAX_PAGES_ENABLED` gates copy that mentions the tax pages. Do not
+  delete the page.
 - Keep `@mui/x-charts` inside lazy-loaded chunks (it is about 600KB). Prefer MUI or native
   features over a new dependency.
 - Must work at a 320px viewport. Tap targets are at least 40px, and the focus ring stays
@@ -43,5 +45,6 @@ Same root `package.json` as the server; `web/tsconfig.json` is strict and cannot
 - A user-visible change that ships bumps `src/version.ts` and adds a `CHANGELOG.md` entry
   (AGENTS.md §Versioning).
 
-Run `npm run build` and `npm test`, and report the real output. Say plainly that layout and
-clicks were not checked in a browser unless you actually checked them.
+Run `npm run build` and `npm run test:db` (plain `npm test` skips the DB suites), and report the
+real output. Say plainly that layout and clicks were not checked in a browser unless you
+actually checked them.

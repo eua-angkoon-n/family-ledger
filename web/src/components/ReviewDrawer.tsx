@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { TAX_PAGES_ENABLED } from '../features.js';
 import {
   Alert,
   Box,
@@ -269,7 +270,7 @@ export default function ReviewDrawer({ txnId, categories, taxEntities, onClose, 
                 {taxTreatment === '' && (taxEntityOverride !== '' || detail.account_default_tax_entity_id != null) && (
                   <Alert severity="warning">
                     ตั้ง Tax Entity ไว้แล้ว แต่ยังไม่ได้เลือก Tax Treatment — รายการนี้จะ<strong>ยังไม่ถูกนับ</strong>ในการประมาณการภาษี
-                    (ไปโผล่ที่ตัวนับ "ยังไม่ระบุ Tax Treatment" แทน) ถ้าต้องการให้นับเป็น
+                    {TAX_PAGES_ENABLED && '(ไปโผล่ที่ตัวนับ "ยังไม่ระบุ Tax Treatment" ในหน้าภาษีแทน) '}ถ้าต้องการให้นับเป็น
                     {detail.direction === 'credit' ? 'รายได้ธุรกิจ ให้เลือก "รายได้ธุรกิจ" ด้านบน' : 'ค่าใช้จ่ายหักภาษีได้ ให้เลือก "ค่าใช้จ่ายหักภาษีได้" ด้านบน'}
                   </Alert>
                 )}
