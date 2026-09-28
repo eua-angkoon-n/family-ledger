@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
+import { isPageEnabled, TAX_PAGES_ENABLED } from '../web/src/features.js';
 import { GUIDES, HELP_ORDER, guideForPath } from '../web/src/guide/guides.js';
 
 const WEB_SRC = join(import.meta.dirname, '..', 'web', 'src');
@@ -66,4 +67,12 @@ test('คู่มือ: guideForPath ตัดเหลือ segment แร�
   // /help ตั้งใจไม่มีคู่มือของตัวเอง (มันคือคู่มืออยู่แล้ว) ปุ่มคู่มือจึงไม่ขึ้นที่นั่น
   assert.equal(guideForPath('/help'), undefined);
   assert.equal(guideForPath('/'), undefined);
+});
+
+test('features: ปิดหน้าภาษีแล้วต้องหายจาก /help และหน้าอื่นยังอยู่ครบ', () => {
+  const shown = HELP_ORDER.filter(isPageEnabled);
+  for (const path of ['/tax', '/tax-documents']) {
+    assert.equal(shown.includes(path), TAX_PAGES_ENABLED, `${path} ต้องขึ้นใน /help ก็ต่อเมื่อ TAX_PAGES_ENABLED`);
+  }
+  assert.ok(shown.includes('/dashboard') && shown.includes('/student-loan'));
 });

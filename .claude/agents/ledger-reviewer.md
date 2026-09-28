@@ -21,12 +21,17 @@ there are none.
    `src/crypto.ts`' AES-256-GCM path.
 3. Authorisation: a route whose `user` / `admin` check was dropped or widened.
 4. Decrypted PDF bytes touching disk instead of staying in the `qpdf | pdftotext` pipe.
-5. Parser change with no new fixture in `test/fixtures/scb`, or one that regresses
-   another SCB layout or a documented edge case (`0.00` events, `No data`, overlapping
+5. Parser change with no new fixture in `test/fixtures/scb` or `test/fixtures/kbank`, or one
+   that regresses another layout or a documented edge case (`0.00` events, `No data`, overlapping
    statements) — see `CONTEXT.md`.
 6. A checksum made to pass by inferring a balance.
 7. Real statement data, `.eml`, `.env` or `data/` content staged for commit.
 8. Domain behaviour that contradicts `CONTEXT.md`, or a hard-to-reverse choice with
-   no ADR in `docs/adr/`.
+   no ADR in `docs/adr/`. That includes planning or income reconciling against `txn` (ADR-0004).
+9. Web: money shown or parsed without `formatBaht`/`parseBahtToSatang`, colours outside the
+   `web/src/theme.ts` tokens, status shown by colour alone, `@mui/x-charts` imported outside a
+   lazy chunk, or a selector used by `web/src/guide/guides.ts` renamed without updating it.
+10. A user-visible change without a `src/version.ts` bump and a matching `CHANGELOG.md` entry
+    (AGENTS.md §Versioning).
 
 Verify with `git diff` / `git status` and by reading the touched files. Do not edit.

@@ -1,9 +1,9 @@
 ---
 name: ledger-ingestion
 description: >
-  Gmail polling and SCB statement parsing: `src/gmail.ts`, `src/parsers/`,
-  `src/account-match.ts`, `test/fixtures/scb`, `test/gmail.test.ts`,
-  `test/scb-parser.test.ts`. Use for new statement layouts, parser/checksum bugs,
+  Gmail polling and SCB/KBank statement parsing: `src/gmail.ts`, `src/parsers/`,
+  `src/account-match.ts`, `test/fixtures/{scb,kbank}`, `test/gmail.test.ts`,
+  `test/scb-parser.test.ts`, `test/kbank-parser.test.ts`, `test/parser-registry.test.ts`. Use for new statement layouts, parser/checksum bugs,
   attachment or dedup issues, account matching. Do NOT use for API/schema work
   (ledger-backend) or UI work.
 tools: [Read, Edit, Write, Grep, Glob, Bash]
@@ -20,9 +20,13 @@ parser → checksum → `txn`.
 
 ## Rules for this repo
 
-- A parser change starts with a fixture. `test/fixtures/scb` holds redacted text
-  extracts — add one there and make it fail before editing `src/parsers/scb.ts`.
-  Never commit a real PDF or `.eml`.
+- A parser change starts with a fixture. `test/fixtures/scb` and `test/fixtures/kbank`
+  hold redacted text extracts. Add one there and make it fail before editing
+  `src/parsers/scb.ts` or `src/parsers/kbank.ts`. Never commit a real PDF or `.eml`.
+- Banks are chosen by `parser_key` through the registry in `src/parsers/index.ts`, which
+  `src/routes/banks.ts` and `src/worker.ts` share. A new bank means a new parser plus a
+  registry entry, not a branch inside an existing parser.
+- KBank has monthly and on-request statements (`monthly.txt`, `request.txt`, `empty.txt`).
 - Three real SCB layouts are supported (monthly e-Passbook with พ.ศ. years and
   masked account; current back-statement with Debit/Credit + running balance; older
   back-statement with a single code/channel column and time on the next line).
