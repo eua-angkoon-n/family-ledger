@@ -228,7 +228,7 @@ export default function ReviewDrawer({ txnId, categories, taxEntities, onClose, 
                     action={<Button size="small" onClick={() => setIncomeModalOpen(true)}>บันทึกเป็นรายได้เต็ม</Button>}
                   >
                     ถ้านี่คือเงินเดือนหรือรายได้ประจำ กดปุ่มนี้เพื่อบันทึกเป็น "รายได้เต็ม" ได้เลย —
-                    จะขึ้นเป็น "เงินได้จากงานประจำ" ในหน้าภาษี ส่วน Tax Treatment ด้านล่างมีไว้สำหรับรายได้ธุรกิจอื่นเท่านั้น
+                    จะนับเป็น "เงินได้จากงานประจำ" ตอนประมาณการภาษี ส่วน Tax Treatment ด้านล่างมีไว้สำหรับรายได้ธุรกิจอื่นเท่านั้น
                     {' '}รายได้ไม่ผูกกับธุรกรรมแล้ว กดซ้ำจะได้รายการซ้ำ
                   </Alert>
                 )}
@@ -268,7 +268,7 @@ export default function ReviewDrawer({ txnId, categories, taxEntities, onClose, 
                 </TextField>
                 {taxTreatment === '' && (taxEntityOverride !== '' || detail.account_default_tax_entity_id != null) && (
                   <Alert severity="warning">
-                    ตั้ง Tax Entity ไว้แล้ว แต่ยังไม่ได้เลือก Tax Treatment — รายการนี้จะ<strong>ยังไม่ถูกนับ</strong>ในหน้าประมาณการภาษี
+                    ตั้ง Tax Entity ไว้แล้ว แต่ยังไม่ได้เลือก Tax Treatment — รายการนี้จะ<strong>ยังไม่ถูกนับ</strong>ในการประมาณการภาษี
                     (ไปโผล่ที่ตัวนับ "ยังไม่ระบุ Tax Treatment" แทน) ถ้าต้องการให้นับเป็น
                     {detail.direction === 'credit' ? 'รายได้ธุรกิจ ให้เลือก "รายได้ธุรกิจ" ด้านบน' : 'ค่าใช้จ่ายหักภาษีได้ ให้เลือก "ค่าใช้จ่ายหักภาษีได้" ด้านบน'}
                   </Alert>
@@ -408,7 +408,7 @@ export default function ReviewDrawer({ txnId, categories, taxEntities, onClose, 
           open
           onClose={() => setIncomeModalOpen(false)}
           onSaved={() => {
-            onNotice({ message: 'บันทึกรายได้เต็มแล้ว — ดูยอดได้ที่หน้าภาษี', severity: 'success' });
+            onNotice({ message: 'บันทึกรายได้เต็มแล้ว', severity: 'success' });
             void load(detail.id);
             onSaved();
           }}

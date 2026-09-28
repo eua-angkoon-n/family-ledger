@@ -4,6 +4,7 @@ import {
 } from '@mui/material';
 import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded';
 import PrintRounded from '@mui/icons-material/PrintRounded';
+import { isPageEnabled, TAX_PAGES_ENABLED } from '../features.js';
 import { GUIDES, HELP_ORDER } from '../guide/guides.js';
 import { descriptionSx } from '../theme.js';
 import { PageHeader } from '../ui.js';
@@ -21,7 +22,7 @@ export default function Help() {
         level={1}
         id="help-heading"
         title="คู่มือการใช้งาน"
-        description="อธิบายทุกหน้าตั้งแต่ตั้งค่าบัญชีธนาคารจนถึงประมาณการภาษี · ในแต่ละหน้ายังมีปุ่มคู่มือ (?) ข้างชื่อหน้า กดแล้วจะไฮไลต์ทีละขั้นบนหน้าจอจริง"
+        description="อธิบายการใช้งานทุกหน้า ตั้งแต่ตั้งค่าบัญชีธนาคารเป็นต้นไป · ในแต่ละหน้ายังมีปุ่มคู่มือ (?) ข้างชื่อหน้า กดแล้วจะไฮไลต์ทีละขั้นบนหน้าจอจริง"
         action={
           <Button variant="outlined" startIcon={<PrintRounded />} onClick={() => window.print()} sx={{ whiteSpace: 'nowrap' }}>
             พิมพ์คู่มือ
@@ -30,7 +31,7 @@ export default function Help() {
       />
 
       <Paper variant="outlined" sx={{ mt: 3, p: { xs: 2, sm: 3 } }}>
-        <Typography component="h2" variant="h2">เริ่มต้นใช้งานครั้งแรก 4 ขั้น</Typography>
+        <Typography component="h2" variant="h2">เริ่มต้นใช้งานครั้งแรก {TAX_PAGES_ENABLED ? 4 : 3} ขั้น</Typography>
         <Stack component="ol" spacing={1} sx={{ mt: 1.5, pl: 3, ...descriptionSx, color: 'text.secondary' }}>
           <li>
             ไปที่ <Link component={RouterLink} to="/accounts">บัญชีของฉัน</Link> เพิ่มบัญชีธนาคาร
@@ -38,15 +39,17 @@ export default function Help() {
           </li>
           <li>รอสักครู่ให้ระบบไล่อ่านอีเมลย้อนหลัง แล้วดูที่ <Link component={RouterLink} to="/dashboard">แดชบอร์ด</Link> ว่าข้อมูลเข้าครบถึงเดือนไหน</li>
           <li>ไปที่ <Link component={RouterLink} to="/transactions">ธุรกรรม</Link> จัดหมวดและยืนยันคู่โอน เพื่อให้รายงานตรงกับความจริง</li>
-          <li>
-            ถ้าต้องใช้เรื่องภาษี ให้เก็บใบเสร็จไว้ที่ <Link component={RouterLink} to="/tax-documents">เอกสารภาษี</Link>
-            {' '}แล้วดูประมาณการที่หน้า <Link component={RouterLink} to="/tax">ภาษี</Link>
-          </li>
+          {TAX_PAGES_ENABLED && (
+            <li>
+              ถ้าต้องใช้เรื่องภาษี ให้เก็บใบเสร็จไว้ที่ <Link component={RouterLink} to="/tax-documents">เอกสารภาษี</Link>
+              {' '}แล้วดูประมาณการที่หน้า <Link component={RouterLink} to="/tax">ภาษี</Link>
+            </li>
+          )}
         </Stack>
       </Paper>
 
       <Box sx={{ mt: 3 }}>
-        {HELP_ORDER.map((path) => {
+        {HELP_ORDER.filter(isPageEnabled).map((path) => {
           const guide = GUIDES[path];
           if (!guide) return null;
           return (
