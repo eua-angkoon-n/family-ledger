@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-09-28T07:59:10Z",
+  "generatedAt": "2026-09-28T10:03:44Z",
   "title": "Design System: Hyacinthia Ledger",
   "extensions": {
     "colorMeta": {
@@ -22,7 +22,7 @@
     },
     "shadows": [
       { "name": "low-lift", "value": "0px 2px 1px -1px rgba(0,0,0,0.2), 0px 1px 1px 0px rgba(0,0,0,0.14), 0px 1px 3px 0px rgba(0,0,0,0.12)", "purpose": "Hover หรือพื้นผิวขนาดเล็กที่ยกขึ้นชั่วคราว" },
-      { "name": "floating-menu", "value": "0px 5px 5px -3px rgba(0,0,0,0.2), 0px 8px 10px 1px rgba(0,0,0,0.14), 0px 3px 14px 2px rgba(0,0,0,0.12)", "purpose": "Menu และ popover" },
+      { "name": "floating-menu", "value": "0px 5px 5px -3px rgba(0,0,0,0.2), 0px 8px 10px 1px rgba(0,0,0,0.14), 0px 3px 14px 2px rgba(0,0,0,0.12)", "purpose": "Menu, popover, navigation drawer (จอ < 900px) และแถบ action ที่ลอยเมื่อเลือกแถว" },
       { "name": "dialog-focus", "value": "0px 11px 15px -7px rgba(0,0,0,0.2), 0px 24px 38px 3px rgba(0,0,0,0.14), 0px 9px 46px 8px rgba(0,0,0,0.12)", "purpose": "Dialog ที่แยกจากฉากหลัง" }
     ],
     "motion": [
@@ -66,7 +66,7 @@
       "name": "Navigation Tabs",
       "kind": "nav",
       "refersTo": "nav-tab-active",
-      "description": "Primary product navigation พร้อม selected indicator",
+      "description": "Primary product navigation พร้อม selected indicator ตามด้วยไอคอนคู่มือ/ประวัติ/ออกจากระบบ; จอ ≥ 1200px (lg) แบรนด์ + tabs ไอคอนพร้อมชื่อเมนู; จอ 900–1199px (md) แบรนด์ + tabs ไอคอนล้วน ชื่อเมนูอยู่ใน Tooltip (hover และ focus) และเป็น accessible name; tabs คงเป็น scrollable กันตัดหายเงียบ ๆ ลูกศรขึ้นเฉพาะตอนล้นจริง (เช่นเปิดหน้าภาษีกลับ) จอ < 900px แทนด้วยปุ่ม ☰ + แบรนด์ ปุ่ม ☰ เปิด Drawer ซ้าย (surface, border, Floating Menu elevation) ที่มีเมนูหลักครบ + ตั้งค่า (แอดมิน) คั่น divider แล้วตามด้วย คู่มือการใช้งาน/ประวัติการเปลี่ยนแปลง/ออกจากระบบ รายการที่เลือกใช้ accent ทั้งสองแบบอยู่ใน nav aria-label=\"เมนูหลัก\" ตัวเดียวที่ mount ตลอด scrollable tabs ยังใช้กับเมนูตั้งค่าที่ยาว",
       "html": "<nav class=\"ds-tabs\" aria-label=\"เมนูหลัก\"><button class=\"ds-tab is-active\">แดชบอร์ด</button><button class=\"ds-tab\">ธุรกรรม</button><button class=\"ds-tab\">วางแผน</button></nav>",
       "css": ".ds-tabs { display: flex; min-height: 48px; border-bottom: 1px solid #32364d; background: #0e101f; } .ds-tab { position: relative; min-width: 72px; min-height: 48px; padding: 12px 16px; border: 0; background: transparent; color: #9498a5; font: 650 .875rem/1.5 system-ui, 'Noto Sans Thai', sans-serif; cursor: pointer; } .ds-tab:hover { color: #e9ebf2; } .ds-tab:focus-visible { outline: 2px solid #70adfb; outline-offset: -2px; } .ds-tab.is-active { color: #70adfb; } .ds-tab.is-active::after { content: ''; position: absolute; right: 0; bottom: 0; left: 0; height: 2px; border-radius: 2px; background: #70adfb; }"
     },
@@ -103,7 +103,10 @@
       { "name": "The Restrained Accent Rule", "body": "Hyacinthia Sky มีไว้สำหรับ action, focus และ selection ไม่ใช่สีตกแต่งทั่วไป", "section": "colors" },
       { "name": "The Two-Lane Type Rule", "body": "ใช้ iannnnn-DOG เฉพาะชื่อหน้า หัวข้อ แบรนด์ และข้อความอธิบาย ส่วนข้อมูลและ controls ใช้ system-ui; ห้ามสลับบทบาทระหว่างสองชุดโดยไม่มีเหตุผลเชิงความหมาย", "section": "typography" },
       { "name": "The Financial Clarity Rule", "body": "ตัวเลข จำนวนเงิน เลขบัญชี อีเมล และข้อมูลเทคนิคใช้ system-ui หรือ monospace พร้อม tabular-nums เมื่อมีตัวเลขที่ต้องเทียบแนว ห้ามใช้ iannnnn-DOG กับข้อมูลสำคัญ", "section": "typography" },
-      { "name": "The Earned Shadow Rule", "body": "ทุกเงาต้องอธิบายการซ้อนชั้นหรือ interaction state ได้ ถ้าเอาเงาออกแล้วความหมายไม่เปลี่ยน เงานั้นไม่จำเป็น", "section": "elevation" }
+      { "name": "The Earned Shadow Rule", "body": "ทุกเงาต้องอธิบายการซ้อนชั้นหรือ interaction state ได้ ถ้าเอาเงาออกแล้วความหมายไม่เปลี่ยน เงานั้นไม่จำเป็น", "section": "elevation" },
+      { "name": "The Floating Selection Bar Rule", "body": "แถบ action ที่ลอยเหนือเนื้อหาเมื่อมีรายการ/แถวถูกเลือก ใช้ Floating Menu (MUI elevation 8) เพราะมันซ้อนเหนือเนื้อหาจริงตาม Earned Shadow Rule และยึดติดขอบล่างจอ (fixed bottom) แถบต้องไม่บังการทำงานของ version badge มุมล่างขวา (ผู้ใช้ยังต้องอ่านเลขเวอร์ชันได้) และต้องไม่ทับ snackbar — ระหว่างที่แถบแสดงอยู่ snackbar ย้ายไปขึ้นด้านบนจอแทน", "section": "elevation" },
+      { "name": "The Toggle Chip Rule", "body": "chip ทำหน้าที่เป็นตัวกรองแบบเปิด/ปิดได้เมื่อมี aria-pressed บอกสถานะเสมอ ตอนเลือกใช้ accent (color=\"primary\", variant=\"filled\") ตอนไม่เลือกเป็น outlined สีปกติ และ label ต้องบอกว่ากรองอะไร (ตัวอย่าง: chip \"ยังไม่ตรวจสอบ\" ในหน้าธุรกรรม) ห้ามใช้ chip แทนปุ่ม action ทั่วไป", "section": "components" },
+      { "name": "The Row Action Rule", "body": "ในตารางข้อมูลแน่น action หลักของแถวคงเป็นปุ่มข้อความ ส่วน action รอง (แก้ไข / ข้าม / เอากลับเข้าแผน / ลบ / เลิกใช้) เป็น icon button ที่มี Tooltip และ aria-label บอกชื่อ action เพื่อให้ตารางพอดีกรอบโดยไม่ต้องเลื่อนแนวนอนบนเดสก์ท็อป", "section": "components" }
     ],
     "dos": [
       "Do ใช้ Hyacinthia Sky เฉพาะ primary action, focus และ current selection",

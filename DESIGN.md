@@ -172,6 +172,8 @@ Hyacinthia Ledger คือสมุดบัญชีครอบครัว�
 
 **The Earned Shadow Rule.** ทุกเงาต้องอธิบายการซ้อนชั้นหรือ interaction state ได้ ถ้าเอาเงาออกแล้วความหมายไม่เปลี่ยน เงานั้นไม่จำเป็น
 
+**The Floating Selection Bar Rule.** แถบ action ที่ลอยเหนือเนื้อหาเมื่อมีรายการ/แถวถูกเลือก ใช้ Floating Menu (MUI elevation 8) เพราะมันซ้อนเหนือเนื้อหาจริงตาม Earned Shadow Rule และยึดติดขอบล่างจอ (fixed bottom) แถบต้องไม่บังการทำงานของ version badge มุมล่างขวา (ผู้ใช้ยังต้องอ่านเลขเวอร์ชันได้) และต้องไม่ทับ snackbar — ระหว่างที่แถบแสดงอยู่ snackbar ย้ายไปขึ้นด้านบนจอแทน
+
 ## Components
 
 Component vocabulary คือ **คุ้นเคย มั่นใจ และเป็นมิตร** ใช้ MUI เป็นฐาน รูปทรง 10px และ state ที่สม่ำเสมอทั่วระบบ
@@ -188,6 +190,9 @@ Component vocabulary คือ **คุ้นเคย มั่นใจ แล
 
 - **Style:** รูปทรง pill ใช้แสดงสถานะสั้น ๆ ไม่ใช้เป็นปุ่มทั่วไป
 - **State:** success ใช้ `income`; self/selected ใช้ `accent`; ทุก chip ต้องมี label ที่อธิบายความหมาย
+- **Toggle filter:** chip กดได้เฉพาะเมื่อเป็นตัวกรองแบบเปิด/ปิด ตาม The Toggle Chip Rule ด้านล่าง
+
+**The Toggle Chip Rule.** chip ทำหน้าที่เป็นตัวกรองแบบเปิด/ปิดได้เมื่อมี `aria-pressed` บอกสถานะเสมอ ตอนเลือกใช้ `accent` (`color="primary"`, `variant="filled"`) ตอนไม่เลือกเป็น outlined สีปกติ และ label ต้องบอกว่ากรองอะไร (ตัวอย่าง: chip "ยังไม่ตรวจสอบ" ในหน้าธุรกรรม) ห้ามใช้ chip แทนปุ่ม action ทั่วไป
 
 ### Cards / Containers
 
@@ -205,14 +210,22 @@ Component vocabulary คือ **คุ้นเคย มั่นใจ แล
 
 ### Navigation
 
-- ใช้ app bar แบบ sticky และ tab navigation ที่คุ้นเคย
-- tab ปกติใช้ `muted`; tab ที่เลือกใช้ `accent` พร้อม indicator
-- มือถือคง action หลักไว้ ลดรายละเอียดแบรนด์ที่ไม่จำเป็น และใช้ scrollable tabs สำหรับเมนูตั้งค่าที่ยาว
+- ใช้ app bar แบบ sticky ทุกขนาดจอ
+- จอ ≥ 1200px (MUI `lg`): แบรนด์ + tab navigation แบบไอคอนพร้อมชื่อเมนู ตามด้วยไอคอนคู่มือ/ประวัติ/ออกจากระบบ
+- จอ 900–1199px (MUI `md`): แบรนด์ + tabs แบบไอคอนล้วน ชื่อเมนูอยู่ใน Tooltip (ขึ้นทั้งตอน hover และ focus) และเป็น accessible name ของ tab ตามด้วยไอคอนคู่มือ/ประวัติ/ออกจากระบบ
+- tabs เมนูหลักคงเป็น scrollable ไว้กันตัดหายเงียบ ๆ เมื่อเมนูยาวขึ้น (เช่นเปิดหน้าภาษีกลับ) ลูกศรขึ้นเฉพาะตอนล้นจริง
+- จอ < 900px: app bar เหลือปุ่ม ☰ กับแบรนด์ ปุ่ม ☰ เปิด Drawer ด้านซ้าย (พื้น `surface`, เส้นขอบ `border`, Floating Menu elevation) ที่มีเมนูหลักครบ + ตั้งค่า (แอดมิน) แล้วคั่นด้วย divider ก่อน คู่มือการใช้งาน / ประวัติการเปลี่ยนแปลง / ออกจากระบบ; กดรายการแล้ว drawer ปิดเอง
+- tab ปกติใช้ `muted`; tab ที่เลือกใช้ `accent` พร้อม indicator; รายการที่เลือกใน drawer ใช้ `accent` บนพื้น selected จาง ๆ
+- เมนูหลักทั้งสองแบบอยู่ใน `<nav aria-label="เมนูหลัก">` ตัวเดียวที่ mount ตลอด (คู่มือในแอปไฮไลต์กล่องนี้)
+- scrollable tabs ยังใช้กับเมนูตั้งค่าที่ยาว
 
 ### Tables and Dialogs
 
 - ตารางใช้ขนาด compact, header น้ำหนัก 650, เส้นแบ่ง `border` และเลื่อนแนวนอนได้บนจอแคบ
+- ตารางข้อมูลแน่นจัด action ในแถวตาม The Row Action Rule ด้านล่าง
 - dialog ใช้ MUI focus management, ความกว้างตามเนื้อหา, divider ชัด และ Dialog Focus elevation
+
+**The Row Action Rule.** ในตารางข้อมูลแน่น action หลักของแถวคงเป็นปุ่มข้อความ ส่วน action รอง (แก้ไข / ข้าม / เอากลับเข้าแผน / ลบ / เลิกใช้) เป็น icon button ที่มี Tooltip และ `aria-label` บอกชื่อ action เพื่อให้ตารางพอดีกรอบโดยไม่ต้องเลื่อนแนวนอนบนเดสก์ท็อป
 
 ## Do's and Don'ts
 
