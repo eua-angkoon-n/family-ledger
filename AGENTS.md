@@ -28,6 +28,9 @@ npm run migrate     # รัน migration เอง (ปกติแอปรั
 - **"test ผ่าน" ต้องมาจาก `npm run test:db` เท่านั้น** `npm test` ข้าม suite ที่ต้องใช้ DB โดยไม่ fail
 - รันเทสต์ไฟล์เดียว: `node --env-file=.env.test --test --import tsx test/<name>.test.ts`
 - ไม่มี lint และไม่มี React component test — ฝั่ง web ตรวจด้วย `npm run build` กับ `test/guides.test.ts`
+- ตรวจหน้า UI จริงด้วย Playwright MCP (`.mcp.json`, ใช้ Chrome ในเครื่อง): รัน `dev:api` + `dev:web` แล้วเปิด
+  `http://localhost:5173` — profile ของ browser เก็บถาวร ล็อกอิน Google ด้วยมือครั้งแรกครั้งเดียว
+  MCP tools ใช้ได้ใน main session เท่านั้น (subagent ของ repo ไม่ได้ประกาศ tool เหล่านี้)
 
 ## Architecture (ภาพรวม — รายละเอียดอยู่ `CONTEXT.md`)
 
