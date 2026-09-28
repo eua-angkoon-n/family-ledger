@@ -31,4 +31,5 @@ Used by `/wayfinder`. The **map** is a file with one **child** file per ticket.
 
 ## Pull requests
 
-Not a request surface for this repo — there is no remote. Triage handles issue files only.
+Not a request surface for this repo. The code is hosted on GitHub (`eua-angkoon-n/family-ledger`) and changes land
+through PRs, but issues are not tracked there. Triage handles `.scratch/` issue files only.

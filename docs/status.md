@@ -1,11 +1,13 @@
-# สถานะงาน — 2026-09-05
+# สถานะงาน — 2026-09-28 (v1.2.3)
 
-ข้อบังคับและท่อข้อมูลอยู่ที่ `CONTEXT.md` · การตัดสินใจอยู่ที่ `docs/adr/0001-statement-pdf-ingestion.md`
-และ `docs/adr/0002-imported-transactions-monthly-planning-and-reconciliation.md`
+ข้อบังคับและท่อข้อมูลอยู่ที่ `CONTEXT.md` · การตัดสินใจอยู่ที่ `docs/adr/` (0001–0004)
+บันทึกรายเวอร์ชันสำหรับผู้ใช้อยู่ที่ `CHANGELOG.md` — ไฟล์นี้เป็นบันทึกเชิงเทคนิคต่อ slice เรียงตามเวลา
+หัวข้อเก่าเล่าสิ่งที่ทำ ณ ตอนนั้น ส่วนที่ถูกแทนแล้วมีหมายเหตุกำกับ ดูสถานะปัจจุบันจากหัวข้อท้ายไฟล์
 
 ## Git
 
-- บน `master`, ล่าสุดถึง Slice 8 (Tax Calculation) — ดูรายละเอียดที่ section ของแต่ละ Slice ด้านล่าง
+- บน `master` ล่าสุดคือ v1.2.3 — Slice 1–8 และงานหลังปิดสโคป (v1.1.0, v1.1.x–1.2.3) ดูหัวข้อด้านล่าง
+- งานเข้า `master` ผ่าน PR บน GitHub (`eua-angkoon-n/family-ledger`) · prod ที่ `ledger.tapestopnight.com` (`docs/deploy.md`)
 - หลัง Slice 1–3 มีงาน rebrand เป็น "Hyacinthia Ledger" และ redesign หน้าเว็บทั้งหมดด้วย MUI
   (โฟลเดอร์/`package.json` ยังชื่อ `family-ledger` — ยังไม่ได้ตามรีเนม)
 - PDF, `.eml`, `.env` และ `data/` ถูก ignore ไม่เข้า git
@@ -70,16 +72,16 @@
 - ตรวจไฟล์จริงแล้ว: รายเดือน 90 รายการ, แบบร้องขอ 191 รายการ และ checksum ผ่านทั้งคู่
 - หลัง deploy บัญชี KBank เดิมต้องสั่ง Full sync หนึ่งครั้ง; บัญชีที่สร้างใหม่ใช้ backfill เดิมอัตโนมัติ
 
-## ตั้งค่า local ที่ต้องแก้ก่อน deploy
+## ตั้งค่า local ที่ต้องแก้ก่อน deploy — ทำแล้ว
 
-`docker-compose.yml` ใช้ `NODE_ENV: development` เพื่อทดสอบผ่าน HTTP localhost ก่อน deploy หลัง Caddy/HTTPS
-ต้องเปลี่ยนเป็น `production` เพื่อให้ session cookie เป็น `secure:true`
+`docker-compose.yml` ตั้ง `NODE_ENV: production` แล้ว (`764c4de`) session cookie จึงเป็น `secure:true`
+เข้าผ่าน HTTPS ของ Caddy เท่านั้น — ดู `docs/deploy.md` §ข้อควรระวัง
 
 ## Requirement ที่ยังไม่มี Slice รองรับ
 
 - Tax Invoice / `TaxInvoiceRecord`
-- audit log การเข้าถึงและแก้ไขข้อมูล
-- `txn.category_id` และตาราง category
+- ~~audit log การเข้าถึงและแก้ไขข้อมูล~~ ทำแล้ว (Slice 7 + v1.1.0)
+- ~~`txn.category_id` และตาราง category~~ ทำแล้ว (Slice 4A — `txn_annotation`/`category`)
 
 ## Slice 4+ — วางแผนแล้ว แตกเป็นเอกสารรายเฟส
 
@@ -143,10 +145,10 @@
   `check (recurring_rule_id is null or occurrence_date is not null)`
 - service: `recurring-generation.ts` (`occurrencesInMonth` pure + generate แบบ **insert-only**),
   `plan-query.ts` (`PAYMENT_STATE_SQL`/`planTotals`/`paymentStatusSummary`/`loadOwnedItem`/`assertOwnedRefs`),
-  `payment-reconciliation.ts` (เกณฑ์ §9.5 ครบ auto-match เฉพาะ candidate เดียว)
+  `payment-reconciliation.ts` (เกณฑ์ §9.5 ครบ auto-match เฉพาะ candidate เดียว) *(ถูกตัดออกใน 1.1.x — ดู ADR-0004)*
 - route: `monthly-plans.ts` (GET เดือน + items + copy-previous + skip + payments + close/reopen +
   PATCH payment) และ `recurring-rules.ts` (CRUD + archive) — `reconcilePayments` ต่อสายทั้งใน
-  `worker.ts:doSync` และใน `POST /monthly-plan-items/:id/payments`
+  `worker.ts:doSync` และใน `POST /monthly-plan-items/:id/payments` *(ถูกตัดออกใน 1.1.x — ดู ADR-0004)*
 - web: `web/src/pages/MonthlyPlan.tsx` (`/planning?month=`), `PaymentStatusChip.tsx`,
   `MonthPicker` รับ `maxMonth` เพื่อเลือกเดือนอนาคตได้, การ์ด "เงินเหลือใช้ตามแผน" และ
   "สถานะการจ่ายบิล" ใน `Dashboard.tsx` เปิดใช้จริงแล้ว (คลิกไป `/planning`)
@@ -200,8 +202,11 @@
 - **generation เป็น insert-only** (`on conflict do nothing`) ห้ามเปลี่ยนเป็น upsert เด็ดขาด —
   เป็นกลไกเดียวที่ทำให้การแก้ `recurring_rule` ไม่ย้อนแก้เดือนที่ปิดแล้ว (§16 ข้อ 16)
   ผลตามมา: item ที่ `skipped`/`cancelled` ห้ามลบ แถวต้องอยู่เพื่อกัน re-insert จึงไม่มี DELETE endpoint
+  *(ภายหลัง `58563c7` เพิ่ม `DELETE /api/monthly-plan-items/:id` แล้ว — generation ข้ามกฎที่มีแถวในเดือนนั้นอยู่แล้วทั้งกฎ
+  ลบรายการของกฎออกหมด = กางใหม่ตามกฎปัจจุบัน และตอบ 409 ถ้ามี payment ที่ยังไม่ยกเลิก)*
 - **`occurrence_date` ห้ามให้ผู้ใช้แก้** เป็นคีย์กันสร้างซ้ำ ถ้าวันไหนเปิดให้ PATCH ได้ บั๊กแถวซ้ำ
   ที่แก้ไปแล้วจะกลับมาทันที
+- *(ถูกตัดออกใน 1.1.x — ดู ADR-0004)* สามข้อถัดไป (ยืนยันคู่ด้วยมือ, `reconcilePayments`, ทิศทาง txn ตอนจับคู่) เหลือไว้เป็นประวัติ
 - **ยืนยันคู่ด้วยมือบังคับยอด/ทิศทาง/บัญชี แต่ไม่บังคับกรอบ ±3 วัน** — ขั้นตอนนี้คือให้คนตัดสินสิ่งที่
   ระบบตัดสินไม่ได้ วันที่คลาดกันได้จริงเวลาธนาคารลงรายการช้า แต่ยอดกับทิศทางเป็นข้อเท็จจริงที่ต่อรองไม่ได้
   (UI ค้น candidate ในกรอบ ±3 วันเพื่อให้ตรงกับที่ระบบพิจารณา)
@@ -235,6 +240,7 @@
 - Migration `008_income_and_installments.sql` — `income_record`, `income_deduction`, `installment_plan`, `installment_due`
   (เลื่อนจาก `007` เพราะ `007_kbank_statement_parser.sql` แทรกก่อนโดยไม่อยู่ในแผนเดิม)
 - ผูก income record เข้ากับ monthly plan item เดิม, จับคู่ยอดสุทธิกับ deposit จริงอัตโนมัติเมื่อยอดตรง
+  *(การจับคู่ deposit ถูกตัดออกใน 1.1.x — ดู ADR-0004)*
 - Installment plan คำนวณงวด (anchor date, เงินดาวน์, เศษงวดสุดท้าย) และผูก due เข้า monthly plan item
   ผ่าน `monthly_plan_item_installment_due_fk` ที่ใส่ FK ทีหลังตาม precedent การเลื่อน FK ข้ามสไลซ์
 - หน้า `Installments.tsx` + `IncomeSection.tsx` ใน web
@@ -352,7 +358,7 @@ Slice 4A–8 เสร็จครบตามแผน — ตัดสิน�
 
 **2. คู่มือระบบ + ปุ่ม Guide**
 
-- `web/src/guide/guides.ts` เป็นเนื้อหาชุดเดียว ใช้ทั้ง tour และหน้า `/help` (ครบ 9 หน้า)
+- `web/src/guide/guides.ts` เป็นเนื้อหาชุดเดียว ใช้ทั้ง tour และหน้า `/help` (ครบ 9 หน้า ณ v1.1.0 — v1.2.0 เพิ่มหน้า กยศ. เป็น 10)
 - `GuideTour.tsx` เขียนด้วย MUI ล้วน ไม่เพิ่ม dependency — ไฮไลต์ด้วย `box-shadow` spread 9999px
   (ได้ "รูโหว่" ในฉากมืดโดยไม่ต้องวาดสี่กล่องล้อม) ชั้นบล็อกคลิกแยกจากกรอบไฮไลต์
 - **จงใจไม่มี transition บนกรอบไฮไลต์**: ตำแหน่งถูกเซ็ตใหม่ทุก scroll event ถ้าใส่ transition กรอบจะ
@@ -370,7 +376,7 @@ Slice 4A–8 เสร็จครบตามแผน — ตัดสิน�
 - ไม่สร้างตารางใหม่ — ใช้ `audit_log` (migration 009) และ `audit()` เดิม **ไม่มี migration ในงานนี้**
 - เติม audit ครบทุก route ที่แก้ข้อมูล: `bank_account.create/update`, `bank.create/update/delete`,
   `category.create/update`, `tax_entity.create/update`, `recurring_rule.create/update/archive`,
-  `income_record.create/update/match/unmatch`, `tax_document.upload/update/archive`,
+  `income_record.create/update/match/unmatch` (`match/unmatch` หายไปพร้อม ADR-0004), `tax_document.upload/update/archive`,
   `installment_due.skip/restore`, `email_account.sync`, `app_user.update`
 - เหตุการณ์ auth: `auth.login` / `auth.signup` / `auth.mailbox_add` / `auth.logout` — `logout` อ่าน
   `session.userId` ก่อน `destroy` และ audit ล้มห้ามกันคนออกจากระบบ (catch → stdout)
@@ -394,11 +400,44 @@ Slice 4A–8 เสร็จครบตามแผน — ตัดสิน�
 
 - `npm run test:db` — เพิ่ม `test/authz.test.ts` ข้อ 42–44 และ `test/guides.test.ts` (4 เทสต์, pure)
   · `npm run build` สะอาด
-- **`test/kbank-parser.test.ts` แถวลบบรรทัด "ยอดยกมา" ทิ้งแล้วคาดว่า `checksumValid=false` fail อยู่**
-  บน `origin/master` **ก่อน**งานนี้ — ไม่ได้แตะ `src/parsers/` เลย ยังไม่แก้ (คนละเรื่อง)
+- ~~`test/kbank-parser.test.ts` แถวลบบรรทัด "ยอดยกมา" fail อยู่บน `origin/master`~~ — 2026-09-28 `npm run test:db`
+  ผ่านครบ 249/249 แล้ว ไม่มีเทสต์ KBank ค้าง fail
 - **ยังไม่เคยเปิดดูในเบราว์เซอร์จริง** เหมือนทุกเฟสก่อนหน้า — เรื่องที่ต้องใช้ตาคนดูมากที่สุดคือ tour:
   tsc/vite ยืนยันว่า compile ผ่าน แต่ไม่ยืนยันว่ากรอบไฮไลต์ตกที่ถูกตัว การ์ดไม่ล้นจอ 320px หรือ focus
   กลับถูกที่ (`test/guides.test.ts` ยืนยันได้แค่ว่า selector ยังมีอยู่จริงใน source)
+
+## หลัง v1.1.0 — v1.1.x ถึง 1.2.3 (เสร็จแล้ว)
+
+**แผนรายเดือน**
+- `58563c7` เปลี่ยน `anchor_day` ของกฎแล้วรายการไม่ซ้ำอีก · เพิ่ม `DELETE /api/monthly-plan-items/:id` + ปุ่มลบ
+- `4afd82c` + migration `011_estimated_item_amount_mode.sql` — `monthly_plan_item.amount_mode` copy มาจากกฎ
+  รายการยอดประมาณการนับเป็น `paid` ทันทีที่กดจ่าย ไม่ค้าง "จ่ายบางส่วน"
+- `8fb5d23` / `4073263` รายการรายได้ในแผนเปิดฟอร์มรายได้แทนปุ่ม "จ่ายแล้ว"
+- **`2ff6675` (feat!) ตัด reconciliation ออกทั้งระบบ** — แผนไม่จับคู่กับ `txn` รายได้ไม่ผูก deposit
+  ลบ `services/payment-reconciliation.ts` และ endpoint `/candidates` `/match` `/unmatch` · บันทึกเป็น ADR-0004
+  (แทนส่วน reconciliation ของ ADR-0002) คอลัมน์เก่า (`txn_id`, `verified_at`) ยังอยู่ในฐานแต่ไม่มีใครอ่าน/เขียน
+
+**หน้าใหม่**
+- `6c60fea` หน้า static สาธารณะ `web/public/home.html`, `privacy.html`, `terms.html`
+- 1.2.0–1.2.2 หน้า "หนี้ กยศ." (`/student-loan`) — migration `012_student_loan.sql`, `services/student-loan.ts`
+  (pure: Step Up 15 งวด, ดอกเบี้ย 1%/ปีเดินรายวัน, ลำดับตัดชำระ พ.ร.บ. 2566), `routes/student-loan.ts`,
+  `web/src/pages/StudentLoan.tsx` + คู่มือ · 1.2.1 debounce ช่องลองปรับตัวเลข · 1.2.2 ตารางรับจอแคบ
+
+**1.2.3 — ปิดหน้าภาษีชั่วคราว**
+- หน้า "เอกสารภาษี" (`/tax-documents`) และ "ภาษี" (`/tax`) ไม่อยู่ในเมนู route และ `/help` แล้ว
+  ผ่าน flag เดียว `TAX_PAGES_ENABLED` ใน `web/src/features.ts` — ลิงก์เก่าตก catch-all ไป `/dashboard`
+- **ไม่แตะ**: backend tax routes (ยังเรียกได้ด้วย `requireUser`), ข้อมูลภาษีในฐาน, ช่อง Tax Treatment ใน
+  `ReviewDrawer` และส่วน Tax Entity ในหน้าบัญชี · เปิดคืน = เปลี่ยน flag เป็น `true` แล้วขยับเวอร์ชัน
+- ข้อความที่เคยชี้ไป "หน้าภาษี" ใน ReviewDrawer/คู่มือ เขียนใหม่ให้เป็นกลาง อ่านได้ทั้งตอนเปิดและปิด
+
+**เครื่องมือพัฒนา**
+- เพิ่ม agent `ledger-web` (`.claude/agents/`) ดูแล `web/` + ดีไซน์ · `AGENTS.md` มีหัวข้อ Commands/Architecture
+- ลบ worktree/branch ที่ merge แล้วทั้งหมด (add-readme, deploy-production, legal-pages, version-guide-serverlog
+  และสาขา feat/fix ของ 1.1.x–1.2.x)
+
+**การตรวจสอบ (1.2.3)**
+- `npm run test:db` 249/249 · `npm test` 109 pass / 10 skip (suite ที่ต้องใช้ DB) · `npm run build` สะอาด
+- ยังไม่ได้เปิดดูในเบราว์เซอร์จริง เหมือนทุกเฟสก่อนหน้า
 
 ## UI design guideline — ปิดแล้ว
 
