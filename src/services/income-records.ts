@@ -109,9 +109,11 @@ async function linkItem(
       ).rowCount
     )
       throw new HttpError(409, "ต้องยกเลิก Payment เดิมก่อน");
+    // รายการหักถูกหักวันเดียวกับวันรับเงิน — ตามวันของรายได้ ถ้ารายได้ไม่มีวันก็คงวันเดิมไว้ (อาจเป็นวันของกฎประจำ)
+    // ฝั่ง income ถูกเขียนทับด้วย due_date ของรายได้อีกทีหลัง linkItem อยู่แล้ว
     await db.query(
-      "update monthly_plan_item set name=$2,planned_amount_satang=$3,income_record_id=$4,explicit_status='active',updated_at=now() where id=$1",
-      [itemId, name, amount, incomeId],
+      "update monthly_plan_item set name=$2,planned_amount_satang=$3,income_record_id=$4,explicit_status='active',due_date=coalesce($5,due_date),updated_at=now() where id=$1",
+      [itemId, name, amount, incomeId, date],
     );
     return itemId;
   }
@@ -162,8 +164,10 @@ export async function saveIncome(
     values.income_date == null || values.income_date === ""
       ? null
       : isoDate(values, "income_date");
-  if (date && date.slice(0, 7) !== month)
-    throw new HttpError(400, "วันที่รับเงินต้องอยู่ในเดือนรายได้");
+  // เงินเดือน ต.ค. ออก 30 ก.ย. ได้ — ยอมตั้งแต่ต้นเดือนก่อนถึงสิ้นเดือนถัดไป เทียบเป็นเลขเดือนล้วน ไม่มี timezone
+  const monthNo = (s: string) => Number(s.slice(0, 4)) * 12 + Number(s.slice(5, 7));
+  if (date && Math.abs(monthNo(date) - monthNo(month)) > 1)
+    throw new HttpError(400, "วันที่รับเงินต้องอยู่ระหว่างเดือนก่อนหน้าถึงเดือนถัดไปของแผน");
   await assertOwnedRefs(db, userId, { bankAccountId: account });
   const oldDeductions = previous
     ? (
