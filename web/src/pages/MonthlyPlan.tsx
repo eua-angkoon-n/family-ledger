@@ -52,7 +52,7 @@ import Modal from '../Modal.js';
 import Money from '../components/Money.js';
 import MonthPicker, { currentMonth, shiftMonth } from '../components/MonthPicker.js';
 import PaymentStatusChip, { PAYMENT_STATE_LABEL } from '../components/PaymentStatusChip.js';
-import IncomeSection from '../components/IncomeSection.js';
+import IncomeSection, { type IncomeSectionHandle } from '../components/IncomeSection.js';
 import PlanSelectionBar from '../components/PlanSelectionBar.js';
 import SummaryCard from '../components/SummaryCard.js';
 import { createFormFieldChangeHandler } from '../form.js';
@@ -271,6 +271,8 @@ export default function MonthlyPlan() {
   // หายเมื่อ payment ไม่ needs_review แล้ว) MUI คืน focus ให้เฉพาะเมื่อ element เดิมยังอยู่ —
   // ไม่งั้น focus ตกไปที่ body ใช้ปุ่มที่อยู่ถาวรบนหน้าเป็นที่รับ focus แทน (ท่าเดียวกับ Accounts.tsx)
   const addItemButtonRef = useRef<HTMLButtonElement>(null);
+  const incomeRef = useRef<IncomeSectionHandle>(null);
+  const incomeChangedRef = useRef(false);
 
   const setMonth = (next: string) =>
     setSearchParams((prev) => {
@@ -323,6 +325,7 @@ export default function MonthlyPlan() {
     setSelected(new Set());
     setBulkFailures(null);
     setItemFilter((f) => ({ ...f, category: '' }));
+    incomeChangedRef.current = false;
   }, [month]);
 
   // ตัด id ที่หายไปหลัง reload (ลบแล้ว) — ผูกกับ plan ไม่ใช่ items เพราะ items เป็น [] ใหม่ทุก render
@@ -364,6 +367,17 @@ export default function MonthlyPlan() {
       (failureAlertRef.current ?? document.getElementById('plan-select-all') ?? addItemButtonRef.current)?.focus({ preventScroll: true });
     }
   }, [bulkRunning]);
+
+  // บันทึกรายได้จากปุ่มบนแถวแล้ว MUI คืน focus ให้ปุ่มนั้นตอนปิดฟอร์ม แต่ reload ทำให้ปุ่มหายไป
+  // (แถวผูก income_record แล้ว) focus จึงตกไปที่ body — รอ plan ใหม่ commit ก่อนค่อยส่งต่อ
+  // ตั้ง flag ที่ปุ่มบนแถวเท่านั้น ปุ่ม "แก้ไข"/"เพิ่มรายได้เต็ม" ในส่วนรายได้ไม่ควรถูกดึง focus ออกมาที่ตาราง
+  useEffect(() => {
+    if (!incomeChangedRef.current) return;
+    incomeChangedRef.current = false;
+    if (document.activeElement == null || document.activeElement === document.body) {
+      (document.getElementById('plan-select-all') ?? addItemButtonRef.current)?.focus({ preventScroll: true });
+    }
+  }, [plan]);
 
   const closed = plan?.status === 'closed';
   const items = plan?.items ?? [];
@@ -846,7 +860,17 @@ export default function MonthlyPlan() {
             </Box>
           )}
 
-          <IncomeSection key={month} month={month} closed={closed} items={items} onChanged={() => reload(true)} />
+          <IncomeSection
+            key={month}
+            ref={incomeRef}
+            month={month}
+            closed={closed}
+            items={items}
+            onChanged={() => {
+              setNotice({ message: 'บันทึกรายได้แล้ว', severity: 'success' });
+              return reload(true);
+            }}
+          />
 
           <Box component="section" aria-labelledby="plan-items-heading">
             <Typography variant="h2" id="plan-items-heading" sx={{ fontSize: '1.25rem', mb: 1.5 }}>
@@ -1023,17 +1047,26 @@ export default function MonthlyPlan() {
 
                                       เงื่อนไข `paid_satang === 0`: แถวที่ยังมีประกาศจ่ายค้างอยู่ต้องเหลือ
                                       ปุ่ม "จ่ายแล้ว" ไว้ เพราะปุ่มยกเลิกการประกาศจ่ายอยู่ใน modal นั้น
-                                      ที่เดียว ถ้าสลับเป็น anchor ทั้งหมด จะยกเลิกของเก่าไม่ได้ และ
+                                      ที่เดียว ถ้าสลับเป็นปุ่มบันทึกรายได้ทั้งหมด จะยกเลิกของเก่าไม่ได้ และ
                                       dropdown ในฟอร์มรายได้ซ่อนรายการที่ยังมี payment อยู่ = ตัน
-                                      ยกเลิกแล้ว paid_satang กลับเป็น 0 ปุ่มจะสลับเป็น anchor ให้เอง */}
+                                      ยกเลิกแล้ว paid_satang กลับเป็น 0 ปุ่มจะสลับเป็นปุ่มบันทึกรายได้ให้เอง
+                                      ปุ่มนั้นเปิดฟอร์มรายได้ที่เชื่อมแถวนี้ไว้แล้วทันที ไม่ต้องเลื่อนไปหาเอง
+
+                                      key แยกสองปุ่ม: ไม่มี key React จะใช้ <button> เดิมต่อแล้วแค่ disable
+                                      หลังบันทึกรายได้ focus จึงค้างบนปุ่ม disabled แทนที่จะตกไปที่ body
+                                      ให้ effect ของ incomeChangedRef ส่งต่อ */}
                                   {item.kind === 'income' && item.income_record_id == null && item.paid_satang === 0 ? (
-                                    <Button size="small" startIcon={<PaidRounded />} href="#income-heading" disabled={closed || inactive || bulkRunning} sx={{ whiteSpace: 'nowrap' }}>
+                                    <Button key="income" size="small" startIcon={<PaidRounded />} onClick={() => {
+                                        incomeChangedRef.current = true;
+                                        incomeRef.current?.openNewFor(item.id);
+                                      }} disabled={closed || inactive || bulkRunning} sx={{ whiteSpace: 'nowrap' }}>
                                       บันทึกรายได้เต็ม
                                     </Button>
                                   ) : item.kind === 'payroll_deduction' &&
                                     item.income_record_id == null &&
                                     item.paid_satang === 0 ? null : (
                                     <Button
+                                      key="pay"
                                       size="small"
                                       startIcon={<PaidRounded />}
                                       disabled={closed || inactive || item.income_record_id != null || item.installment_due_id != null || bulkRunning}

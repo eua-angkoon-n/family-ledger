@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Alert, Box, Button, Checkbox, Chip, FormControlLabel, MenuItem, Paper, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from '@mui/material';
 import AddRounded from '@mui/icons-material/AddRounded';
@@ -19,7 +19,9 @@ function amount(value: string): number {
   return result;
 }
 
-export default function IncomeSection({ month, closed, items, onChanged }: { month: string; closed: boolean; items: PlanItem[]; onChanged: () => Promise<void> }) {
+export type IncomeSectionHandle = { openNewFor: (itemId: number) => void };
+
+export default forwardRef<IncomeSectionHandle, { month: string; closed: boolean; items: PlanItem[]; onChanged: () => Promise<void> }>(function IncomeSection({ month, closed, items, onChanged }, ref) {
   const [rows, setRows] = useState<IncomeRecord[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,6 +54,18 @@ export default function IncomeSection({ month, closed, items, onChanged }: { mon
   };
   const available = (kind: PlanItem['kind'], selected = '') => items.filter((item) =>
     item.kind === kind && (String(item.id) === selected || (item.income_record_id == null && item.installment_due_id == null && item.explicit_status === 'active' && !item.payments.some((p) => p.status !== 'cancelled'))));
+  // ปุ่ม "บันทึกรายได้เต็ม" บนแถวของแผนเปิดฟอร์มใหม่ที่เชื่อมรายการนั้นไว้แล้ว — ผลเท่ากับเลือกใน
+  // dropdown "เชื่อมรายได้ในแผน" เอง โหลดส่วนนี้ไม่สำเร็จ → เลื่อนไปให้เห็นปุ่มลองใหม่ ส่วนรายการที่ไม่อยู่ใน
+  // dropdown (ผูกไปแล้ว/มีการจ่าย) ไม่เปิดฟอร์มว่าง เพราะจะได้รายได้ซ้ำที่ไม่ผูกกับแผน
+  useImperativeHandle(ref, () => ({
+    openNewFor: (itemId) => {
+      if (error) { document.getElementById('income-heading')?.scrollIntoView({ block: 'start' }); return; }
+      const item = available('income').find((i) => i.id === itemId);
+      if (!item) return;
+      openEditor('new');
+      setForm({ ...emptyForm(), monthly_plan_item_id: String(item.id), name: item.name, gross: formatBaht(item.planned_amount_satang) });
+    },
+  }));
   const updateDeduction = (index: number, changes: Partial<DeductionForm>) => setForm((f) => ({ ...f, deductions: f.deductions.map((d, i) => i === index ? { ...d, ...changes } : d) }));
   const save = async () => {
     setBusy(true); setFormError('');
@@ -115,4 +129,4 @@ export default function IncomeSection({ month, closed, items, onChanged }: { mon
       </Stack>
     </Modal>
   </Box>;
-}
+});
