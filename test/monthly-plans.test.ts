@@ -646,6 +646,39 @@ test('monthly planning API', async (t) => {
     assert.equal(rows.filter(r=>r.id===a.id||r.id===b.id).length,2);
   });
 
+  await t.test('รายได้เต็ม: วันที่รับเงินอยู่ได้ตั้งแต่ต้นเดือนก่อนถึงสิ้นเดือนถัดไปของแผน รวมข้ามปี', async () => {
+    const lastDay=(ym:string)=>`${ym}-${new Date(Date.UTC(Number(ym.slice(0,4)),Number(ym.slice(5,7)),0)).getUTCDate()}`;
+    const postIncome=(month:string,income_date:string)=>send('/api/income-records','POST',{month,name:`Window ${income_date}`,gross_amount_satang:100,income_date});
+    const month=shiftMonth(11),prev=shiftMonth(10),next=shiftMonth(12);
+    // เงินเดือนเดือนนี้ที่ออกสิ้นเดือนก่อน — เก็บวันตามจริง ไม่เลื่อนเพราะ timezone
+    const early=await postIncome(month,lastDay(prev));
+    assert.equal(early.status,201,await early.clone().text());
+    const created=await early.json() as {id:number;income_date:string};
+    assert.equal(created.income_date,lastDay(prev));
+    assert.equal((await postIncome(month,lastDay(next))).status,201);
+    const before=await postIncome(month,lastDay(shiftMonth(9)));
+    assert.equal(before.status,400);
+    assert.equal((await before.json() as {error:string}).error,'วันที่รับเงินต้องอยู่ระหว่างเดือนก่อนหน้าถึงเดือนถัดไปของแผน');
+    assert.equal((await postIncome(month,`${shiftMonth(13)}-01`)).status,400);
+    assert.equal((await postIncome(month,`${shiftMonth(9)}-15`)).status,400);
+    // PATCH ใช้เดือนของแผนเดิมเสมอ กฎเดียวกัน
+    const patchDate=(income_date:string)=>send(`/api/income-records/${created.id}`,'PATCH',{income_date});
+    assert.equal((await patchDate(`${shiftMonth(13)}-01`)).status,400);
+    assert.equal((await patchDate(lastDay(shiftMonth(9)))).status,400);
+    const moved=await patchDate(`${next}-01`);
+    assert.equal(moved.status,200);
+    assert.equal((await moved.json() as {income_date:string}).income_date,`${next}-01`);
+    assert.equal((await patchDate(`${prev}-01`)).status,200);
+    // ข้ามปี: ใช้ ม.ค./ธ.ค. ในอดีตที่ไม่ชนเดือนของ test อื่น และไม่ขึ้นกับวันนี้
+    const back=(n:number)=>shiftMonth(-(new Date().getMonth()+n));
+    const jan=back(12),dec=back(13),nov=back(14),feb=back(11);
+    assert.equal(jan.slice(5),'01');
+    assert.equal((await postIncome(jan,`${dec}-01`)).status,201);
+    assert.equal((await postIncome(jan,lastDay(nov))).status,400);
+    assert.equal((await postIncome(dec,lastDay(jan))).status,201);
+    assert.equal((await postIncome(dec,`${feb}-01`)).status,400);
+  });
+
   await t.test('ยอดประมาณการ: จ่ายแล้วคือจบ ไม่มี partial และดูส่วนต่างจากที่ประมาณไว้ได้', async () => {
     // ผูก end_date ให้คลุมเดือนเดียว — generateMonthlyItems ยิงทุกครั้งที่ GET เดือนไหนก็ตาม
     // ถ้าไม่ผูกจะไปโผล่ในเดือนที่ test อื่น assert ยอดรวมไว้เป๊ะ (เหตุผลเดียวกับกฎของ MONTH_CLOSING)

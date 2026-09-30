@@ -162,8 +162,10 @@ export async function saveIncome(
     values.income_date == null || values.income_date === ""
       ? null
       : isoDate(values, "income_date");
-  if (date && date.slice(0, 7) !== month)
-    throw new HttpError(400, "วันที่รับเงินต้องอยู่ในเดือนรายได้");
+  // เงินเดือน ต.ค. ออก 30 ก.ย. ได้ — ยอมตั้งแต่ต้นเดือนก่อนถึงสิ้นเดือนถัดไป เทียบเป็นเลขเดือนล้วน ไม่มี timezone
+  const monthNo = (s: string) => Number(s.slice(0, 4)) * 12 + Number(s.slice(5, 7));
+  if (date && Math.abs(monthNo(date) - monthNo(month)) > 1)
+    throw new HttpError(400, "วันที่รับเงินต้องอยู่ระหว่างเดือนก่อนหน้าถึงเดือนถัดไปของแผน");
   await assertOwnedRefs(db, userId, { bankAccountId: account });
   const oldDeductions = previous
     ? (

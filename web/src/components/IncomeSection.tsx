@@ -6,7 +6,9 @@ import { post, patch, req, type Account, type IncomeDeduction, type IncomeRecord
 import Modal from '../Modal.js';
 import { formatBaht, formatDate, parseBahtToSatang } from '../format.js';
 import { ConfirmDialog, LoadError, PageHeader, TableSkeleton } from '../ui.js';
+import { dataTextSx } from '../theme.js';
 import Money from './Money.js';
+import { shiftMonth } from './MonthPicker.js';
 
 const DEDUCTIONS = { social_security: 'ประกันสังคม', withholding_tax: 'ภาษีหัก ณ ที่จ่าย', other: 'รายการหักอื่น' };
 type DeductionForm = { deduction_type: IncomeDeduction['deduction_type']; name: string; amount: string; monthly_plan_item_id: string };
@@ -78,6 +80,11 @@ export default forwardRef<IncomeSectionHandle, { month: string; closed: boolean;
     } catch (e) { setFormError(e instanceof Error ? e.message : 'บันทึกรายได้ไม่สำเร็จ'); }
     finally { setBusy(false); }
   };
+  // วันรับเงินอยู่ได้ตั้งแต่ต้นเดือนก่อนหน้าถึงสิ้นเดือนถัดไป (กติกาเดียวกับ backend) — Date.UTC(y, m, 0) คือวันสุดท้ายของเดือน m
+  const minDate = `${shiftMonth(month, -1)}-01`;
+  const nextMonth = shiftMonth(month, 1);
+  const [ny, nm] = nextMonth.split('-').map(Number);
+  const maxDate = `${nextMonth}-${new Date(Date.UTC(ny!, nm!, 0)).getUTCDate()}`;
   let preview: number | null = null;
   try { preview = amount(form.gross) - form.deductions.reduce((sum, d) => sum + amount(d.amount), 0); } catch { /* incomplete form */ }
 
@@ -123,7 +130,7 @@ export default forwardRef<IncomeSectionHandle, { month: string; closed: boolean;
         <Button onClick={() => setForm({ ...form, deductions: [...form.deductions, { deduction_type: 'other', name: '', amount: '', monthly_plan_item_id: '' }] })}>เพิ่มรายการหัก</Button>
         {preview != null && <Typography aria-live="polite">ยอดสุทธิหลังหัก: <Money satang={preview} tone={preview < 0 ? 'expense' : 'income'} /></Typography>}
         <TextField select label="บัญชีรับเงิน" value={form.bank_account_id} onChange={(e) => setForm({ ...form, bank_account_id: e.target.value })}><MenuItem value="">ยังไม่ระบุ</MenuItem>{accounts.map((a) => <MenuItem key={a.id} value={String(a.id)}>{a.nickname}</MenuItem>)}</TextField>
-        <TextField label="วันที่รับเงิน" type="date" value={form.income_date} onChange={(e) => setForm({ ...form, income_date: e.target.value })} slotProps={{ inputLabel: { shrink: true } }} />
+        <TextField label="วันที่รับเงิน" type="date" value={form.income_date} onChange={(e) => setForm({ ...form, income_date: e.target.value })} helperText={`เลือกได้ตั้งแต่ ${formatDate(minDate)} ถึง ${formatDate(maxDate)} เช่น เงินเดือนที่ออกก่อนสิ้นเดือน`} slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: minDate, max: maxDate, sx: dataTextSx } }} />
         {formError && <Alert severity="error">{formError}</Alert>}
         <Button type="submit" variant="contained" disabled={busy || (preview != null && preview < 0)}>{busy ? 'กำลังบันทึก…' : 'บันทึกรายได้'}</Button>
       </Stack>
