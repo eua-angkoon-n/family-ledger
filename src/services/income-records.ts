@@ -109,9 +109,11 @@ async function linkItem(
       ).rowCount
     )
       throw new HttpError(409, "ต้องยกเลิก Payment เดิมก่อน");
+    // รายการหักถูกหักวันเดียวกับวันรับเงิน — ตามวันของรายได้ ถ้ารายได้ไม่มีวันก็คงวันเดิมไว้ (อาจเป็นวันของกฎประจำ)
+    // ฝั่ง income ถูกเขียนทับด้วย due_date ของรายได้อีกทีหลัง linkItem อยู่แล้ว
     await db.query(
-      "update monthly_plan_item set name=$2,planned_amount_satang=$3,income_record_id=$4,explicit_status='active',updated_at=now() where id=$1",
-      [itemId, name, amount, incomeId],
+      "update monthly_plan_item set name=$2,planned_amount_satang=$3,income_record_id=$4,explicit_status='active',due_date=coalesce($5,due_date),updated_at=now() where id=$1",
+      [itemId, name, amount, incomeId, date],
     );
     return itemId;
   }

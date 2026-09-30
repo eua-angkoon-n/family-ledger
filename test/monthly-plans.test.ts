@@ -596,6 +596,16 @@ test('monthly planning API', async (t) => {
     // ไม่มีคู่เงินเข้าให้รักษาแล้ว แก้ยอดเต็มย้อนหลังได้เลย ไม่ต้องยกเลิกอะไรก่อน
     assert.equal((await send(`/api/income-records/${income.id}`,'PATCH',{gross_amount_satang:12000})).status,200);
     assert.equal(itemNamed(await getPlan(month),'Salary').planned_amount_satang,12000);
+    // รายการหักถูกหักวันเดียวกับวันรับเงิน — รายการหักที่ผูกไว้ต้องตามวันรับเงินไปด้วย (เคส prod: ย้ายไปสิ้นเดือนก่อน)
+    const deductionDue=async()=>(await getPlan(month)).items.find(i=>i.id===deductionItem.id)!.due_date;
+    assert.equal(await deductionDue(),`${month}-25`);
+    const payday=`${shiftMonth(7)}-28`;
+    assert.equal((await send(`/api/income-records/${income.id}`,'PATCH',{income_date:payday})).status,200);
+    assert.equal(itemNamed(await getPlan(month),'Salary').due_date,payday);
+    assert.equal(await deductionDue(),payday);
+    // ไม่มีวันรับเงิน = คงวันเดิมของรายการหักไว้ ไม่ล้างทิ้ง
+    assert.equal((await send(`/api/income-records/${income.id}`,'PATCH',{income_date:null})).status,200);
+    assert.equal(await deductionDue(),payday);
     const outsider=(await db.pool.query(`insert into app_user(google_sub,email,display_name,is_admin,status) values('slice6-admin','slice6-admin@example.com','Admin',true,'approved') returning id`)).rows[0]!.id;
     await send('/test/login','POST',{userId:outsider});
     assert.equal((await send(`/api/income-records/${income.id}`,'PATCH',{name:'Stolen'})).status,404);
