@@ -29,6 +29,11 @@ const SPECS: Record<PaymentState, Spec> = {
   cancelled: { label: 'ยกเลิก', color: 'default', icon: <BlockRounded /> },
 };
 
+// label ชุดเดียวกับชิป ให้ตัวกรองสถานะในหน้าวางแผนเรียกชื่อตรงกับที่เห็นในตาราง
+export const PAYMENT_STATE_LABEL = Object.fromEntries(
+  Object.entries(SPECS).map(([state, spec]) => [state, spec.label]),
+) as Record<PaymentState, string>;
+
 export default function PaymentStatusChip({ state }: { state: PaymentState }) {
   const spec = SPECS[state] ?? SPECS.unpaid;
   return <Chip size="small" icon={spec.icon} label={spec.label} color={spec.color} variant="outlined" />;

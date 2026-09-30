@@ -130,7 +130,8 @@ export function TableSkeleton({ rows = 4 }: { rows?: number }) {
 type ConfirmDialogProps = {
   open: boolean;
   title: string;
-  description: string;
+  // ReactNode สำหรับ dialog แบบกลุ่มที่ต้องแสดงรายชื่อทุกรายการที่จะถูกแตะ
+  description: ReactNode;
   confirmLabel: string;
   confirmColor?: ButtonProps['color'];
   busy?: boolean;
@@ -152,7 +153,12 @@ export function ConfirmDialog({
     <Dialog open={open} onClose={busy ? undefined : onClose} maxWidth="xs" fullWidth aria-labelledby="confirm-title">
       <DialogTitle id="confirm-title">{title}</DialogTitle>
       <DialogContent>
-        <DialogContentText>{description}</DialogContentText>
+        {/* DialogContentText เป็น <p> — รายการ (<ul>) ข้างในผิด nesting จึงเปลี่ยนเป็น div เมื่อไม่ใช่ข้อความล้วน */}
+        {typeof description === 'string' ? (
+          <DialogContentText>{description}</DialogContentText>
+        ) : (
+          <DialogContentText component="div">{description}</DialogContentText>
+        )}
       </DialogContent>
       <DialogActions>
         <Button color="inherit" onClick={onClose} disabled={busy} autoFocus>ยกเลิก</Button>
@@ -166,9 +172,18 @@ export function ConfirmDialog({
 
 export type Notice = { message: string; severity: 'success' | 'error' };
 
-export function FeedbackSnackbar({ notice, onClose }: { notice: Notice | null; onClose: () => void }) {
+// placement="top" ใช้ตอนมีแถบลอยด้านล่างจอ (แถบรายการที่เลือกในหน้าวางแผน) ไม่งั้น snackbar ทับปุ่มของแถบ
+export function FeedbackSnackbar({
+  notice,
+  onClose,
+  placement = 'bottom',
+}: {
+  notice: Notice | null;
+  onClose: () => void;
+  placement?: 'top' | 'bottom';
+}) {
   return (
-    <Snackbar open={Boolean(notice)} autoHideDuration={4500} onClose={onClose} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
+    <Snackbar open={Boolean(notice)} autoHideDuration={4500} onClose={onClose} anchorOrigin={{ vertical: placement, horizontal: 'center' }}>
       {notice ? <Alert severity={notice.severity} variant="filled" onClose={onClose}>{notice.message}</Alert> : undefined}
     </Snackbar>
   );
