@@ -106,7 +106,7 @@ export default function Installments() {
 
   return <Stack spacing={2}>
     <Button component={Link} to={id ? '/installments' : '/planning'} sx={{ alignSelf: 'flex-start' }}>← {id ? 'แผนผ่อนทั้งหมด' : 'แผนรายเดือน'}</Button>
-    <PageHeader level={1} id="installments-heading" title={detail?.name ?? (id ? 'รายละเอียดแผนผ่อน' : 'แผนผ่อนและยอดคงเหลือ')} description="ยอดจ่ายแล้วรวมรายการที่รอ Statement ยืนยันด้วย ข้อมูลเงินจริงไม่รวมเงินสดและ e-Wallet" action={<Button variant="contained" startIcon={<AddRounded />} disabled={loading || Boolean(error) || detail?.status === 'cancelled'} onClick={openEditor}>{id ? 'แก้ไขแผนผ่อน' : 'เพิ่มแผนผ่อน'}</Button>} />
+    <PageHeader level={1} id="installments-heading" title={detail?.name ?? (id ? 'รายละเอียดแผนผ่อน' : 'แผนผ่อนและยอดคงเหลือ')} description="ยอดจ่ายแล้วรวมรายการที่รอ statement ยืนยันด้วย ข้อมูลเงินจริงไม่รวมเงินสดและ e-Wallet" action={<Button variant="contained" startIcon={<AddRounded />} disabled={loading || Boolean(error) || detail?.status === 'cancelled'} onClick={openEditor}>{id ? 'แก้ไขแผนผ่อน' : 'เพิ่มแผนผ่อน'}</Button>} />
     {error && <LoadError message={error} onRetry={refresh} />}
     {loading ? <TableSkeleton rows={5} /> : detail ? <>
       <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}><Chip label={STATUS[detail.status]} variant="outlined" />{detail.status === 'active' && <Button color="error" onClick={() => { setFormError(''); setConfirmation({ title: 'ยกเลิกแผนผ่อน', description: 'เก็บประวัติและยอดเดิมไว้ แต่แยกออกจากยอดรวมแผนที่กำลังผ่อน การยกเลิกไม่ได้หมายถึงชำระหนี้แล้ว', action: () => patch(`/api/installment-plans/${detail.id}`, { status: 'cancelled' }) }); }}>ยกเลิกแผน</Button>}</Stack>
@@ -159,14 +159,14 @@ export default function Installments() {
           <TextField label="ยอดชำระ (บาท)" required value={payment.amount} onChange={(e) => setPayment({ ...payment, amount: e.target.value })} slotProps={{ htmlInput: { inputMode: 'decimal' } }} />
           <TextField label="วันที่จ่ายจริง" type="date" required value={payment.paid_date} onChange={(e) => setPayment({ ...payment, paid_date: e.target.value })} slotProps={{ inputLabel: { shrink: true } }} />
           <TextField select label="บัญชีที่จ่าย" required value={payment.bank_account_id} onChange={(e) => setPayment({ ...payment, bank_account_id: e.target.value })}>{accounts.map((a) => <MenuItem key={a.id} value={String(a.id)}>{a.nickname}</MenuItem>)}</TextField>
-          <Typography variant="body2" color="text.secondary">บันทึกการจ่ายเต็มหรือบางส่วนก่อนวันครบกำหนดได้ ระบบจะรอ Statement ยืนยัน</Typography>
+          <Typography variant="body2" color="text.secondary">บันทึกการจ่ายเต็มหรือบางส่วนก่อนวันครบกำหนดได้ ระบบจะรอ statement ยืนยัน</Typography>
           <Button type="submit" variant="contained" disabled={busy}>{busy ? 'กำลังบันทึก…' : 'บันทึกว่าจ่ายแล้ว'}</Button>
         </Stack>}
         {liveDue?.plan_closed && <Alert severity="info">เดือนของงวดนี้ปิดแล้ว ต้องเปิดเดือนก่อนจึงเพิ่มหรือยกเลิกการชำระได้</Alert>}
         {formError && <Alert severity="error">{formError}</Alert>}
       </Stack>
     </Modal>
-    <Modal open={reviewing != null} title="เลือกคู่ Statement" onClose={() => setReviewing(null)} busy={busy}><Stack spacing={2}>
+    <Modal open={reviewing != null} title="เลือกคู่ statement" onClose={() => setReviewing(null)} busy={busy}><Stack spacing={2}>
       {candidateLoading ? <TableSkeleton rows={2} /> : candidates.length === 0 ? <Typography>ยังไม่มีธุรกรรมที่ตรงกับยอดและวันที่ชำระ</Typography> : candidates.map((c) => <Paper key={c.id} variant="outlined" sx={{ p: 2 }}><Stack spacing={1}><Typography>{formatDate(c.txn_date)} · {c.description}</Typography><Money satang={c.amount_satang} /><Button disabled={busy} onClick={() => void run(() => patch(`/api/monthly-item-payments/${reviewing!.id}`, { txn_id: c.id }))}>ยืนยันคู่นี้</Button></Stack></Paper>)}
       {formError && <Alert severity="error">{formError}</Alert>}
     </Stack></Modal>

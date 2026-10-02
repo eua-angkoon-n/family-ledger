@@ -283,11 +283,10 @@ export default function StudentLoan() {
             เดินทุกวัน ยิ่งทิ้งไว้นานตัวเลขยิ่งคลาด ควรกลับมาอัปเดตยอดคงเหลือเป็นระยะ
           </Alert>
 
-          {/* ไม่มีสี warning ใน DESIGN.md (มีแค่ accent/income/expense/neutral) เหมือน DataFreshness.tsx
-              จึงใช้ info ซึ่ง map ไปที่ muted (theme.ts) แล้วให้ไอคอน + ข้อความสื่อความหมายแทน */}
+          {/* ยอดไม่ตรงกับแอป = เตือน (warning ของ DESIGN.md ผ่าน AA ทั้งสองโหมด) พร้อมไอคอน + ข้อความ ไม่สื่อด้วยสีอย่างเดียว */}
           {calibration && (
             <Alert
-              severity={calibration.ok ? 'success' : 'info'}
+              severity={calibration.ok ? 'success' : 'warning'}
               icon={calibration.ok ? <CheckCircleRounded /> : <WarningAmberRounded />}
             >
               <Stack spacing={0.5}>

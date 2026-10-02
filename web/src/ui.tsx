@@ -18,6 +18,19 @@ import {
 import { GuideButton } from './guide/GuideButton.js';
 import { dataTextSx, descriptionSx } from './theme.js';
 
+// ซ่อนจากตาแต่ screen reader ยังอ่าน (ตารางข้อมูลของกราฟ, live region) — ค่าเป็น string เพราะ sx ตีความ 1 = 100%
+export const visuallyHiddenSx = {
+  position: 'absolute',
+  width: '1px',
+  height: '1px',
+  padding: 0,
+  margin: '-1px',
+  overflow: 'hidden',
+  clip: 'rect(0 0 0 0)',
+  whiteSpace: 'nowrap',
+  border: 0,
+} as const;
+
 /**
  * เลขเวอร์ชันมุมล่างขวา แสดงทุกหน้ารวมหน้าเข้าสู่ระบบ ค่ามาจาก `GET /api/me`
  * ใช้ฟอนต์ data ตาม Financial Clarity Rule (เลขเวอร์ชันคือข้อมูลเทคนิค ไม่ใช่ข้อความอธิบาย)
@@ -26,8 +39,8 @@ import { dataTextSx, descriptionSx } from './theme.js';
 export function VersionBadge({ version }: { version: string | null }) {
   if (!version) return null;
   return (
+    // ไม่ใส่ aria-label: บน div ที่ไม่มี role screen reader ข้ามทิ้ง — ข้อความที่เห็น "v1.4.0" อ่านออกเสียงได้อยู่แล้ว
     <Box
-      aria-label={`เวอร์ชันระบบ ${version}`}
       sx={{
         position: 'fixed',
         right: { xs: 8, sm: 12 },

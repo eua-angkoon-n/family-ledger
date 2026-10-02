@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Alert, Box, Stack, Typography } from '@mui/material';
-import { useColorScheme } from '@mui/material/styles';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Alert, Box, Button, Skeleton, Stack, Typography, useMediaQuery } from '@mui/material';
+import { useColorScheme, type Theme } from '@mui/material/styles';
 import { BarChart } from '@mui/x-charts/BarChart';
 import { LineChart } from '@mui/x-charts/LineChart';
 import { PieChart } from '@mui/x-charts/PieChart';
@@ -9,6 +9,7 @@ import AccountBalanceRounded from '@mui/icons-material/AccountBalanceRounded';
 import CallReceivedRounded from '@mui/icons-material/CallReceivedRounded';
 import CallMadeRounded from '@mui/icons-material/CallMadeRounded';
 import CategoryRounded from '@mui/icons-material/CategoryRounded';
+import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded';
 import ErrorOutlineRounded from '@mui/icons-material/ErrorOutlineRounded';
 import EventBusyRounded from '@mui/icons-material/EventBusyRounded';
 import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded';
@@ -16,25 +17,26 @@ import FactCheckRounded from '@mui/icons-material/FactCheckRounded';
 import PaidRounded from '@mui/icons-material/PaidRounded';
 import SwapHorizRounded from '@mui/icons-material/SwapHorizRounded';
 import TrendingUpRounded from '@mui/icons-material/TrendingUpRounded';
+import UpdateRounded from '@mui/icons-material/UpdateRounded';
+import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded';
 import {
   req,
   type AccountBalances,
   type AccountCoverage,
   type CashFlow,
   type CategoryBreakdown,
+  type FailedStatement,
   type MonthlyPlan,
   type ReportSummary,
 } from '../api.js';
-import ChartCard from '../components/ChartCard.js';
+import ChartCard, { type ChartTable } from '../components/ChartCard.js';
 import DataFreshness from '../components/DataFreshness.js';
 import Money from '../components/Money.js';
-import MonthPicker, { currentMonth } from '../components/MonthPicker.js';
+import MonthPicker, { currentMonth, validMonth } from '../components/MonthPicker.js';
 import SummaryCard, { summaryRowSx } from '../components/SummaryCard.js';
 import { dataTextSx, tokens } from '../theme.js';
-import { formatBaht, formatDate, formatDateTime } from '../format.js';
-import { LoadError, PageHeader, TableSkeleton } from '../ui.js';
-
-const COVERAGE_NOTE_LINES = ['ข้อมูลเงินจริงคำนวณจาก Bank Statement ที่นำเข้าสู่ระบบเท่านั้น', 'ไม่รวมเงินสดและ e-Wallet'];
+import { formatBaht, formatDate, formatDateTime, formatDayMonth, formatMonth } from '../format.js';
+import { LoadError, PageHeader } from '../ui.js';
 
 function monthsBack(month: string, count: number): { from: string; to: string } {
   const [y, m] = month.split('-').map(Number) as [number, number];
@@ -44,70 +46,150 @@ function monthsBack(month: string, count: number): { from: string; to: string } 
   return { from: iso(start), to: iso(new Date(end.getTime() - 86400000)) };
 }
 
+type Load<T> = { status: 'loading' } | { status: 'error' } | { status: 'ok'; data: T };
+
+// หนึ่งคำขอต่อหนึ่งส่วนของหน้า: ส่วนที่ล้มเหลวแสดง "โหลดไม่สำเร็จ" + ลองใหม่ของตัวเอง ส่วนอื่นยังแสดงได้ตามปกติ
+// ผลผูกกับ url+key ที่ขอ — เปลี่ยนเดือนแล้วถือว่ากำลังโหลดตั้งแต่ render แรก ตัวเลขของเดือนก่อนจึงไม่ค้างใต้
+// label เดือนใหม่ (bug เดิมตอน request fail) และคำตอบที่มาช้าของเดือนเก่าถูกทิ้ง (live = false)
+function useLoad<T>(url: string): [Load<T>, () => void] {
+  const [key, setKey] = useState(0);
+  const [result, setResult] = useState<{ url: string; key: number; load: Load<T> } | null>(null);
+  useEffect(() => {
+    let live = true;
+    req<T>(url).then(
+      (data) => { if (live) setResult({ url, key, load: { status: 'ok', data } }); },
+      () => { if (live) setResult({ url, key, load: { status: 'error' } }); },
+    );
+    return () => { live = false; };
+  }, [url, key]);
+  const load: Load<T> = result != null && result.url === url && result.key === key ? result.load : { status: 'loading' };
+  return [load, () => setKey((k) => k + 1)];
+}
+
+const dataOf = <T,>(load: Load<T>): T | null => (load.status === 'ok' ? load.data : null);
+
+// ศูนย์ = ไม่มีปัญหา จึงเงียบ (สีรอง) / มากกว่าศูนย์ = ต้องจัดการ: สี warning + ไอคอน (ไม่สื่อด้วยสีอย่างเดียว)
+// warning ไม่ใช่ error: ตัวนับคือ "ต้องจัดการ" ไม่ใช่ข้อผิดพลาด (The Issue Count Rule)
+function IssueCount({ n }: { n: number }) {
+  if (n === 0) return <Box component="span" sx={{ color: 'text.secondary' }}>0</Box>;
+  return (
+    <Box component="span" sx={{ color: 'warning.main', display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
+      <WarningAmberRounded fontSize="inherit" titleAccess="ต้องจัดการ" />
+      {n.toLocaleString('th-TH')}
+    </Box>
+  );
+}
+
+// error_reason ที่ worker เขียนจริง (src/worker.ts): decrypt_failed / pdftotext_failed / checksum_failed หรือข้อความ
+// exception ของ parser (เช่น "ไม่พบชนิด KBank statement") — มีแค่รหัสผ่าน PDF ที่ผู้ใช้แก้เองได้ที่หน้าบัญชีของฉัน
+// ที่เหลือเป็นเรื่องของ parser/เซิร์ฟเวอร์ จึงบอกให้แจ้งผู้ดูแล ไม่มีปุ่มที่กดแล้วแก้ไม่ได้ (ข้อความดิบไม่แสดง เลข #id พอให้ผู้ดูแลตามได้)
+function failureInfo(s: FailedStatement): { text: string; selfFix: boolean } {
+  const reason = typeof s.error_reason === 'string' ? s.error_reason : '';
+  if (reason === 'decrypt_failed') return { text: 'เปิดไฟล์ไม่ได้ เพราะรหัสผ่าน PDF ไม่ตรง', selfFix: true };
+  if (reason === 'pdftotext_failed') return { text: 'อ่านข้อความในไฟล์ไม่ได้ — แจ้งผู้ดูแล', selfFix: false };
+  if (s.status === 'checksum_failed') return { text: 'ยอดรวมในไฟล์ไม่ตรงกับรายการ — แจ้งผู้ดูแล', selfFix: false };
+  return { text: 'ธนาคารเปลี่ยนรูปแบบไฟล์ ระบบยังอ่านไม่ได้ — แจ้งผู้ดูแล', selfFix: false };
+}
+
+// ponytail: สีของหมวดมาจาก category_id mod จำนวนสี (ชนกันในเดือนเดียวกันขยับไปช่องว่างถัดไป) — หมวดเดิมได้สีเดิม
+// ข้ามเดือนเกือบทุกครั้ง แต่ธีมมีแค่ 5 สี หมวดที่ 6+ วนซ้ำ; ต้องการสีประจำหมวดแน่นอนให้เก็บสีในตาราง category
+function colorsByIdentity(ids: (number | null)[], palette: readonly string[]): string[] {
+  const used = new Set<number>();
+  return ids.map((id) => {
+    let i = (((id ?? 0) % palette.length) + palette.length) % palette.length;
+    for (let tries = 0; tries < palette.length && used.has(i); tries++) i = (i + 1) % palette.length;
+    used.add(i);
+    return palette[i]!;
+  });
+}
+
+const compactNumber = new Intl.NumberFormat('th-TH', { notation: 'compact' });
+const sectionHeadingSx = { fontSize: '1.25rem', mb: 1.5 } as const;
+
 export default function Dashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
-  const month = searchParams.get('month') ?? currentMonth();
+  // ?month= ที่พิมพ์ไม่ครบ/ผิดรูปแบบไม่ยิง request — ใช้เดือนปัจจุบันแทน (ไม่ replace URL ทิ้ง ค่าที่คำนวณได้คือสิ่งที่ใช้จริง)
+  const month = validMonth(searchParams.get('month'), currentMonth()) ?? currentMonth();
+  const setMonth = (m: string) => setSearchParams((prev) => { const next = new URLSearchParams(prev); next.set('month', m); return next; });
 
-  const [summary, setSummary] = useState<ReportSummary | null>(null);
-  const [breakdown, setBreakdown] = useState<CategoryBreakdown | null>(null);
-  const [cashFlow, setCashFlow] = useState<CashFlow | null>(null);
-  const [balances, setBalances] = useState<AccountBalances | null>(null);
-  const [coverage, setCoverage] = useState<AccountCoverage[]>([]);
-  const [plan, setPlan] = useState<MonthlyPlan | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const requestIdRef = useRef(0);
+  const { from } = monthsBack(month, 6);
+  const { to } = monthsBack(month, 1);
+  const [summaryLoad, retrySummary] = useLoad<ReportSummary>(`/api/reports/summary?month=${month}`);
+  const [breakdownLoad, retryBreakdown] = useLoad<CategoryBreakdown>(`/api/reports/category-breakdown?month=${month}`);
+  const [cashFlowLoad, retryCashFlow] = useLoad<CashFlow>(`/api/reports/cash-flow?from=${from}&to=${to}`);
+  const [balancesLoad, retryBalances] = useLoad<AccountBalances>(`/api/reports/account-balances?month=${month}`);
+  // ความสดของข้อมูลไม่ผูกกับเดือน — url คงที่ จึงโหลดครั้งเดียว ไม่กระพริบตอนเปลี่ยนเดือน
+  const [coverageLoad, retryCoverage] = useLoad<{ rows: AccountCoverage[] }>('/api/reports/data-coverage');
+  // การ์ดวางแผนอ่านจาก endpoint เดียวกับหน้า /planning เพื่อไม่ให้ตัวเลขสองที่คำนวณคนละสูตร
+  const [planLoad, retryPlan] = useLoad<MonthlyPlan>(`/api/monthly-plans/${month}`);
+  const summary = dataOf(summaryLoad);
+  const breakdown = dataOf(breakdownLoad);
+  const cashFlow = dataOf(cashFlowLoad);
+  const balances = dataOf(balancesLoad);
+  const coverage = dataOf(coverageLoad)?.rows ?? null;
+  const plan = dataOf(planLoad);
+
   // กราฟ SVG ต้องใช้ค่าสีจริง ไม่ใช่ CSS var — เลือกชุด token ตามธีมที่แสดงอยู่ (colorScheme = ค่าที่ resolve โหมด "ตามเครื่อง" แล้ว)
   const { colorScheme } = useColorScheme();
   const chartTokens = tokens[colorScheme === 'dark' ? 'dark' : 'light'];
   const categoryPalette = chartTokens.categoryPalette;
+  // จอแคบ (การ์ดกราฟกว้าง ~256px ที่ 320px) legend ด้านขวาบีบวงกลมจนเล็ก — ย้ายไปไว้ล่าง
+  const narrow = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'), { noSsr: true });
 
-  useEffect(() => {
-    const requestId = ++requestIdRef.current;
-    // เคลียร์ของเดือนก่อนหน้าทิ้งก่อนยิงคำขอใหม่เสมอ — ไม่งั้น request ที่ fail (Promise.allSettled เขียน
-    // เฉพาะฝั่ง fulfilled) จะเหลือตัวเลขของเดือนก่อนค้างอยู่ใต้ label เดือนใหม่ที่ MonthPicker เปลี่ยนไปแล้ว
-    setSummary(null);
-    setBreakdown(null);
-    setCashFlow(null);
-    setBalances(null);
-    setCoverage([]);
-    setPlan(null);
-    setLoading(true);
-    setError('');
-    void (async () => {
-      const { from } = monthsBack(month, 6);
-      const { to } = monthsBack(month, 1);
-      const [summaryR, breakdownR, cashFlowR, balancesR, coverageR, planR] = await Promise.allSettled([
-        req<ReportSummary>(`/api/reports/summary?month=${month}`),
-        req<CategoryBreakdown>(`/api/reports/category-breakdown?month=${month}`),
-        req<CashFlow>(`/api/reports/cash-flow?from=${from}&to=${to}`),
-        req<AccountBalances>(`/api/reports/account-balances?month=${month}`),
-        req<{ rows: AccountCoverage[] }>('/api/reports/data-coverage'),
-        // การ์ดวางแผนอ่านจาก endpoint เดียวกับหน้า /planning เพื่อไม่ให้ตัวเลขสองที่คำนวณคนละสูตร
-        req<MonthlyPlan>(`/api/monthly-plans/${month}`),
-      ]);
-      if (requestId !== requestIdRef.current) return; // เปลี่ยนเดือนไปแล้วระหว่างรอ — ทิ้งผลลัพธ์ที่มาช้า
-      const failures: string[] = [];
-      if (summaryR.status === 'fulfilled') setSummary(summaryR.value); else failures.push('สรุปยอด');
-      if (breakdownR.status === 'fulfilled') setBreakdown(breakdownR.value); else failures.push('ค่าใช้จ่ายตามหมวด');
-      if (cashFlowR.status === 'fulfilled') setCashFlow(cashFlowR.value); else failures.push('แนวโน้มรายรับรายจ่าย');
-      if (balancesR.status === 'fulfilled') setBalances(balancesR.value); else failures.push('แนวโน้มยอดคงเหลือ');
-      if (coverageR.status === 'fulfilled') setCoverage(coverageR.value.rows); else failures.push('ความสดของข้อมูล');
-      if (planR.status === 'fulfilled') setPlan(planR.value); else failures.push('แผนรายเดือน');
-      if (failures.length > 0) setError(`โหลดไม่สำเร็จ: ${failures.join(', ')}`);
-      setLoading(false);
-    })();
-  }, [month]);
+  // วันที่ข้อมูลล่าสุด = latest_txn_date ที่ใหม่สุดข้ามทุกบัญชี — บอกว่าเดือนที่เลือก "ยังไม่มี statement" หรือ "ยอด 0 จริง"
+  const latestDate = coverage?.reduce<string | null>((max, a) => (a.latest_txn_date && (max == null || a.latest_txn_date > max) ? a.latest_txn_date : max), null) ?? null;
+  const latestMonth = latestDate?.slice(0, 7) ?? null;
 
   // ทุกการ์ด/กราฟคำนวณจาก EXCLUDED_FROM_FLOW_SQL (ตัดโอนภายในออกแล้ว) ยกเว้นการ์ดโอนภายในเอง — ต้องส่ง
   // is_internal_transfer=false เป็นค่าตั้งต้นเสมอ ไม่งั้น list ปลายทางรวมโอนภายในที่การ์ดตัดออกไปแล้ว ตัวเลข
   // จะไม่ตรงกัน (ผู้ใช้กด "เงินเข้า" แล้วเจอยอดในตารางมากกว่าที่การ์ดบอก) การ์ดที่ต้องการเห็นโอนภายในส่ง
   // is_internal_transfer: 'true' มาทับค่าตั้งต้นนี้ได้ตามปกติ
-  const goTransactions = (params: Record<string, string>) => {
-    const p = new URLSearchParams({ month, is_internal_transfer: 'false', ...params });
-    navigate(`/transactions?${p.toString()}`);
+  const txnLink = (params: Record<string, string>) =>
+    `/transactions?${new URLSearchParams({ month, is_internal_transfer: 'false', ...params }).toString()}`;
+
+  const parseFailed = summary?.statement_health.find((s) => s.status === 'parse_failed')?.n ?? 0;
+  const checksumFailed = summary?.statement_health.find((s) => s.status === 'checksum_failed')?.n ?? 0;
+  const overdue = plan?.payment_status.overdue_count ?? 0;
+  const behindCount = coverage?.filter((a) => a.statement_behind).length ?? 0;
+
+  // แถบ "ต้องจัดการ": เฉพาะเรื่องที่ > 0 เป็นลิงก์ไปที่แก้ได้ ไม่มีเรื่องเลย = ไม่แสดงทั้งแถบ
+  // นับเมื่อทั้งสามแหล่งโหลดเสร็จ (ที่ล้มเหลวข้ามไป ส่วนของมันแสดง LoadError เอง) — ระหว่างเปลี่ยนเดือนถ้ารอบก่อนมีแถบ
+  // จอง skeleton สูงเท่าปุ่มไว้ เนื้อหาด้านล่างจะไม่กระโดดขึ้นแล้วลง
+  const issuesReady = summaryLoad.status !== 'loading' && planLoad.status !== 'loading' && coverageLoad.status !== 'loading';
+  const issues = issuesReady
+    ? [
+        { label: 'บิลเกินกำหนด', n: overdue, to: `/planning?month=${month}` },
+        { label: 'statement มีปัญหา', n: parseFailed + checksumFailed, to: '#statement-failures' },
+        { label: 'บัญชีข้อมูลช้า', n: behindCount, to: '#data-freshness' },
+        { label: 'ยังไม่จัดหมวด', n: summary?.uncategorised_count ?? 0, to: txnLink({ uncategorised: '1' }) },
+        { label: 'ยังไม่ตรวจสอบ', n: summary?.unreviewed_count ?? 0, to: txnLink({ review_status: 'unreviewed' }) },
+      ].filter((i) => i.n > 0)
+    : [];
+  const hadIssues = useRef(false);
+  if (issuesReady) hadIssues.current = issues.length > 0;
+
+  // กราฟว่างเพราะ statement ยังไม่มา ใช้ข้อความเดียวกับบรรทัดสถานะด้านบน แทน "ยังไม่มีข้อมูล" กลาง ๆ
+  const pendingMessage = (fromMonth: string): string | undefined => {
+    if (coverage == null) return undefined;
+    if (latestMonth == null) return 'ยังไม่มีรายการจาก statement ในระบบ';
+    if (latestMonth >= fromMonth) return undefined;
+    return fromMonth === month
+      ? `statement ${formatMonth(month)} ยังไม่มา`
+      : `statement ช่วง ${formatMonth(fromMonth, '2-digit')} – ${formatMonth(month, '2-digit')} ยังไม่มา`;
   };
+  const baht = (satang: number) => `฿${formatBaht(satang)}`;
+  // ตารางแทนกราฟเส้น: แถว = วันที่, คอลัมน์ = บัญชี (ยอดปิดวันนั้น, "—" = วันนั้นไม่มีรายการ ยอดเท่าวันก่อน)
+  let balancesTable: ChartTable | undefined;
+  if (balances) {
+    const accounts = Array.from(new Map(balances.rows.map((r) => [r.bank_account_id, r.account_nickname])));
+    const dates = Array.from(new Set(balances.rows.map((r) => r.txn_date))).sort();
+    const at = new Map(balances.rows.map((r) => [`${r.bank_account_id}|${r.txn_date}`, r.running_balance_satang]));
+    balancesTable = {
+      columns: ['วันที่', ...accounts.map(([, name]) => name)],
+      rows: dates.map((d) => [formatDate(d), ...accounts.map(([id]) => { const v = at.get(`${id}|${d}`); return v == null ? '—' : baht(v); })]),
+    };
+  }
 
   return (
     <Box>
@@ -115,194 +197,316 @@ export default function Dashboard() {
         level={1}
         id="dashboard-heading"
         title="แดชบอร์ด"
-        action={
-          <MonthPicker
-            value={month}
-            onChange={(m) => setSearchParams((prev) => { const next = new URLSearchParams(prev); next.set('month', m); return next; })}
-          />
-        }
+        description="ตัวเลขเงินจริงมาจาก statement ของธนาคารที่นำเข้าเท่านั้น ไม่รวมเงินสดและ e-Wallet"
+        action={<MonthPicker value={month} onChange={setMonth} keyboardShortcut />}
       />
-      <Stack sx={{ mt: 0.5 }}>
-        {COVERAGE_NOTE_LINES.map((line) => (
-          <Typography key={line} variant="body2" color="text.secondary">{line}</Typography>
+
+      {/* ข้อมูลถึงวันไหน — อยู่เหนือการ์ดแรก ไม่งั้น ฿0.00 ของเดือนที่ statement ยังไม่มาอ่านเหมือนไม่มีเงินเข้าออกจริง */}
+      <Box sx={{ mt: 1.5 }}>
+        {coverageLoad.status === 'loading' && <Skeleton width={180} />}
+        {coverage != null && (latestDate == null || latestMonth == null ? (
+          <Alert severity="info" variant="outlined">
+            ยังไม่มีรายการจาก statement ในระบบ — เพิ่มบัญชีหรือสั่งดึงอีเมลที่หน้าบัญชีของฉัน
+            <Box sx={{ mt: 1 }}>
+              <Button component={Link} to="/accounts" variant="outlined" color="inherit" size="small">ไปที่บัญชีของฉัน</Button>
+            </Box>
+          </Alert>
+        ) : latestMonth < month ? (
+          <Alert severity="info" variant="outlined">
+            {month === currentMonth() ? 'statement ของเดือนนี้ยังไม่มา' : `statement ของ ${formatMonth(month)} ยังไม่มา`} — ข้อมูลล่าสุดถึง{' '}
+            <Box component="span" sx={dataTextSx}>{formatDate(latestDate)}</Box>
+            <Box sx={{ mt: 1 }}>
+              <Button variant="outlined" color="inherit" size="small" onClick={() => setMonth(latestMonth)}>ไปเดือนล่าสุดที่มีข้อมูล</Button>
+            </Box>
+          </Alert>
+        ) : (
+          <Typography variant="body2" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+            <UpdateRounded fontSize="small" aria-hidden />
+            ข้อมูลถึง <Box component="span" sx={dataTextSx}>{formatDate(latestDate)}</Box>
+          </Typography>
         ))}
-      </Stack>
+      </Box>
 
-      {error && <LoadError message={error} />}
+      {issues.length > 0 ? (
+        <Box role="group" aria-labelledby="dashboard-issues-label" sx={{ mt: 1.5, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1 }}>
+          <Typography id="dashboard-issues-label" variant="body2" sx={{ fontWeight: 600, color: 'warning.main', display: 'inline-flex', alignItems: 'center', gap: 0.5, mr: 0.5 }}>
+            <WarningAmberRounded fontSize="small" aria-hidden />
+            ต้องจัดการ
+          </Typography>
+          {issues.map((i) => {
+            // span ครอบ: Button เป็น inline-flex ช่องว่างล้วนระหว่างลูก flex ถูกทิ้ง ป้ายกับตัวเลขจะติดกัน
+            const label = <span>{i.label} <Box component="span" sx={dataTextSx}>{i.n.toLocaleString('th-TH')}</Box></span>;
+            // ส่วนในหน้าเดียวกันเป็น anchor ธรรมดา (router ไม่เลื่อนไปหา #id ให้)
+            return i.to.startsWith('#') ? (
+              <Button key={i.label} href={i.to} variant="outlined" color="warning" size="small" endIcon={<ChevronRightRounded />}>{label}</Button>
+            ) : (
+              <Button key={i.label} component={Link} to={i.to} variant="outlined" color="warning" size="small" endIcon={<ChevronRightRounded />}>{label}</Button>
+            );
+          })}
+        </Box>
+      ) : !issuesReady && hadIssues.current ? (
+        <Skeleton variant="rounded" height={40} sx={{ mt: 1.5 }} />
+      ) : null}
 
-      {loading && <TableSkeleton rows={6} />}
-
-      {!loading && summary && (
-        <Stack spacing={4} sx={{ mt: 3 }}>
-          <Box component="section" aria-labelledby="actual-heading">
-            <Typography variant="h2" id="actual-heading" sx={{ fontSize: '1.25rem', mb: 1.5 }}>เงินจริงจาก Statement</Typography>
+      <Stack spacing={4} sx={{ mt: 3 }}>
+        <Box component="section" aria-labelledby="actual-heading">
+          <Typography variant="h2" id="actual-heading" sx={sectionHeadingSx}>เงินจริงจาก statement</Typography>
+          {summaryLoad.status === 'error' ? (
+            <LoadError message="โหลดสรุปยอดไม่สำเร็จ" onRetry={retrySummary} />
+          ) : (
             <Box sx={summaryRowSx(5)}>
               <SummaryCard
                 dense
+                loading={!summary}
                 title="เงินเข้า"
                 icon={<CallReceivedRounded fontSize="small" />}
-                value={<Money satang={summary.money_in_satang} tone="income" />}
-                onClick={() => goTransactions({ direction: 'credit' })}
+                value={summary && <Money satang={summary.money_in_satang} tone="income" />}
+                to={txnLink({ direction: 'credit' })}
               />
               <SummaryCard
                 dense
+                loading={!summary}
                 title="เงินออก"
                 icon={<CallMadeRounded fontSize="small" />}
-                value={<Money satang={summary.money_out_satang} tone="expense" />}
-                onClick={() => goTransactions({ direction: 'debit' })}
+                value={summary && <Money satang={summary.money_out_satang} tone="expense" />}
+                to={txnLink({ direction: 'debit' })}
               />
               <SummaryCard
                 dense
-                title="กระแสเงินสดสุทธิ"
+                loading={!summary}
+                title="เหลือสุทธิ (เข้า − ออก)"
                 icon={<TrendingUpRounded fontSize="small" />}
-                value={<Money satang={summary.net_satang} tone={summary.net_satang >= 0 ? 'income' : 'expense'} showSign />}
-                onClick={() => goTransactions({})}
+                value={summary && <Money satang={summary.net_satang} tone={summary.net_satang >= 0 ? 'income' : 'expense'} showSign />}
+                to={txnLink({})}
               />
-              {/* ไม่มี onClick โดยตั้งใจ — เป็นยอดรวมข้าม "ทุกบัญชี" ไม่มีตาราง/บัญชีเดียวที่เป็น "รายการต้นทาง"
+              {/* ไม่มีลิงก์โดยตั้งใจ — เป็นยอดรวมข้าม "ทุกบัญชี" ไม่มีตาราง/บัญชีเดียวที่เป็น "รายการต้นทาง"
                   ของยอดรวมนี้ได้จริง (ต่างจากการ์ดอื่นที่ drill ไปยัง transaction ต้นทางเจาะจงได้) */}
               <SummaryCard
                 dense
+                loading={!summary}
                 title="ยอดคงเหลือรวมล่าสุด"
                 icon={<AccountBalanceRounded fontSize="small" />}
-                value={<Money satang={summary.total_balance_satang} />}
+                value={summary && <Money satang={summary.total_balance_satang} />}
               />
               <SummaryCard
                 dense
+                loading={!summary}
                 title="โอนภายใน (ไม่นับรายรับ/รายจ่าย)"
                 icon={<SwapHorizRounded fontSize="small" />}
-                value={<Money satang={summary.internal_transfer_excluded_satang} />}
-                caption={`${summary.internal_transfer_count} รายการ (นับสองขา)`}
-                onClick={() => goTransactions({ is_internal_transfer: 'true' })}
+                value={summary && <Money satang={summary.internal_transfer_excluded_satang} />}
+                caption={summary && `${summary.internal_transfer_count} รายการ (นับทั้งฝั่งโอนออกและโอนเข้า)`}
+                to={txnLink({ is_internal_transfer: 'true' })}
               />
             </Box>
-          </Box>
+          )}
+        </Box>
 
-          <Box component="section" aria-labelledby="quality-heading">
-            <Typography variant="h2" id="quality-heading" sx={{ fontSize: '1.25rem', mb: 1.5 }}>คุณภาพข้อมูล</Typography>
-            <Box sx={summaryRowSx(5)}>
-              <SummaryCard
-                dense
-                title="ยังไม่ได้จัดหมวด"
-                icon={<CategoryRounded fontSize="small" />}
-                value={<Box component="span" sx={dataTextSx}>{summary.uncategorised_count.toLocaleString('th-TH')}</Box>}
-                caption="รายการ"
-                onClick={() => goTransactions({ uncategorised: '1' })}
-              />
-              <SummaryCard
-                dense
-                title="ยังไม่ตรวจสอบ"
-                icon={<FactCheckRounded fontSize="small" />}
-                value={<Box component="span" sx={dataTextSx}>{summary.unreviewed_count.toLocaleString('th-TH')}</Box>}
-                caption="รายการ"
-                onClick={() => goTransactions({ review_status: 'unreviewed' })}
-              />
-              <SummaryCard
-                dense
-                title="Statement อ่านไฟล์ไม่สำเร็จ"
-                icon={<ErrorOutlineRounded fontSize="small" />}
-                value={<Box component="span" sx={dataTextSx}>{(summary.statement_health.find((s) => s.status === 'parse_failed')?.n ?? 0).toLocaleString('th-TH')}</Box>}
-                caption="ทั้งหมด (ไม่ผูกกับเดือนที่เลือก)"
-              />
-              <SummaryCard
-                dense
-                title="Statement checksum ไม่ผ่าน"
-                icon={<ErrorOutlineRounded fontSize="small" />}
-                value={<Box component="span" sx={dataTextSx}>{(summary.statement_health.find((s) => s.status === 'checksum_failed')?.n ?? 0).toLocaleString('th-TH')}</Box>}
-                caption="ทั้งหมด (ไม่ผูกกับเดือนที่เลือก)"
-              />
-              <SummaryCard
-                dense
-                title="บัญชีที่ข้อมูลอาจขาดช่วง"
-                icon={<EventBusyRounded fontSize="small" />}
-                value={<Box component="span" sx={dataTextSx}>{coverage.filter((a) => a.statement_behind).length.toLocaleString('th-TH')}</Box>}
-                caption="ดูรายละเอียดด้านล่าง"
-              />
-            </Box>
-            {summary.failed_statements.length > 0 && (
-              <Alert severity="error" variant="outlined" sx={{ mt: 2 }}>
-                <Stack spacing={0.5}>
-                  {summary.failed_statements.slice(0, 5).map((s) => (
-                    <Typography key={s.id} variant="body2" sx={dataTextSx}>
-                      {s.account_nickname} · {s.status === 'parse_failed' ? 'อ่านไฟล์ไม่สำเร็จ' : 'checksum ไม่ผ่าน'} · {formatDateTime(s.created_at)}
-                    </Typography>
-                  ))}
-                </Stack>
-              </Alert>
-            )}
-          </Box>
+        <Box component="section" aria-labelledby="quality-heading">
+          <Typography variant="h2" id="quality-heading" sx={sectionHeadingSx}>คุณภาพข้อมูล</Typography>
+          {summaryLoad.status === 'error' ? (
+            <LoadError message="โหลดคุณภาพข้อมูลไม่สำเร็จ" onRetry={retrySummary} />
+          ) : (
+            <>
+              <Box sx={summaryRowSx(5)}>
+                <SummaryCard
+                  dense
+                  loading={!summary}
+                  title="ยังไม่ได้จัดหมวด"
+                  icon={<CategoryRounded fontSize="small" />}
+                  value={summary && <IssueCount n={summary.uncategorised_count} />}
+                  caption="รายการ"
+                  to={txnLink({ uncategorised: '1' })}
+                />
+                <SummaryCard
+                  dense
+                  loading={!summary}
+                  title="ยังไม่ตรวจสอบ"
+                  icon={<FactCheckRounded fontSize="small" />}
+                  value={summary && <IssueCount n={summary.unreviewed_count} />}
+                  caption="รายการ"
+                  to={txnLink({ review_status: 'unreviewed' })}
+                />
+                {/* แก้ที่หน้าบัญชีของฉัน (ตั้งรหัสผ่าน PDF ใหม่ / สั่งดึงอีเมลใหม่) */}
+                <SummaryCard
+                  dense
+                  loading={!summary}
+                  title="statement อ่านไฟล์ไม่สำเร็จ"
+                  icon={<ErrorOutlineRounded fontSize="small" />}
+                  value={summary && <IssueCount n={parseFailed} />}
+                  caption="ทั้งหมด (ไม่ผูกกับเดือนที่เลือก)"
+                  to="/accounts"
+                />
+                <SummaryCard
+                  dense
+                  loading={!summary}
+                  title="statement checksum ไม่ผ่าน"
+                  icon={<ErrorOutlineRounded fontSize="small" />}
+                  value={summary && <IssueCount n={checksumFailed} />}
+                  caption="ทั้งหมด (ไม่ผูกกับเดือนที่เลือก)"
+                  to="/accounts"
+                />
+                <SummaryCard
+                  dense
+                  loading={coverageLoad.status === 'loading'}
+                  disabled={coverageLoad.status === 'error'}
+                  disabledReason="โหลดไม่สำเร็จ — ลองใหม่ที่ด้านล่าง"
+                  title="บัญชีที่ข้อมูลอาจขาดช่วง"
+                  icon={<EventBusyRounded fontSize="small" />}
+                  value={coverage && <IssueCount n={behindCount} />}
+                  caption="ดูรายละเอียดด้านล่าง"
+                  to="#data-freshness"
+                />
+              </Box>
+              {summary && summary.failed_statements.length > 0 && (
+                // warning ให้ตรงกับการ์ดตัวนับด้านบน — แต่ละแถวบอกสาเหตุเป็นภาษาคน และมีปุ่มเฉพาะแถวที่ผู้ใช้แก้เองได้
+                <Alert id="statement-failures" severity="warning" variant="outlined" sx={{ mt: 2, scrollMarginTop: 80 }}>
+                  <Stack spacing={1}>
+                    {summary.failed_statements.slice(0, 5).map((s) => {
+                      const info = failureInfo(s);
+                      return (
+                        <Stack key={s.id} direction={{ xs: 'column', sm: 'row' }} spacing={{ xs: 0.5, sm: 1.5 }} sx={{ alignItems: { sm: 'center' } }}>
+                          <Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>
+                            {s.account_nickname} · {info.text} · รับเมื่อ <Box component="span" sx={dataTextSx}>{formatDateTime(s.created_at)}</Box>{' '}
+                            <Box component="span" sx={{ ...dataTextSx, fontSize: '0.8125rem' }}>#{s.id}</Box>
+                          </Typography>
+                          {info.selfFix && (
+                            <Button component={Link} to="/accounts" variant="outlined" color="inherit" size="small" sx={{ flexShrink: 0, alignSelf: { xs: 'flex-start', sm: 'center' } }}>
+                              ตั้งรหัสผ่าน PDF ใหม่
+                            </Button>
+                          )}
+                        </Stack>
+                      );
+                    })}
+                    {summary.failed_statements.length > 5 && (
+                      <Typography variant="body2">และอีก {summary.failed_statements.length - 5} ไฟล์</Typography>
+                    )}
+                  </Stack>
+                </Alert>
+              )}
+            </>
+          )}
+        </Box>
 
-          <Box component="section" aria-labelledby="dashboard-planning-heading">
-            <Typography variant="h2" id="dashboard-planning-heading" sx={{ fontSize: '1.25rem', mb: 1.5 }}>การวางแผนรายเดือน</Typography>
+        <Box component="section" aria-labelledby="dashboard-planning-heading">
+          <Typography variant="h2" id="dashboard-planning-heading" sx={sectionHeadingSx}>การวางแผนรายเดือน</Typography>
+          {planLoad.status === 'error' ? (
+            <LoadError message="โหลดแผนรายเดือนไม่สำเร็จ" onRetry={retryPlan} />
+          ) : (
             <Box sx={summaryRowSx(2)}>
               <SummaryCard
+                loading={!plan}
                 title="เงินเหลือใช้ตามแผน"
                 icon={<EventRepeatRounded fontSize="small" />}
-                value={<Money satang={plan?.totals.planned_available_satang ?? 0} tone={(plan?.totals.planned_available_satang ?? 0) < 0 ? 'expense' : 'income'} />}
+                value={plan && <Money satang={plan.totals.planned_available_satang} tone={plan.totals.planned_available_satang < 0 ? 'expense' : 'income'} showSign={plan.totals.planned_available_satang < 0} />}
                 caption="รายได้เต็ม − รายการหัก − รายจ่ายตามแผน − เงินกันไว้"
                 // GET /monthly-plans/:month สร้างแถวแผนให้เองแบบ lazy เพราะฉะนั้น plan ไม่เคยเป็น null
                 // สำหรับเดือนที่เปิดดูได้ — เช็ค items.length ด้วย ไม่งั้นเดือนที่ไม่มีแผนเลยจะโชว์ ฿0.00
                 // ซึ่งแยกไม่ออกจาก "วางแผนไว้พอดีเป็นศูนย์" (การ์ดข้าง ๆ เช็ค total_count === 0 อยู่แล้ว)
-                disabled={plan == null || plan.items.length === 0}
+                disabled={plan != null && plan.items.length === 0}
                 disabledReason="ยังไม่มีแผนของเดือนนี้"
-                onClick={() => navigate(`/planning?month=${month}`)}
+                to={`/planning?month=${month}`}
               />
               <SummaryCard
+                loading={!plan}
                 title="สถานะการจ่ายบิล"
                 icon={<PaidRounded fontSize="small" />}
                 value={
-                  <>
-                    {plan?.payment_status.paid_count ?? 0}
-                    <Box component="span" sx={{ color: 'text.secondary', fontSize: '1rem' }}>
-                      {` / ${plan?.payment_status.total_count ?? 0} รายการ`}
-                    </Box>
-                  </>
+                  plan && (
+                    <>
+                      {plan.payment_status.paid_count}
+                      <Box component="span" sx={{ color: 'text.secondary', fontSize: '1rem' }}>
+                        {` / ${plan.payment_status.total_count} รายการ`}
+                      </Box>
+                    </>
+                  )
                 }
                 caption={
-                  plan == null
-                    ? undefined
-                    : `เกินกำหนด ${plan.payment_status.overdue_count} · จ่ายบางส่วน ${plan.payment_status.partial_count} · ยังไม่จ่าย ${plan.payment_status.unpaid_count}`
+                  plan && (
+                    <>
+                      {/* เกินกำหนดคือเรื่องที่ต้องทำก่อน — แยกบรรทัด สี warning + ไอคอน ไม่ซ่อนในบรรทัดเล็ก */}
+                      {overdue > 0 && (
+                        <Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'warning.main', fontWeight: 600, mb: 0.25 }}>
+                          <WarningAmberRounded fontSize="small" aria-hidden />
+                          เกินกำหนด {overdue} รายการ
+                        </Box>
+                      )}
+                      {`${overdue === 0 ? 'ไม่มีรายการเกินกำหนด · ' : ''}จ่ายบางส่วน ${plan.payment_status.partial_count} · ยังไม่จ่าย ${plan.payment_status.unpaid_count}`}
+                    </>
+                  )
                 }
-                disabled={plan == null || plan.payment_status.total_count === 0}
+                disabled={plan != null && plan.payment_status.total_count === 0}
                 disabledReason="ยังไม่มีรายการที่ต้องจ่ายในเดือนนี้"
-                onClick={() => navigate(`/planning?month=${month}`)}
+                to={`/planning?month=${month}`}
               />
             </Box>
-          </Box>
+          )}
+        </Box>
 
-          <Box component="section" aria-labelledby="charts-heading">
-            <Typography variant="h2" id="charts-heading" sx={{ fontSize: '1.25rem', mb: 1.5 }}>กราฟ</Typography>
-            <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))' }}>
-              <ChartCard title="รายรับเทียบรายจ่ายรายเดือน" empty={!cashFlow || cashFlow.rows.every((r) => r.money_in_satang === 0 && r.money_out_satang === 0)}>
-                {cashFlow && (
-                  <BarChart
-                    height={280}
-                    xAxis={[{ scaleType: 'band', data: cashFlow.rows.map((r) => r.month), valueFormatter: (m: string) => m.slice(2) }]}
-                    series={[
-                      { id: 'income', label: 'รายรับ', data: cashFlow.rows.map((r) => r.money_in_satang / 100), color: chartTokens.income, valueFormatter: (v: number | null) => formatBaht(Math.round((v ?? 0) * 100)) },
-                      { id: 'expense', label: 'รายจ่าย', data: cashFlow.rows.map((r) => r.money_out_satang / 100), color: chartTokens.expense, valueFormatter: (v: number | null) => formatBaht(Math.round((v ?? 0) * 100)) },
-                    ]}
-                    onItemClick={(_event, item) => {
-                      const row = cashFlow!.rows[item.dataIndex];
-                      if (row) {
-                        const p = new URLSearchParams({ month: row.month, is_internal_transfer: 'false', direction: item.seriesId === 'income' ? 'credit' : 'debit' });
-                        navigate(`/transactions?${p.toString()}`);
-                      }
-                    }}
-                    slotProps={{ legend: { direction: 'horizontal', position: { vertical: 'top', horizontal: 'end' } } }}
-                  />
-                )}
-              </ChartCard>
+        <Box component="section" aria-labelledby="charts-heading">
+          <Typography variant="h2" id="charts-heading" sx={sectionHeadingSx}>แนวโน้ม</Typography>
+          {/* min(100%, 320px): ที่ 320px จอเหลือ 288px — minmax(320px) เฉย ๆ ดันการ์ดล้นจอ */}
+          <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))' }}>
+            <ChartCard
+              title="รายรับเทียบรายจ่ายรายเดือน"
+              period={`6 เดือนล่าสุด: ${formatMonth(from.slice(0, 7), '2-digit')} – ${formatMonth(month, '2-digit')}`}
+              loading={cashFlowLoad.status === 'loading'}
+              error={cashFlowLoad.status === 'error'}
+              onRetry={retryCashFlow}
+              empty={cashFlow != null && cashFlow.rows.every((r) => r.money_in_satang === 0 && r.money_out_satang === 0)}
+              emptyMessage={pendingMessage(from.slice(0, 7))}
+              table={cashFlow ? {
+                columns: ['เดือน', 'รายรับ', 'รายจ่าย'],
+                rows: cashFlow.rows.map((r) => [formatMonth(r.month), baht(r.money_in_satang), baht(r.money_out_satang)]),
+              } : undefined}
+            >
+              {cashFlow && (
+                <BarChart
+                  height={280}
+                  experimentalFeatures={{ keyboardActivation: true }}
+                  xAxis={[{
+                    scaleType: 'band',
+                    // ค่าเริ่มต้น 25px เหลือที่ให้ป้าย 25 − ขีด 6 − ช่อง 3 = 16px แต่กล่องตัวอักษรไทย (Noto Sans Thai/Poppins
+                    // ที่ 12px) สูง ~18px x-charts จึงตัดป้ายทิ้งเหลือ <text> ว่าง — 32px เหลือ 23px
+                    height: 32,
+                    data: cashFlow.rows.map((r) => r.month),
+                    valueFormatter: (m: string, ctx) => formatMonth(m, ctx.location === 'tick' ? '2-digit' : 'numeric'),
+                  }]}
+                  yAxis={[{ width: 56, valueFormatter: (v: number) => compactNumber.format(v) }]}
+                  series={[
+                    { id: 'income', label: 'รายรับ', data: cashFlow.rows.map((r) => r.money_in_satang / 100), color: chartTokens.income, valueFormatter: (v: number | null) => formatBaht(Math.round((v ?? 0) * 100)) },
+                    { id: 'expense', label: 'รายจ่าย', data: cashFlow.rows.map((r) => r.money_out_satang / 100), color: chartTokens.expense, valueFormatter: (v: number | null) => formatBaht(Math.round((v ?? 0) * 100)) },
+                  ]}
+                  onItemClick={(_event, item) => {
+                    const row = cashFlow.rows[item.dataIndex];
+                    if (row) navigate(`/transactions?${new URLSearchParams({ month: row.month, is_internal_transfer: 'false', direction: item.seriesId === 'income' ? 'credit' : 'debit' }).toString()}`);
+                  }}
+                  slotProps={{ legend: { direction: 'horizontal', position: { vertical: 'top', horizontal: 'end' } } }}
+                />
+              )}
+            </ChartCard>
 
-              <ChartCard title="ค่าใช้จ่ายแยกตามหมวด" empty={!breakdown || breakdown.rows.length === 0}>
-                {breakdown && (
+            <ChartCard
+              title="ค่าใช้จ่ายแยกตามหมวด"
+              period={formatMonth(month)}
+              loading={breakdownLoad.status === 'loading'}
+              error={breakdownLoad.status === 'error'}
+              onRetry={retryBreakdown}
+              empty={breakdown != null && breakdown.rows.length === 0}
+              emptyMessage={pendingMessage(month)}
+              table={breakdown ? { columns: ['หมวด', 'ยอดจ่าย'], rows: breakdown.rows.map((r) => [r.category_name, baht(r.total_satang)]) } : undefined}
+            >
+              {breakdown && (() => {
+                const colors = colorsByIdentity(breakdown.rows.map((r) => r.category_id), categoryPalette);
+                return (
                   <PieChart
                     height={280}
+                    experimentalFeatures={{ keyboardActivation: true }}
                     series={[{
                       data: breakdown.rows.map((r, i) => ({
                         id: r.category_id ?? -1,
                         label: r.category_name,
                         value: r.total_satang / 100,
-                        color: categoryPalette[i % categoryPalette.length],
+                        color: colors[i],
                       })),
                       valueFormatter: (item: { value: number }) => formatBaht(Math.round(item.value * 100)),
                       innerRadius: 40,
@@ -310,47 +514,74 @@ export default function Dashboard() {
                     onItemClick={(_event, item) => {
                       const row = breakdown.rows[item.dataIndex];
                       if (!row) return;
-                      goTransactions(row.category_id == null ? { direction: 'debit', uncategorised: '1' } : { direction: 'debit', category_id: String(row.category_id) });
+                      navigate(txnLink(row.category_id == null ? { direction: 'debit', uncategorised: '1' } : { direction: 'debit', category_id: String(row.category_id) }));
                     }}
-                    slotProps={{ legend: { direction: 'vertical', position: { vertical: 'middle', horizontal: 'end' } } }}
+                    slotProps={{
+                      legend: narrow
+                        ? { direction: 'horizontal', position: { vertical: 'bottom', horizontal: 'center' } }
+                        : { direction: 'vertical', position: { vertical: 'middle', horizontal: 'end' } },
+                    }}
                   />
-                )}
-              </ChartCard>
+                );
+              })()}
+            </ChartCard>
 
-              <ChartCard title="แนวโน้มยอดคงเหลือตามบัญชี" empty={!balances || balances.rows.length === 0}>
-                {balances && (() => {
-                  // ทุกบัญชีเรียงบน x-axis วันที่ร่วมกันชุดเดียว — วันที่บัญชีหนึ่งไม่มี txn ค่าเป็น null
-                  // (ไม่ใช่ "ไม่มีข้อมูล" แต่ "ยอดไม่เปลี่ยนวันนั้น") connectNulls ลากเส้นทับช่องว่างนั้นให้ถูกต้อง
-                  const dates = Array.from(new Set(balances.rows.map((r) => r.txn_date))).sort();
-                  const accountIds = Array.from(new Set(balances.rows.map((r) => r.bank_account_id)));
-                  return (
-                    <LineChart
-                      height={280}
-                      xAxis={[{ scaleType: 'point', data: dates, valueFormatter: (d: string) => formatDate(d) }]}
-                      series={accountIds.map((id, i) => {
-                        const nickname = balances.rows.find((r) => r.bank_account_id === id)?.account_nickname ?? '';
-                        const byDate = new Map(balances.rows.filter((r) => r.bank_account_id === id).map((r) => [r.txn_date, r.running_balance_satang / 100]));
-                        return {
-                          id: String(id),
-                          label: nickname,
-                          data: dates.map((d) => byDate.get(d) ?? null),
-                          color: categoryPalette[i % categoryPalette.length],
-                          valueFormatter: (v: number | null) => (v == null ? '' : formatBaht(Math.round(v * 100))),
-                          connectNulls: true,
-                        };
-                      })}
-                      onMarkClick={(_event, item) => goTransactions({ bank_account_id: String(item.seriesId) })}
-                      slotProps={{ legend: { direction: 'horizontal', position: { vertical: 'top', horizontal: 'end' } } }}
-                    />
-                  );
-                })()}
-              </ChartCard>
-            </Box>
+            <ChartCard
+              title="แนวโน้มยอดคงเหลือตามบัญชี"
+              period={formatMonth(month)}
+              loading={balancesLoad.status === 'loading'}
+              error={balancesLoad.status === 'error'}
+              onRetry={retryBalances}
+              empty={balances != null && balances.rows.length === 0}
+              emptyMessage={pendingMessage(month)}
+              table={balancesTable}
+            >
+              {balances && (() => {
+                // ทุกบัญชีเรียงบน x-axis วันที่ร่วมกันชุดเดียว — วันที่บัญชีหนึ่งไม่มี txn ค่าเป็น null
+                // (ไม่ใช่ "ไม่มีข้อมูล" แต่ "ยอดไม่เปลี่ยนวันนั้น") connectNulls ลากเส้นทับช่องว่างนั้นให้ถูกต้อง
+                const dates = Array.from(new Set(balances.rows.map((r) => r.txn_date))).sort();
+                const accountIds = Array.from(new Set(balances.rows.map((r) => r.bank_account_id)));
+                return (
+                  <LineChart
+                    height={280}
+                    experimentalFeatures={{ keyboardActivation: true }}
+                    xAxis={[{
+                      scaleType: 'point',
+                      height: 32, // เหตุผลเดียวกับกราฟแท่ง: ป้ายวันที่ภาษาไทยสูงเกิน 16px ที่ค่าเริ่มต้นเหลือให้
+                      data: dates,
+                      valueFormatter: (d: string, ctx) => (ctx.location === 'tick' ? formatDayMonth(d) : formatDate(d)),
+                    }]}
+                    yAxis={[{ width: 56, valueFormatter: (v: number) => compactNumber.format(v) }]}
+                    series={accountIds.map((id, i) => {
+                      const nickname = balances.rows.find((r) => r.bank_account_id === id)?.account_nickname ?? '';
+                      const byDate = new Map(balances.rows.filter((r) => r.bank_account_id === id).map((r) => [r.txn_date, r.running_balance_satang / 100]));
+                      return {
+                        id: String(id),
+                        label: nickname,
+                        data: dates.map((d) => byDate.get(d) ?? null),
+                        color: categoryPalette[i % categoryPalette.length],
+                        valueFormatter: (v: number | null) => (v == null ? '' : formatBaht(Math.round(v * 100))),
+                        connectNulls: true,
+                      };
+                    })}
+                    onMarkClick={(_event, item) => navigate(txnLink({ bank_account_id: String(item.seriesId) }))}
+                    slotProps={{ legend: { direction: 'horizontal', position: { vertical: 'top', horizontal: 'end' } } }}
+                  />
+                );
+              })()}
+            </ChartCard>
           </Box>
+        </Box>
 
-          <DataFreshness accounts={coverage} />
-        </Stack>
-      )}
+        {/* เป้าของการ์ด "บัญชีที่ข้อมูลอาจขาดช่วง" — scrollMarginTop กัน app bar แบบ sticky บังหัวข้อ */}
+        <Box id="data-freshness" sx={{ scrollMarginTop: 80 }}>
+          {coverageLoad.status === 'error' ? (
+            <LoadError message="โหลดความสดของข้อมูลแต่ละบัญชีไม่สำเร็จ" onRetry={retryCoverage} />
+          ) : (
+            coverage && <DataFreshness accounts={coverage} />
+          )}
+        </Box>
+      </Stack>
     </Box>
   );
 }

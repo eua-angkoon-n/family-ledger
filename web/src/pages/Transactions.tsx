@@ -22,7 +22,7 @@ import { dataTextSx } from '../theme.js';
 import { EmptyState, FeedbackSnackbar, LoadError, PageHeader, TableSkeleton, type Notice } from '../ui.js';
 
 const LIMIT = 50;
-const COVERAGE_NOTE = 'ข้อมูลเงินจริงคำนวณจาก Bank Statement ที่นำเข้าสู่ระบบเท่านั้น ไม่รวมเงินสดและ e-Wallet';
+const COVERAGE_NOTE = 'ข้อมูลเงินจริงคำนวณจาก bank statement ที่นำเข้าสู่ระบบเท่านั้น ไม่รวมเงินสดและ e-Wallet';
 
 export default function Transactions() {
   const [searchParams, setSearchParams] = useSearchParams();
