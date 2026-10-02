@@ -26,7 +26,7 @@ function behindText(a: AccountCoverage): string {
 }
 
 // §8.1: แสดงวันที่ข้อมูลล่าสุดของทุกบัญชี + เตือนเมื่อ statement ของเดือนยังมาไม่ครบ
-// สีสถานะต้องมาพร้อมไอคอน/ข้อความเสมอ (Semantic Color Rule) — "ข้อมูลอาจไม่ครบ" ใช้ warning เหมือนตัวนับปัญหาบนการ์ด
+// สีสถานะต้องมาพร้อมไอคอน/ข้อความเสมอ (Semantic Color Rule) — "ข้อมูลช้า" (คำเดียวกับการ์ดและแถบ "ต้องจัดการ" บนแดชบอร์ด) ใช้ warning เหมือนตัวนับปัญหาบนการ์ด
 // (The Issue Count Rule) และ "ต้องเชื่อม Gmail ใหม่" ใช้ error (destructive ที่ปรับให้ผ่าน AA แล้ว)
 export default function DataFreshness({ accounts }: { accounts: AccountCoverage[] }) {
   if (accounts.length === 0) return null;
@@ -67,7 +67,7 @@ export default function DataFreshness({ accounts }: { accounts: AccountCoverage[
                 // ไม่ทำเป็นลิงก์เพราะ chip เล็กสูง 28px ต่ำกว่า tap target 40px — ปุ่มไปหน้าบัญชีของฉันอยู่หัวกล่องนี้
                 <Chip size="small" icon={<LinkOffRounded />} label="ต้องเชื่อม Gmail ใหม่" color="error" variant="outlined" />
               ) : a.statement_behind ? (
-                <Chip size="small" icon={<WarningAmberRounded />} label="ข้อมูลอาจไม่ครบ" color="warning" variant="outlined" />
+                <Chip size="small" icon={<WarningAmberRounded />} label="ข้อมูลช้า" color="warning" variant="outlined" />
               ) : (
                 <Chip size="small" icon={<CheckCircleRounded />} label="ข้อมูลล่าสุด" color="success" variant="outlined" />
               )}

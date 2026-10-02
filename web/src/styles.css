@@ -19,12 +19,14 @@ body {
   font-kerning: normal;
 }
 
+/* reduced motion: ตัด animation (skeleton/spinner) และการเลื่อนแบบนุ่ม แต่ไม่ตัด transition ทั้งหมด —
+   transition ที่เคลื่อนที่ของ MUI (Slide/Grow/Collapse/Fade, ripple) เป็น 0 จาก theme.motion.reducedMotion และการยก
+   การ์ดของ SummaryCard ปิดเอง ที่เหลือคือ transition สี/พื้นสั้น ๆ ของ state (hover/focus) ซึ่งไม่ใช่ motion จึงคงไว้ */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     scroll-behavior: auto !important;
-    transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
   }

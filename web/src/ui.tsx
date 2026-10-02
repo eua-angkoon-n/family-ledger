@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import {
   Alert,
   Box,
@@ -67,7 +67,13 @@ type HeaderProps = {
   id?: string;
 };
 
+export const APP_NAME = 'Hyacinthia Ledger';
+
 export function PageHeader({ title, description, action, level = 2, id }: HeaderProps) {
+  // ชื่อแท็บตามหน้า (WCAG 2.4.2) — ทุกหน้าที่ล็อกอินแล้วมี PageHeader level 1 ตัวเดียว จึงตั้งที่นี่ที่เดียว
+  useEffect(() => {
+    if (level === 1) document.title = `${title} · ${APP_NAME}`;
+  }, [level, title]);
   return (
     <Stack
       direction={{ xs: 'column', sm: 'row' }}

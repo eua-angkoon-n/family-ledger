@@ -46,7 +46,7 @@ import Admin from './Admin.js';
 import ThemeModeToggle from './components/ThemeModeToggle.js';
 import { isPageEnabled } from './features.js';
 import { brandCopySx, dataTextSx, descriptionSx } from './theme.js';
-import { FeedbackSnackbar, PageHeader, TableSkeleton, VersionBadge, type Notice } from './ui.js';
+import { APP_NAME, FeedbackSnackbar, PageHeader, TableSkeleton, VersionBadge, type Notice } from './ui.js';
 
 // แยก chunk เฉพาะ Dashboard — เป็นหน้าเดียวที่ดึง @mui/x-charts (~600KB) เข้ามา หน้าอื่นไม่ต้องรอโหลดมันด้วย
 const Dashboard = lazy(() => import('./pages/Dashboard.js'));
@@ -235,6 +235,13 @@ export default function App() {
       })
       .catch(() => setUser(null));
   }, []);
+
+  // หน้าก่อนเข้าระบบไม่มี PageHeader (ที่ตั้ง document.title ให้หน้าอื่น) — ตั้งชื่อแท็บที่นี่
+  useEffect(() => {
+    if (user === undefined || user?.status === 'approved') return;
+    const page = !user ? 'เข้าสู่ระบบ' : user.status === 'pending' ? 'รอการอนุมัติ' : 'ไม่สามารถเข้าใช้งานได้';
+    document.title = `${page} · ${APP_NAME}`;
+  }, [user]);
 
   const logout = async () => {
     setLoggingOut(true);

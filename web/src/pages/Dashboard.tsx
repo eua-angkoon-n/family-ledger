@@ -103,6 +103,21 @@ function colorsByIdentity(ids: (number | null)[], palette: readonly string[]): s
   });
 }
 
+// จอสัมผัส (hover: none) ไม่มี hover ให้เห็น tooltip ก่อนกด — แตะแรกแค่โชว์ tooltip, แตะซ้ำจุดเดิมจึงไปหน้ารายการ
+// เมาส์/คีย์บอร์ดยังไปทันทีเหมือนเดิม key ต้องไม่ซ้ำข้ามกราฟ (ใส่ชื่อกราฟนำหน้า)
+function useTapToNavigate() {
+  const touch = useMediaQuery('(hover: none)', { noSsr: true });
+  const armed = useRef<string | null>(null);
+  return (key: string, go: () => void) => {
+    if (touch && armed.current !== key) {
+      armed.current = key;
+      return;
+    }
+    armed.current = null;
+    go();
+  };
+}
+
 const compactNumber = new Intl.NumberFormat('th-TH', { notation: 'compact' });
 const sectionHeadingSx = { fontSize: '1.25rem', mb: 1.5 } as const;
 
@@ -140,6 +155,15 @@ export default function Dashboard() {
   // วันที่ข้อมูลล่าสุด = latest_txn_date ที่ใหม่สุดข้ามทุกบัญชี — บอกว่าเดือนที่เลือก "ยังไม่มี statement" หรือ "ยอด 0 จริง"
   const latestDate = coverage?.reduce<string | null>((max, a) => (a.latest_txn_date && (max == null || a.latest_txn_date > max) ? a.latest_txn_date : max), null) ?? null;
   const latestMonth = latestDate?.slice(0, 7) ?? null;
+  // เดือนที่ statement ยังไม่มา: การ์ดเงินจริงเป็น "—" เส้นประ แทน ฿0.00 ที่อ่านเหมือนไม่มีเงินเข้าออกจริง
+  // (ยอดคงเหลือรวมยังแสดงได้ — เป็นยอดล่าสุดที่รู้ บอกวันที่กำกับไว้)
+  const pendingReason = coverage == null ? null
+    : latestMonth == null ? 'ยังไม่มี statement ในระบบ'
+    : latestMonth < month ? 'รอ statement ของเดือนนี้'
+    : null;
+  // รอ coverage ด้วย ไม่งั้นการ์ดแวบเป็น ฿0.00 ก่อนเปลี่ยนเป็นเส้นประ
+  const moneyLoading = !summary || coverageLoad.status === 'loading';
+  const tapToNavigate = useTapToNavigate();
 
   // ทุกการ์ด/กราฟคำนวณจาก EXCLUDED_FROM_FLOW_SQL (ตัดโอนภายในออกแล้ว) ยกเว้นการ์ดโอนภายในเอง — ต้องส่ง
   // is_internal_transfer=false เป็นค่าตั้งต้นเสมอ ไม่งั้น list ปลายทางรวมโอนภายในที่การ์ดตัดออกไปแล้ว ตัวเลข
@@ -160,7 +184,7 @@ export default function Dashboard() {
   const issues = issuesReady
     ? [
         { label: 'บิลเกินกำหนด', n: overdue, to: `/planning?month=${month}` },
-        { label: 'statement มีปัญหา', n: parseFailed + checksumFailed, to: '#statement-failures' },
+        { label: 'statement ที่มีปัญหา', n: parseFailed + checksumFailed, to: '#statement-failures' },
         { label: 'บัญชีข้อมูลช้า', n: behindCount, to: '#data-freshness' },
         { label: 'ยังไม่จัดหมวด', n: summary?.uncategorised_count ?? 0, to: txnLink({ uncategorised: '1' }) },
         { label: 'ยังไม่ตรวจสอบ', n: summary?.unreviewed_count ?? 0, to: txnLink({ review_status: 'unreviewed' }) },
@@ -205,18 +229,20 @@ export default function Dashboard() {
       <Box sx={{ mt: 1.5 }}>
         {coverageLoad.status === 'loading' && <Skeleton width={180} />}
         {coverage != null && (latestDate == null || latestMonth == null ? (
-          <Alert severity="info" variant="outlined">
+          // role="status" ไม่ใช่ alert (ค่าเริ่มต้นของ Alert): เป็นสถานะของหน้า ไม่ใช่เหตุด่วนที่ต้องขัดจังหวะ screen reader
+          // ปุ่มเป็น primary เพราะเป็นทางออกเดียวของสถานะนี้
+          <Alert severity="info" variant="outlined" role="status">
             ยังไม่มีรายการจาก statement ในระบบ — เพิ่มบัญชีหรือสั่งดึงอีเมลที่หน้าบัญชีของฉัน
             <Box sx={{ mt: 1 }}>
-              <Button component={Link} to="/accounts" variant="outlined" color="inherit" size="small">ไปที่บัญชีของฉัน</Button>
+              <Button component={Link} to="/accounts" variant="contained" size="small">ไปที่บัญชีของฉัน</Button>
             </Box>
           </Alert>
         ) : latestMonth < month ? (
-          <Alert severity="info" variant="outlined">
+          <Alert severity="info" variant="outlined" role="status">
             {month === currentMonth() ? 'statement ของเดือนนี้ยังไม่มา' : `statement ของ ${formatMonth(month)} ยังไม่มา`} — ข้อมูลล่าสุดถึง{' '}
             <Box component="span" sx={dataTextSx}>{formatDate(latestDate)}</Box>
             <Box sx={{ mt: 1 }}>
-              <Button variant="outlined" color="inherit" size="small" onClick={() => setMonth(latestMonth)}>ไปเดือนล่าสุดที่มีข้อมูล</Button>
+              <Button variant="contained" size="small" onClick={() => setMonth(latestMonth)}>ไปเดือนล่าสุดที่มีข้อมูล</Button>
             </Box>
           </Alert>
         ) : (
@@ -257,7 +283,9 @@ export default function Dashboard() {
             <Box sx={summaryRowSx(5)}>
               <SummaryCard
                 dense
-                loading={!summary}
+                loading={moneyLoading}
+                disabled={pendingReason != null}
+                disabledReason={pendingReason ?? undefined}
                 title="เงินเข้า"
                 icon={<CallReceivedRounded fontSize="small" />}
                 value={summary && <Money satang={summary.money_in_satang} tone="income" />}
@@ -265,7 +293,9 @@ export default function Dashboard() {
               />
               <SummaryCard
                 dense
-                loading={!summary}
+                loading={moneyLoading}
+                disabled={pendingReason != null}
+                disabledReason={pendingReason ?? undefined}
                 title="เงินออก"
                 icon={<CallMadeRounded fontSize="small" />}
                 value={summary && <Money satang={summary.money_out_satang} tone="expense" />}
@@ -273,7 +303,9 @@ export default function Dashboard() {
               />
               <SummaryCard
                 dense
-                loading={!summary}
+                loading={moneyLoading}
+                disabled={pendingReason != null}
+                disabledReason={pendingReason ?? undefined}
                 title="เหลือสุทธิ (เข้า − ออก)"
                 icon={<TrendingUpRounded fontSize="small" />}
                 value={summary && <Money satang={summary.net_satang} tone={summary.net_satang >= 0 ? 'income' : 'expense'} showSign />}
@@ -283,14 +315,18 @@ export default function Dashboard() {
                   ของยอดรวมนี้ได้จริง (ต่างจากการ์ดอื่นที่ drill ไปยัง transaction ต้นทางเจาะจงได้) */}
               <SummaryCard
                 dense
-                loading={!summary}
+                loading={moneyLoading}
                 title="ยอดคงเหลือรวมล่าสุด"
                 icon={<AccountBalanceRounded fontSize="small" />}
                 value={summary && <Money satang={summary.total_balance_satang} />}
+                caption={pendingReason != null && latestDate ? `ณ ${formatDate(latestDate)}` : undefined}
+                captionInline
               />
               <SummaryCard
                 dense
-                loading={!summary}
+                loading={moneyLoading}
+                disabled={pendingReason != null}
+                disabledReason={pendingReason ?? undefined}
                 title="โอนภายใน (ไม่นับรายรับ/รายจ่าย)"
                 icon={<SwapHorizRounded fontSize="small" />}
                 value={summary && <Money satang={summary.internal_transfer_excluded_satang} />}
@@ -326,31 +362,34 @@ export default function Dashboard() {
                   caption="รายการ"
                   to={txnLink({ review_status: 'unreviewed' })}
                 />
-                {/* แก้ที่หน้าบัญชีของฉัน (ตั้งรหัสผ่าน PDF ใหม่ / สั่งดึงอีเมลใหม่) */}
+                {/* ทั้งสองใบไปที่รายการไฟล์ด้านล่าง (บอกสาเหตุและทางแก้ทีละไฟล์ เหมือนปุ่มในแถบ "ต้องจัดการ")
+                    ศูนย์ = ไม่มีรายการให้ไปดู จึงไม่เป็นลิงก์ · ขอบเขต "นับทุกเดือน" อยู่ที่หัวรายการ ไม่ซ้ำในการ์ด */}
                 <SummaryCard
                   dense
                   loading={!summary}
                   title="statement อ่านไฟล์ไม่สำเร็จ"
                   icon={<ErrorOutlineRounded fontSize="small" />}
                   value={summary && <IssueCount n={parseFailed} />}
-                  caption="ทั้งหมด (ไม่ผูกกับเดือนที่เลือก)"
-                  to="/accounts"
+                  caption="ไฟล์"
+                  captionInline
+                  to={parseFailed > 0 ? '#statement-failures' : undefined}
                 />
                 <SummaryCard
                   dense
                   loading={!summary}
-                  title="statement checksum ไม่ผ่าน"
+                  title="statement ยอดรวมไม่ตรง"
                   icon={<ErrorOutlineRounded fontSize="small" />}
                   value={summary && <IssueCount n={checksumFailed} />}
-                  caption="ทั้งหมด (ไม่ผูกกับเดือนที่เลือก)"
-                  to="/accounts"
+                  caption="ไฟล์"
+                  captionInline
+                  to={checksumFailed > 0 ? '#statement-failures' : undefined}
                 />
                 <SummaryCard
                   dense
                   loading={coverageLoad.status === 'loading'}
                   disabled={coverageLoad.status === 'error'}
                   disabledReason="โหลดไม่สำเร็จ — ลองใหม่ที่ด้านล่าง"
-                  title="บัญชีที่ข้อมูลอาจขาดช่วง"
+                  title="บัญชีข้อมูลช้า"
                   icon={<EventBusyRounded fontSize="small" />}
                   value={coverage && <IssueCount n={behindCount} />}
                   caption="ดูรายละเอียดด้านล่าง"
@@ -359,15 +398,29 @@ export default function Dashboard() {
               </Box>
               {summary && summary.failed_statements.length > 0 && (
                 // warning ให้ตรงกับการ์ดตัวนับด้านบน — แต่ละแถวบอกสาเหตุเป็นภาษาคน และมีปุ่มเฉพาะแถวที่ผู้ใช้แก้เองได้
-                <Alert id="statement-failures" severity="warning" variant="outlined" sx={{ mt: 2, scrollMarginTop: 80 }}>
+                // เป็น section ที่มีชื่อ ไม่ใช่ role="alert" (ค่าเริ่มต้นของ Alert) — รายการคงที่ ไม่ใช่เหตุด่วนให้ screen reader ขัดจังหวะ
+                <Alert
+                  id="statement-failures"
+                  component="section"
+                  role="region"
+                  aria-labelledby="statement-failures-heading"
+                  severity="warning"
+                  variant="outlined"
+                  // หลายบรรทัด: ไอคอนอยู่แนวหัวข้อ ไม่ลอยกลางกล่อง (theme ตั้ง Alert ให้จัดกลางสำหรับข้อความบรรทัดเดียว)
+                  sx={{ mt: 2, scrollMarginTop: 80, alignItems: 'flex-start' }}
+                >
+                  <Typography component="h3" variant="h2" id="statement-failures-heading" sx={{ fontSize: '1rem', lineHeight: 1.5, mb: 1 }}>
+                    statement ที่มีปัญหา — นับทุกเดือน ไม่ผูกกับเดือนที่เลือก
+                  </Typography>
                   <Stack spacing={1}>
                     {summary.failed_statements.slice(0, 5).map((s) => {
                       const info = failureInfo(s);
                       return (
                         <Stack key={s.id} direction={{ xs: 'column', sm: 'row' }} spacing={{ xs: 0.5, sm: 1.5 }} sx={{ alignItems: { sm: 'center' } }}>
+                          {/* เลขไฟล์นำหน้า: สองไฟล์ของบัญชีเดียวกันที่มาพร้อมกัน (เหตุผลเดียวกัน) แยกกันได้ด้วยเลขนี้ */}
                           <Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>
-                            {s.account_nickname} · {info.text} · รับเมื่อ <Box component="span" sx={dataTextSx}>{formatDateTime(s.created_at)}</Box>{' '}
-                            <Box component="span" sx={{ ...dataTextSx, fontSize: '0.8125rem' }}>#{s.id}</Box>
+                            <Box component="span" sx={{ ...dataTextSx, fontWeight: 600 }}>ไฟล์ #{s.id}</Box>
+                            {' · '}{s.account_nickname} · {info.text} · รับเมื่อ <Box component="span" sx={dataTextSx}>{formatDateTime(s.created_at)}</Box>
                           </Typography>
                           {info.selfFix && (
                             <Button component={Link} to="/accounts" variant="outlined" color="inherit" size="small" sx={{ flexShrink: 0, alignSelf: { xs: 'flex-start', sm: 'center' } }}>
@@ -393,7 +446,9 @@ export default function Dashboard() {
             <LoadError message="โหลดแผนรายเดือนไม่สำเร็จ" onRetry={retryPlan} />
           ) : (
             <Box sx={summaryRowSx(2)}>
+              {/* dense เหมือนแถวเงินจริง: ตัวเลขแผนต้องไม่ใหญ่กว่าเงินจริงทุกขนาดจอ (แถวแรกคือเรื่องหลักของหน้า) */}
               <SummaryCard
+                dense
                 loading={!plan}
                 title="เงินเหลือใช้ตามแผน"
                 icon={<EventRepeatRounded fontSize="small" />}
@@ -407,6 +462,7 @@ export default function Dashboard() {
                 to={`/planning?month=${month}`}
               />
               <SummaryCard
+                dense
                 loading={!plan}
                 title="สถานะการจ่ายบิล"
                 icon={<PaidRounded fontSize="small" />}
@@ -445,7 +501,8 @@ export default function Dashboard() {
         <Box component="section" aria-labelledby="charts-heading">
           <Typography variant="h2" id="charts-heading" sx={sectionHeadingSx}>แนวโน้ม</Typography>
           {/* min(100%, 320px): ที่ 320px จอเหลือ 288px — minmax(320px) เฉย ๆ ดันการ์ดล้นจอ */}
-          <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))' }}>
+          {/* alignItems start: การ์ดที่ว่าง (กล่องเตี้ย) ไม่ถูกยืดสูงตามกราฟใบข้าง ๆ */}
+          <Box sx={{ display: 'grid', gap: 2, alignItems: 'start', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))' }}>
             <ChartCard
               title="รายรับเทียบรายจ่ายรายเดือน"
               period={`6 เดือนล่าสุด: ${formatMonth(from.slice(0, 7), '2-digit')} – ${formatMonth(month, '2-digit')}`}
@@ -469,16 +526,27 @@ export default function Dashboard() {
                     // ที่ 12px) สูง ~18px x-charts จึงตัดป้ายทิ้งเหลือ <text> ว่าง — 32px เหลือ 23px
                     height: 32,
                     data: cashFlow.rows.map((r) => r.month),
-                    valueFormatter: (m: string, ctx) => formatMonth(m, ctx.location === 'tick' ? '2-digit' : 'numeric'),
+                    // ป้ายแกนเป็นเดือนล้วน ("ต.ค.") ครบทั้ง 6 เดือน — ปีอยู่ในบรรทัดช่วงเวลาของการ์ดแล้ว ป้ายมีปี ("ต.ค. 69")
+                    // กว้างจน x-charts ซ่อนป้ายเว้นเดือน แถบละ ~33px ที่จอ 320px / ~42px ที่ 375px / ~45px ที่ 1280px ป้ายเดือนล้วน ~25px
+                    tickLabelInterval: () => true,
+                    valueFormatter: (m: string, ctx) => formatMonth(m, ctx.location === 'tick' ? 'none' : 'numeric'),
                   }]}
                   yAxis={[{ width: 56, valueFormatter: (v: number) => compactNumber.format(v) }]}
                   series={[
                     { id: 'income', label: 'รายรับ', data: cashFlow.rows.map((r) => r.money_in_satang / 100), color: chartTokens.income, valueFormatter: (v: number | null) => formatBaht(Math.round((v ?? 0) * 100)) },
                     { id: 'expense', label: 'รายจ่าย', data: cashFlow.rows.map((r) => r.money_out_satang / 100), color: chartTokens.expense, valueFormatter: (v: number | null) => formatBaht(Math.round((v ?? 0) * 100)) },
                   ]}
+                  // income/expense ธีมสว่างต่างกันแค่ hue (ความสว่างแทบเท่ากัน 1.01:1) — แท่งรายจ่ายจึงเป็นสีอ่อน + ขอบทึบ
+                  // ทั้งแท่งและช่องสีใน legend (ทั้งสองอยู่ใต้ [data-series="expense"]) แยกออกได้แม้ไม่เห็นสี ใช้ได้ทั้งสองโหมด
+                  // ขอบใช้สี expense เต็ม (บน card 4.81 สว่าง / 4.63 มืด) ขอบแท่งจึงยังผ่าน 3:1
+                  // ช่องสีใน legend เป็น svg 13×13 ที่ตัดขอบครึ่งนอกทิ้ง จึงใช้เส้นหนา 3 ให้เหลือเห็น 1.5 เท่าแท่ง
+                  sx={{
+                    '& [data-series="expense"] .MuiBarChart-element': { fillOpacity: 0.35, stroke: chartTokens.expense, strokeWidth: 1.5 },
+                    '& [data-series="expense"] .MuiChartsLabelMark-fill': { fillOpacity: 0.35, stroke: chartTokens.expense, strokeWidth: 3 },
+                  }}
                   onItemClick={(_event, item) => {
                     const row = cashFlow.rows[item.dataIndex];
-                    if (row) navigate(`/transactions?${new URLSearchParams({ month: row.month, is_internal_transfer: 'false', direction: item.seriesId === 'income' ? 'credit' : 'debit' }).toString()}`);
+                    if (row) tapToNavigate(`bar:${item.seriesId}:${item.dataIndex}`, () => navigate(`/transactions?${new URLSearchParams({ month: row.month, is_internal_transfer: 'false', direction: item.seriesId === 'income' ? 'credit' : 'debit' }).toString()}`));
                   }}
                   slotProps={{ legend: { direction: 'horizontal', position: { vertical: 'top', horizontal: 'end' } } }}
                 />
@@ -514,7 +582,7 @@ export default function Dashboard() {
                     onItemClick={(_event, item) => {
                       const row = breakdown.rows[item.dataIndex];
                       if (!row) return;
-                      navigate(txnLink(row.category_id == null ? { direction: 'debit', uncategorised: '1' } : { direction: 'debit', category_id: String(row.category_id) }));
+                      tapToNavigate(`pie:${item.dataIndex}`, () => navigate(txnLink(row.category_id == null ? { direction: 'debit', uncategorised: '1' } : { direction: 'debit', category_id: String(row.category_id) })));
                     }}
                     slotProps={{
                       legend: narrow
@@ -564,7 +632,7 @@ export default function Dashboard() {
                         connectNulls: true,
                       };
                     })}
-                    onMarkClick={(_event, item) => navigate(txnLink({ bank_account_id: String(item.seriesId) }))}
+                    onMarkClick={(_event, item) => tapToNavigate(`line:${item.seriesId}:${item.dataIndex ?? ''}`, () => navigate(txnLink({ bank_account_id: String(item.seriesId) })))}
                     slotProps={{ legend: { direction: 'horizontal', position: { vertical: 'top', horizontal: 'end' } } }}
                   />
                 );
@@ -573,7 +641,7 @@ export default function Dashboard() {
           </Box>
         </Box>
 
-        {/* เป้าของการ์ด "บัญชีที่ข้อมูลอาจขาดช่วง" — scrollMarginTop กัน app bar แบบ sticky บังหัวข้อ */}
+        {/* เป้าของการ์ด "บัญชีข้อมูลช้า" — scrollMarginTop กัน app bar แบบ sticky บังหัวข้อ */}
         <Box id="data-freshness" sx={{ scrollMarginTop: 80 }}>
           {coverageLoad.status === 'error' ? (
             <LoadError message="โหลดความสดของข้อมูลแต่ละบัญชีไม่สำเร็จ" onRetry={retryCoverage} />

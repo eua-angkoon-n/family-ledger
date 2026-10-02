@@ -22,6 +22,8 @@ type SummaryCardProps = {
   // การ์ดแถวละ 5 ใบ (หน้าวางแผน) — padding/ตัวเลขเล็กลง และ caption ย้ายไปอยู่ใน tooltip ของปุ่ม ⓘ
   // ไม่งั้นคำอธิบายยาว ๆ ดันการ์ดใบนั้นสูงกว่าเพื่อนทั้งแถว
   dense?: boolean;
+  /** dense แต่ caption สั้นและต้องเห็นทันที (เช่น "ณ วันที่") — แสดงเป็นบรรทัดแทนปุ่ม ⓘ */
+  captionInline?: boolean;
 };
 
 // แถวการ์ดสรุป: ≥ md อยู่บรรทัดเดียวเสมอ (การ์ดหดแทนการตกบรรทัดเหลือใบเดียว) / มือถือ 2 คอลัมน์
@@ -44,10 +46,10 @@ const cardGridSx = { display: 'grid', gridRow: 'span 3', gridTemplateRows: 'subg
 
 // การ์ดสรุปตัวเดียว ไม่ซ้อน Paper ใน Paper (Don't ของ DESIGN.md) — value ผ่าน dataTextSx เสมอ
 // (ตัวเลข/เงินตาม Financial Clarity Rule) ต่างจาก title/caption ที่เป็นคำอธิบาย
-export default function SummaryCard({ title, icon, value, caption, to, onClick, disabled, disabledReason, loading = false, dense = false }: SummaryCardProps) {
+export default function SummaryCard({ title, icon, value, caption, to, onClick, disabled, disabledReason, loading = false, dense = false, captionInline = false }: SummaryCardProps) {
   const interactive = !disabled && !loading && (to != null || onClick != null);
   // ไม่ใส่ปุ่ม ⓘ ในการ์ดที่กดได้ทั้งใบ (button ซ้อน button ผิด HTML) — ใช้ caption เป็นบรรทัดตามเดิม
-  const captionAsTip = dense && caption != null && !disabled && !interactive;
+  const captionAsTip = dense && !captionInline && caption != null && !disabled && !loading && !interactive;
   const content = (
     // rowGap ของ subgrid ทับ gap ของแถวการ์ด (12/16px) ระยะหัว → ตัวเลข → คำอธิบายจึงเป็น 6px เท่าเดิม
     <Box sx={{ ...cardGridSx, rowGap: 0.75, alignItems: 'start', p: dense ? 2 : { xs: 2, sm: 3 }, textAlign: 'left' }}>
@@ -74,7 +76,8 @@ export default function SummaryCard({ title, icon, value, caption, to, onClick, 
           lineHeight: 1.3,
           overflowWrap: 'anywhere',
           // ขั้น Data Display ของ DESIGN.md — ไม่ dense ก็อยู่ 2 คอลัมน์บนมือถือ / 4 ใบที่ 900px 1.75rem ล้นการ์ดถ้าไม่ย่อลง
-          fontSize: dense ? { xs: '1.25rem', md: '1.125rem', lg: '1.25rem' } : { xs: '1.25rem', sm: '1.5rem', lg: '1.75rem' },
+          // dense ที่ md 1.125rem (การ์ด 5 ใบที่ 900px เหลือที่ให้ตัวเลขราว 125px) ที่ lg 1.5rem (ราว 185px)
+          fontSize: dense ? { xs: '1.25rem', md: '1.125rem', lg: '1.5rem' } : { xs: '1.25rem', sm: '1.5rem', lg: '1.75rem' },
         }}
       >
         {loading ? <Skeleton width="60%" /> : disabled ? '—' : value}
@@ -112,12 +115,13 @@ export default function SummaryCard({ title, icon, value, caption, to, onClick, 
       bgcolor: 'background.paper',
       boxShadow: (theme) => theme.vars.shadows[1],
       transition: 'transform 200ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 200ms cubic-bezier(0.16, 1, 0.3, 1)',
+      // focus ring มาจาก theme.focusVisible ของ ButtonBase ซึ่งตั้ง box-shadow ของมันเองทับเงาการ์ด — คืน hard offset
+      // ไว้ก่อน &:hover เพื่อให้ตอน hover พร้อม focus เงา 5px ยังชนะ
+      '&.Mui-focusVisible': { boxShadow: (theme) => theme.vars.shadows[1] },
       '&:hover': {
         transform: 'translate(-2px, -2px)',
         boxShadow: (theme) => `5px 5px 0 0 ${theme.vars.palette.divider}`,
       },
-      // ButtonBase ตั้ง outline 0 — ใส่ focus ring ของธีมคืน (ring 2px ตาม DESIGN.md)
-      '&.Mui-focusVisible': { outline: (theme) => `2px solid ${theme.vars.palette.brand.ring}`, outlineOffset: '2px' },
       '@media (prefers-reduced-motion: reduce)': { transition: 'none', '&:hover': { transform: 'none' } },
     };
     if (to != null && to.startsWith('#')) return <ButtonBase href={to} sx={sx}>{content}</ButtonBase>;

@@ -9,9 +9,10 @@ export function formatDate(isoDate: string): string {
   });
 }
 
-// 'YYYY-MM' → "ส.ค. 2569" / year '2-digit' → "ส.ค. 69" (แกนกราฟ) / style 'long' → "สิงหาคม 2569" — UTC เหตุผลเดียวกับ formatDate
-export function formatMonth(month: string, year: 'numeric' | '2-digit' = 'numeric', style: 'short' | 'long' = 'short'): string {
-  return new Date(`${month}-01T00:00:00Z`).toLocaleDateString('th-TH', { month: style, year, timeZone: 'UTC' });
+// 'YYYY-MM' → "ส.ค. 2569" / year '2-digit' → "ส.ค. 69" / 'none' → "ส.ค." (แกนกราฟที่บอกปีไว้ที่อื่นแล้ว)
+// style 'long' → "สิงหาคม 2569" — UTC เหตุผลเดียวกับ formatDate
+export function formatMonth(month: string, year: 'numeric' | '2-digit' | 'none' = 'numeric', style: 'short' | 'long' = 'short'): string {
+  return new Date(`${month}-01T00:00:00Z`).toLocaleDateString('th-TH', { month: style, year: year === 'none' ? undefined : year, timeZone: 'UTC' });
 }
 
 // จำนวนวันจาก 'YYYY-MM-DD' ถึงวันนี้ (ตามปฏิทินของเครื่อง) — นับเป็นวันเต็ม ไม่สนเวลา
