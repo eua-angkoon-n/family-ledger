@@ -54,7 +54,7 @@ import MonthPicker, { currentMonth, shiftMonth } from '../components/MonthPicker
 import PaymentStatusChip, { PAYMENT_STATE_LABEL } from '../components/PaymentStatusChip.js';
 import IncomeSection, { type IncomeSectionHandle } from '../components/IncomeSection.js';
 import PlanSelectionBar from '../components/PlanSelectionBar.js';
-import SummaryCard from '../components/SummaryCard.js';
+import SummaryCard, { summaryRowSx } from '../components/SummaryCard.js';
 import { createFormFieldChangeHandler } from '../form.js';
 import { formatDate, parseBahtToSatang } from '../format.js';
 import {
@@ -785,15 +785,8 @@ export default function MonthlyPlan() {
             <Typography variant="h2" id="plan-totals-heading" sx={{ fontSize: '1.25rem', mb: 1.5 }}>
               สรุปตามแผน
             </Typography>
-            {/* minmax(0, 1fr) ไม่ใช่ 1fr เฉย ๆ — 1fr มี min เป็น auto ยอดเงินยาว ๆ จะดันคอลัมน์จนล้นจอ 320px
-                มือถือ 2 คอลัมน์ ใบที่ 5 (เงินเหลือใช้ = ผลลัพธ์) กินเต็มแถวแทนที่จะค้างอยู่ครึ่งแถว */}
-            <Box
-              sx={{
-                display: 'grid',
-                gap: { xs: 1.5, md: 2 },
-                gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', md: 'repeat(5, minmax(0, 1fr))' },
-              }}
-            >
+            {/* มือถือ ใบที่ 5 (เงินเหลือใช้ = ผลลัพธ์) กินเต็มแถว — summaryRowSx จัดให้ */}
+            <Box sx={summaryRowSx(5)}>
               <SummaryCard dense title="รายได้เต็มตามแผน" value={<Money satang={plan.totals.planned_income_satang} tone="income" />} />
               <SummaryCard dense title="รายการหักจากรายได้" value={<Money satang={plan.totals.planned_deduction_satang} />} />
               <SummaryCard dense title="ค่าใช้จ่ายตามแผน" value={<Money satang={plan.totals.planned_expense_satang} tone="expense" />} />
@@ -803,21 +796,19 @@ export default function MonthlyPlan() {
                 value={<Money satang={plan.totals.planned_reserve_satang} />}
                 caption="กันงบไว้ ไม่ใช่รายจ่าย และไม่ลดยอดคงเหลือในบัญชี"
               />
-              <Box sx={{ gridColumn: { xs: '1 / -1', md: 'auto' }, minWidth: 0, display: 'grid' }}>
-                <SummaryCard
-                  dense
-                  title="เงินเหลือใช้ตามแผน"
-                  value={
-                    // Money แสดงค่าสัมบูรณ์ ติดลบต้องมี "−" ด้วย ไม่ใช่บอกด้วยสีแดงอย่างเดียว (Semantic Color Rule)
-                    <Money
-                      satang={plan.totals.planned_available_satang}
-                      tone={plan.totals.planned_available_satang < 0 ? 'expense' : 'income'}
-                      showSign={plan.totals.planned_available_satang < 0}
-                    />
-                  }
-                  caption="รายได้เต็ม − รายการหัก − รายจ่ายตามแผน − เงินกันไว้"
-                />
-              </Box>
+              <SummaryCard
+                dense
+                title="เงินเหลือใช้ตามแผน"
+                value={
+                  // Money แสดงค่าสัมบูรณ์ ติดลบต้องมี "−" ด้วย ไม่ใช่บอกด้วยสีแดงอย่างเดียว (Semantic Color Rule)
+                  <Money
+                    satang={plan.totals.planned_available_satang}
+                    tone={plan.totals.planned_available_satang < 0 ? 'expense' : 'income'}
+                    showSign={plan.totals.planned_available_satang < 0}
+                  />
+                }
+                caption="รายได้เต็ม − รายการหัก − รายจ่ายตามแผน − เงินกันไว้"
+              />
             </Box>
           </Box>
 

@@ -16,6 +16,19 @@ type SummaryCardProps = {
   dense?: boolean;
 };
 
+// แถวการ์ดสรุป: ≥ md อยู่บรรทัดเดียวเสมอ (การ์ดหดแทนการตกบรรทัดเหลือใบเดียว) / มือถือ 2 คอลัมน์
+// และใบสุดท้ายที่เหลือเศษกินเต็มแถว — minmax(0, 1fr) ไม่ใช่ 1fr เฉย ๆ เพราะ 1fr มี min เป็น auto
+// ยอดเงินยาว ๆ จะดันคอลัมน์จนล้นจอ 320px · แถว 5 ใบขึ้นไปใช้ dense ไม่งั้นที่ 900px การ์ดแคบเกินตัวเลข
+export function summaryRowSx(count: number) {
+  return {
+    display: 'grid',
+    gap: { xs: 1.5, md: 2 },
+    gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', md: `repeat(${count}, minmax(0, 1fr))` },
+    // nth-of-type ไม่ใช่ nth-child: emotion เตือน nth-child ทุก render — การ์ดทุกใบ render เป็น div จึงนับเท่ากัน
+    '& > div:last-child:nth-of-type(odd)': { gridColumn: { xs: 'span 2', md: 'auto' } },
+  };
+}
+
 // การ์ดสรุปตัวเดียว ไม่ซ้อน Paper ใน Paper (Don't ของ DESIGN.md) — value ผ่าน dataTextSx เสมอ
 // (ตัวเลข/เงินตาม Financial Clarity Rule) ต่างจาก title/caption ที่เป็นคำอธิบาย
 export default function SummaryCard({ title, icon, value, caption, onClick, disabled, disabledReason, dense = false }: SummaryCardProps) {
@@ -24,7 +37,7 @@ export default function SummaryCard({ title, icon, value, caption, onClick, disa
   // dense: ตัวเลขชิดล่างการ์ด (mt auto) — หัวการ์ดที่ตัดเป็น 2 บรรทัดจะไม่ดันตัวเลขให้ต่ำกว่าใบอื่นในแถวเดียวกัน
   // ต้องใช้ useFlexGap ด้วย เหตุผลเดียวกับแถวหัวการ์ด (Stack แบบ margin ลบ mt ของลูกทิ้ง) และการ์ดต้องสูงเต็มช่อง grid
   const content = (
-    <Stack spacing={0.75} useFlexGap={dense} sx={{ p: dense ? 2 : 3, textAlign: 'left', height: '100%' }}>
+    <Stack spacing={0.75} useFlexGap={dense} sx={{ p: dense ? 2 : { xs: 2, sm: 3 }, textAlign: 'left', height: '100%' }}>
       {/* useFlexGap: Stack แบบ margin (ค่าเริ่มต้น) รีเซ็ต margin ของลูกทุกตัวด้วย selector ที่ชนะ sx
           margin ติดลบของปุ่ม ⓘ ด้านล่างจึงหายเงียบ ๆ แล้วปุ่ม 40px ดันการ์ดที่มี caption ให้ตัวเลขต่ำกว่าใบอื่น */}
       <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', color: 'text.secondary' }}>
@@ -44,9 +57,11 @@ export default function SummaryCard({ title, icon, value, caption, onClick, disa
         sx={{
           ...dataTextSx,
           lineHeight: 1.3,
+          overflowWrap: 'anywhere',
+          // ไม่ dense ก็อยู่ 2 คอลัมน์บนมือถือ / 4 ใบที่ 900px — 1.75rem ล้นการ์ดถ้าไม่ย่อลง
           ...(dense
-            ? { fontSize: { xs: '1.25rem', md: '1.125rem', lg: '1.25rem' }, overflowWrap: 'anywhere', mt: 'auto' }
-            : { fontSize: '1.75rem' }),
+            ? { fontSize: { xs: '1.25rem', md: '1.125rem', lg: '1.25rem' }, mt: 'auto' }
+            : { fontSize: { xs: '1.25rem', sm: '1.5rem', lg: '1.75rem' } }),
         }}
       >
         {disabled ? '—' : value}

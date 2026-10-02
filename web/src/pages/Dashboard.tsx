@@ -29,7 +29,7 @@ import ChartCard from '../components/ChartCard.js';
 import DataFreshness from '../components/DataFreshness.js';
 import Money from '../components/Money.js';
 import MonthPicker, { currentMonth } from '../components/MonthPicker.js';
-import SummaryCard from '../components/SummaryCard.js';
+import SummaryCard, { summaryRowSx } from '../components/SummaryCard.js';
 import { dataTextSx, tokens } from '../theme.js';
 import { formatBaht, formatDate, formatDateTime } from '../format.js';
 import { LoadError, PageHeader, TableSkeleton } from '../ui.js';
@@ -136,20 +136,23 @@ export default function Dashboard() {
         <Stack spacing={4} sx={{ mt: 3 }}>
           <Box component="section" aria-labelledby="actual-heading">
             <Typography variant="h2" id="actual-heading" sx={{ fontSize: '1.25rem', mb: 1.5 }}>เงินจริงจาก Statement</Typography>
-            <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+            <Box sx={summaryRowSx(5)}>
               <SummaryCard
+                dense
                 title="เงินเข้า"
                 icon={<CallReceivedRounded fontSize="small" />}
                 value={<Money satang={summary.money_in_satang} tone="income" />}
                 onClick={() => goTransactions({ direction: 'credit' })}
               />
               <SummaryCard
+                dense
                 title="เงินออก"
                 icon={<CallMadeRounded fontSize="small" />}
                 value={<Money satang={summary.money_out_satang} tone="expense" />}
                 onClick={() => goTransactions({ direction: 'debit' })}
               />
               <SummaryCard
+                dense
                 title="กระแสเงินสดสุทธิ"
                 icon={<TrendingUpRounded fontSize="small" />}
                 value={<Money satang={summary.net_satang} tone={summary.net_satang >= 0 ? 'income' : 'expense'} showSign />}
@@ -158,11 +161,13 @@ export default function Dashboard() {
               {/* ไม่มี onClick โดยตั้งใจ — เป็นยอดรวมข้าม "ทุกบัญชี" ไม่มีตาราง/บัญชีเดียวที่เป็น "รายการต้นทาง"
                   ของยอดรวมนี้ได้จริง (ต่างจากการ์ดอื่นที่ drill ไปยัง transaction ต้นทางเจาะจงได้) */}
               <SummaryCard
+                dense
                 title="ยอดคงเหลือรวมล่าสุด"
                 icon={<AccountBalanceRounded fontSize="small" />}
                 value={<Money satang={summary.total_balance_satang} />}
               />
               <SummaryCard
+                dense
                 title="โอนภายใน (ไม่นับรายรับ/รายจ่าย)"
                 icon={<SwapHorizRounded fontSize="small" />}
                 value={<Money satang={summary.internal_transfer_excluded_satang} />}
@@ -174,8 +179,9 @@ export default function Dashboard() {
 
           <Box component="section" aria-labelledby="quality-heading">
             <Typography variant="h2" id="quality-heading" sx={{ fontSize: '1.25rem', mb: 1.5 }}>คุณภาพข้อมูล</Typography>
-            <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+            <Box sx={summaryRowSx(5)}>
               <SummaryCard
+                dense
                 title="ยังไม่ได้จัดหมวด"
                 icon={<CategoryRounded fontSize="small" />}
                 value={<Box component="span" sx={dataTextSx}>{summary.uncategorised_count.toLocaleString('th-TH')}</Box>}
@@ -183,6 +189,7 @@ export default function Dashboard() {
                 onClick={() => goTransactions({ uncategorised: '1' })}
               />
               <SummaryCard
+                dense
                 title="ยังไม่ตรวจสอบ"
                 icon={<FactCheckRounded fontSize="small" />}
                 value={<Box component="span" sx={dataTextSx}>{summary.unreviewed_count.toLocaleString('th-TH')}</Box>}
@@ -190,18 +197,21 @@ export default function Dashboard() {
                 onClick={() => goTransactions({ review_status: 'unreviewed' })}
               />
               <SummaryCard
+                dense
                 title="Statement อ่านไฟล์ไม่สำเร็จ"
                 icon={<ErrorOutlineRounded fontSize="small" />}
                 value={<Box component="span" sx={dataTextSx}>{(summary.statement_health.find((s) => s.status === 'parse_failed')?.n ?? 0).toLocaleString('th-TH')}</Box>}
                 caption="ทั้งหมด (ไม่ผูกกับเดือนที่เลือก)"
               />
               <SummaryCard
+                dense
                 title="Statement checksum ไม่ผ่าน"
                 icon={<ErrorOutlineRounded fontSize="small" />}
                 value={<Box component="span" sx={dataTextSx}>{(summary.statement_health.find((s) => s.status === 'checksum_failed')?.n ?? 0).toLocaleString('th-TH')}</Box>}
                 caption="ทั้งหมด (ไม่ผูกกับเดือนที่เลือก)"
               />
               <SummaryCard
+                dense
                 title="บัญชีที่ข้อมูลอาจขาดช่วง"
                 icon={<EventBusyRounded fontSize="small" />}
                 value={<Box component="span" sx={dataTextSx}>{coverage.filter((a) => a.statement_behind).length.toLocaleString('th-TH')}</Box>}
@@ -223,7 +233,7 @@ export default function Dashboard() {
 
           <Box component="section" aria-labelledby="dashboard-planning-heading">
             <Typography variant="h2" id="dashboard-planning-heading" sx={{ fontSize: '1.25rem', mb: 1.5 }}>การวางแผนรายเดือน</Typography>
-            <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+            <Box sx={summaryRowSx(2)}>
               <SummaryCard
                 title="เงินเหลือใช้ตามแผน"
                 icon={<EventRepeatRounded fontSize="small" />}

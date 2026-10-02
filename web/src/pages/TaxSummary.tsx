@@ -14,7 +14,7 @@ import { post, req, type Account, type TaxCalculationSnapshot, type TaxEntity, t
 import DeductionClaimSection from '../components/DeductionClaimSection.js';
 import IncomeQuickAddModal from '../components/IncomeQuickAddModal.js';
 import Money from '../components/Money.js';
-import SummaryCard from '../components/SummaryCard.js';
+import SummaryCard, { summaryRowSx } from '../components/SummaryCard.js';
 import { formatDate, formatDateTime } from '../format.js';
 import { dataTextSx } from '../theme.js';
 import { EmptyState, FeedbackSnackbar, LoadError, PageHeader, TableSkeleton, type Notice } from '../ui.js';
@@ -228,32 +228,36 @@ export default function TaxSummary() {
             </Alert>
           )}
 
-          <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', mt: 3 }} data-tour="tax-cards">
-            <SummaryCard title="เงินได้จากงานประจำ" value={<Money satang={summary.inputs.employmentIncomeSatang} tone="income" />} caption="income_record ของ Tax Entity นี้ในปีภาษีนี้" />
+          {/* จำนวนการ์ดต้องตรงกับที่ render จริงด้านล่าง: 4 ใบคงที่ + (ประมาณการ 2 ใบ หรือการ์ดปิด 1 ใบ) */}
+          <Box sx={{ ...summaryRowSx(e ? 6 : 5), mt: 3 }} data-tour="tax-cards">
+            <SummaryCard dense title="เงินได้จากงานประจำ" value={<Money satang={summary.inputs.employmentIncomeSatang} tone="income" />} caption="income_record ของ Tax Entity นี้ในปีภาษีนี้" />
             <SummaryCard
+              dense
               title="รายได้ธุรกิจอื่น"
               value={<Money satang={summary.inputs.otherIncomeSatang} tone="income" />}
               onClick={() => goTransactions(summary.drilldown_params.other_income)}
               caption="คลิกดูรายการธุรกรรม"
             />
             <SummaryCard
+              dense
               title="ค่าใช้จ่ายหักภาษีได้"
               value={<Money satang={summary.inputs.deductibleExpenseSatang} tone="expense" />}
               onClick={() => goTransactions(summary.drilldown_params.deductible_expense)}
               caption="คลิกดูรายการธุรกรรม"
             />
-            <SummaryCard title="ค่าลดหย่อนที่ยื่นขอ" value={<Money satang={summary.inputs.deductionClaimSatang} />} caption="รวมจากตารางค่าลดหย่อนด้านล่าง" />
+            <SummaryCard dense title="ค่าลดหย่อนที่ยื่นขอ" value={<Money satang={summary.inputs.deductionClaimSatang} />} caption="รวมจากตารางค่าลดหย่อนด้านล่าง" />
             {e ? (
               <>
-                <SummaryCard title="เงินได้สุทธิ (ประมาณการ)" value={<Money satang={e.netSatang} />} />
+                <SummaryCard dense title="เงินได้สุทธิ (ประมาณการ)" value={<Money satang={e.netSatang} />} />
                 <SummaryCard
+                  dense
                   title="ประมาณการยอดต้องชำระเพิ่ม/ขอคืน"
                   value={<Money satang={e.estimatedPayableSatang} tone={e.estimatedPayableSatang > 0 ? 'expense' : 'income'} showSign />}
                   caption={e.estimatedPayableSatang > 0 ? 'ต้องชำระเพิ่มโดยประมาณ' : 'ขอคืนได้โดยประมาณ'}
                 />
               </>
             ) : (
-              <SummaryCard title="ประมาณการภาษี" value="—" disabled disabledReason={summary.estimate_unavailable_reason ?? undefined} />
+              <SummaryCard dense title="ประมาณการภาษี" value="—" disabled disabledReason={summary.estimate_unavailable_reason ?? undefined} />
             )}
           </Box>
 
