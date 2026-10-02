@@ -195,7 +195,7 @@ function BulkList({ intro, targets, excluded }: { intro: string; targets: PlanIt
       </Box>
       {excluded.length > 0 && (
         <>
-          <Typography variant="body2" sx={{ fontWeight: 650 }}>
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>
             ตัดออก {excluded.length} รายการ
           </Typography>
           <Box component="ul" sx={{ m: 0, pl: 2.5, color: 'text.secondary' }}>
@@ -1346,7 +1346,7 @@ export default function MonthlyPlan() {
         >
           <Stack spacing={2.5}>
             <Box component="fieldset" sx={{ m: 0, p: 0, minWidth: 0, border: 0 }}>
-              <FormLabel component="legend" sx={{ mb: 1.5, color: 'text.primary', fontWeight: 650 }}>
+              <FormLabel component="legend" sx={{ mb: 1.5, color: 'text.primary', fontWeight: 600 }}>
                 รายการและยอด
               </FormLabel>
               <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 16rem), 1fr))' }}>
@@ -1374,7 +1374,7 @@ export default function MonthlyPlan() {
             </Box>
 
             <Box component="fieldset" sx={{ m: 0, p: 0, minWidth: 0, border: 0 }}>
-              <FormLabel component="legend" sx={{ mb: 1.5, color: 'text.primary', fontWeight: 650 }}>
+              <FormLabel component="legend" sx={{ mb: 1.5, color: 'text.primary', fontWeight: 600 }}>
                 ความถี่
               </FormLabel>
               <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 16rem), 1fr))' }}>
@@ -1504,7 +1504,7 @@ export default function MonthlyPlan() {
 
             {payingItemLive != null && payingItemLive.payments.length > 0 && (
               <Box component="section" aria-labelledby="payment-history-heading">
-                <Typography component="h3" id="payment-history-heading" variant="body2" sx={{ fontWeight: 650, mb: 1 }}>
+                <Typography component="h3" id="payment-history-heading" variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
                   ที่ประกาศจ่ายไว้แล้ว
                 </Typography>
                 <Stack spacing={1}>
@@ -1646,7 +1646,7 @@ export default function MonthlyPlan() {
                     sx={{ display: 'grid', gap: 1, alignItems: 'center', gridTemplateColumns: { xs: '1fr', sm: 'minmax(0, 1fr) 14rem' } }}
                   >
                     <Box sx={{ minWidth: 0 }}>
-                      <Typography sx={{ fontWeight: 650, overflowWrap: 'anywhere' }}>{i.name}</Typography>
+                      <Typography sx={{ fontWeight: 600, overflowWrap: 'anywhere' }}>{i.name}</Typography>
                       <Typography variant="body2" color="text.secondary">
                         {i.amount_mode === 'estimated' ? 'ยอดประมาณการ — กรอกยอดจากบิลจริง' : 'ยอดคงที่'}
                       </Typography>
@@ -1667,7 +1667,7 @@ export default function MonthlyPlan() {
 
             {payPlan.excluded.length > 0 && (
               <Box>
-                <Typography variant="body2" sx={{ fontWeight: 650, mb: 0.5 }}>
+                <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
                   ตัดออก {payPlan.excluded.length} รายการ
                 </Typography>
                 <Box component="ul" sx={{ m: 0, pl: 2.5, color: 'text.secondary' }}>

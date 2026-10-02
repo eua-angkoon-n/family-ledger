@@ -284,7 +284,7 @@ export default function StudentLoan() {
           </Alert>
 
           {/* ไม่มีสี warning ใน DESIGN.md (มีแค่ accent/income/expense/neutral) เหมือน DataFreshness.tsx
-              จึงใช้ info ซึ่ง map ไปที่ colors.muted แล้วให้ไอคอน + ข้อความสื่อความหมายแทน */}
+              จึงใช้ info ซึ่ง map ไปที่ muted (theme.ts) แล้วให้ไอคอน + ข้อความสื่อความหมายแทน */}
           {calibration && (
             <Alert
               severity={calibration.ok ? 'success' : 'info'}

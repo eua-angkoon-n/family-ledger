@@ -8,7 +8,7 @@ import KeyboardArrowDownRounded from '@mui/icons-material/KeyboardArrowDownRound
 import KeyboardArrowRightRounded from '@mui/icons-material/KeyboardArrowRightRounded';
 import { req, type AuditLogEntry, type AuditLogListResponse } from '../api.js';
 import { formatDateTime } from '../format.js';
-import { dataTextSx, descriptionSx } from '../theme.js';
+import { dataTextSx, descriptionSx, fontFamilies } from '../theme.js';
 import { EmptyState, LoadError, PageHeader, TableSkeleton } from '../ui.js';
 
 const LIMIT = 50;
@@ -18,10 +18,10 @@ function DetailBlock({ label, value }: { label: string; value: unknown }) {
   if (value == null) return null;
   return (
     <Box sx={{ minWidth: 0, flex: 1 }}>
-      <Typography component="h4" color="text.secondary" sx={{ fontSize: '0.875rem', fontWeight: 650 }}>{label}</Typography>
+      <Typography component="h4" color="text.secondary" sx={{ fontSize: '0.875rem', fontWeight: 600 }}>{label}</Typography>
       <Box
         component="pre"
-        sx={{ ...dataTextSx, m: 0, mt: 0.5, p: 1.5, fontSize: '0.875rem', borderRadius: 1, border: 1, borderColor: 'divider', bgcolor: 'background.default', overflowX: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
+        sx={{ fontFamily: fontFamilies.mono, m: 0, mt: 0.5, p: 1.5, fontSize: '0.875rem', borderRadius: 1, border: 1, borderColor: 'divider', bgcolor: 'background.default', overflowX: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
       >
         {JSON.stringify(value, null, 2)}
       </Box>

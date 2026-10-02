@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Alert, Box, Stack, Typography } from '@mui/material';
+import { useColorScheme } from '@mui/material/styles';
 import { BarChart } from '@mui/x-charts/BarChart';
 import { LineChart } from '@mui/x-charts/LineChart';
 import { PieChart } from '@mui/x-charts/PieChart';
@@ -29,7 +30,7 @@ import DataFreshness from '../components/DataFreshness.js';
 import Money from '../components/Money.js';
 import MonthPicker, { currentMonth } from '../components/MonthPicker.js';
 import SummaryCard from '../components/SummaryCard.js';
-import { categoryPalette, colors, dataTextSx } from '../theme.js';
+import { dataTextSx, tokens } from '../theme.js';
 import { formatBaht, formatDate, formatDateTime } from '../format.js';
 import { LoadError, PageHeader, TableSkeleton } from '../ui.js';
 
@@ -57,6 +58,10 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const requestIdRef = useRef(0);
+  // กราฟ SVG ต้องใช้ค่าสีจริง ไม่ใช่ CSS var — เลือกชุด token ตามธีมที่แสดงอยู่ (colorScheme = ค่าที่ resolve โหมด "ตามเครื่อง" แล้ว)
+  const { colorScheme } = useColorScheme();
+  const chartTokens = tokens[colorScheme === 'dark' ? 'dark' : 'light'];
+  const categoryPalette = chartTokens.categoryPalette;
 
   useEffect(() => {
     const requestId = ++requestIdRef.current;
@@ -263,8 +268,8 @@ export default function Dashboard() {
                     height={280}
                     xAxis={[{ scaleType: 'band', data: cashFlow.rows.map((r) => r.month), valueFormatter: (m: string) => m.slice(2) }]}
                     series={[
-                      { id: 'income', label: 'รายรับ', data: cashFlow.rows.map((r) => r.money_in_satang / 100), color: colors.income, valueFormatter: (v: number | null) => formatBaht(Math.round((v ?? 0) * 100)) },
-                      { id: 'expense', label: 'รายจ่าย', data: cashFlow.rows.map((r) => r.money_out_satang / 100), color: colors.expense, valueFormatter: (v: number | null) => formatBaht(Math.round((v ?? 0) * 100)) },
+                      { id: 'income', label: 'รายรับ', data: cashFlow.rows.map((r) => r.money_in_satang / 100), color: chartTokens.income, valueFormatter: (v: number | null) => formatBaht(Math.round((v ?? 0) * 100)) },
+                      { id: 'expense', label: 'รายจ่าย', data: cashFlow.rows.map((r) => r.money_out_satang / 100), color: chartTokens.expense, valueFormatter: (v: number | null) => formatBaht(Math.round((v ?? 0) * 100)) },
                     ]}
                     onItemClick={(_event, item) => {
                       const row = cashFlow!.rows[item.dataIndex];

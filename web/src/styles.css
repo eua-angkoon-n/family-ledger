@@ -1,29 +1,17 @@
-@font-face {
-  font-family: "iannnnn-DOG";
-  src: url("/fonts/iannnnn-DOG-Regular.ttf") format("truetype");
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-}
-
-:root {
-  --bg: #0e101f;
-  --surface: #1a1e30;
-  --border: #32364d;
-  --text: #e9ebf2;
-  --muted: #9498a5;
-  --accent: #70adfb;
-  --income: #52cd86;
-  --expense: #f3625d;
-  color-scheme: dark;
-}
-
 * {
   box-sizing: border-box;
 }
 
+/* สีพื้นและ color-scheme มาจาก CSS var ของ MUI ตามธีมที่ใช้อยู่ — ค่า fallback (background ของแต่ละธีมใน theme.ts)
+   มีไว้แค่ช่วงก่อน React mount ที่ MUI ยังไม่ได้ใส่ตัวแปร; data-mui-color-scheme ตั้งโดยสคริปต์ใน index.html */
 html {
-  background: var(--bg);
+  background: var(--mui-palette-background-default, #f6e6ee);
+  color-scheme: light;
+}
+
+html[data-mui-color-scheme="dark"] {
+  background: var(--mui-palette-background-default, #12242e);
+  color-scheme: dark;
 }
 
 body {

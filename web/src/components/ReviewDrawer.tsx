@@ -200,7 +200,7 @@ export default function ReviewDrawer({ txnId, categories, taxEntities, onClose, 
         ) : detail && !error ? (
           <Stack spacing={3}>
             <Box>
-              <Typography sx={{ fontWeight: 650 }}>{detail.description}</Typography>
+              <Typography sx={{ fontWeight: 600 }}>{detail.description}</Typography>
               <Typography variant="body2" color="text.secondary" sx={dataTextSx}>
                 {formatDate(detail.txn_date)} · {detail.account_nickname} ({detail.bank_name})
               </Typography>
@@ -357,7 +357,7 @@ export default function ReviewDrawer({ txnId, categories, taxEntities, onClose, 
                       <Box key={m.id} sx={{ p: 2, border: 1, borderColor: 'divider', borderRadius: '10px' }}>
                         <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 0.5 }}>
                           <SwapHorizRounded fontSize="small" sx={{ color: 'text.secondary' }} />
-                          <Typography variant="body2" sx={{ fontWeight: 650 }}>{m.counterpart_account_nickname}</Typography>
+                          <Typography variant="body2" sx={{ fontWeight: 600 }}>{m.counterpart_account_nickname}</Typography>
                           {m.status === 'confirmed' && <Chip size="small" icon={<CheckRounded />} label="ยืนยันแล้ว" color="success" variant="outlined" />}
                         </Stack>
                         <Typography variant="body2" color="text.secondary" sx={dataTextSx}>

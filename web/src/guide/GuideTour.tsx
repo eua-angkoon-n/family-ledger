@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Box, Button, IconButton, Paper, Stack, Typography, useMediaQuery } from '@mui/material';
 import CloseRounded from '@mui/icons-material/CloseRounded';
-import { colors, descriptionSx } from '../theme.js';
+import { descriptionSx } from '../theme.js';
 import type { Guide } from './guides.js';
 
 const CARD_WIDTH = 360;
 const GAP = 12;
 /** ต้องอยู่เหนือ AppBar/Fab แต่ต่ำกว่า Dialog(1300) และ Snackbar(1400) ของ MUI */
 const Z = 1200;
-const DIM = 'rgba(14, 16, 31, 0.72)'; // colors.background ที่ opacity 0.72
 
 /**
  * Tour ไฮไลต์ทีละขั้น เขียนด้วย MUI ล้วน ไม่เพิ่ม dependency
@@ -99,26 +98,27 @@ export function GuideTour({ guide, onClose }: { guide: Guide; onClose: () => voi
       {/* ชั้นบล็อกคลิก — คลิกที่ไหนก็ปิด tour (ทางออกที่เดาได้เสมอ) */}
       <Box
         onClick={onClose}
-        sx={{ position: 'fixed', inset: 0, zIndex: Z, bgcolor: rect ? 'transparent' : DIM }}
+        sx={{ position: 'fixed', inset: 0, zIndex: Z, bgcolor: rect ? 'transparent' : 'brand.scrim' }}
       />
       {rect && (
         <Box
           aria-hidden
-          sx={{
+          sx={(theme) => ({
             position: 'fixed',
             top: rect.top - 6,
             left: rect.left - 6,
             width: rect.width + 12,
             height: rect.height + 12,
             borderRadius: '10px',
-            outline: `2px solid ${colors.accent}`,
-            boxShadow: `0 0 0 9999px ${DIM}`,
+            outline: `2px solid ${theme.vars.palette.brand.ring}`,
+            // ฉากหรี่ตามธีม (brand.scrim ใน theme.ts) — ชุดเดียวกับชั้นบล็อกคลิกด้านบนตอนไม่มีไฮไลต์
+            boxShadow: `0 0 0 9999px ${theme.vars.palette.brand.scrim}`,
             pointerEvents: 'none',
             zIndex: Z + 1,
             // ตั้งใจไม่ใส่ transition: ตำแหน่งถูกเซ็ตใหม่ทุก scroll event ถ้าใส่ transition กรอบไฮไลต์
             // จะวิ่งตามหลังหน้าจอตอนเลื่อน (และเป็นการ animate ค่าที่ทำให้ layout คำนวณใหม่)
             // ความรู้สึกว่ามีการเคลื่อนไหวมาจาก smooth scroll ตอนเปลี่ยนขั้นอยู่แล้ว
-          }}
+          })}
         />
       )}
       <Paper
@@ -141,7 +141,7 @@ export function GuideTour({ guide, onClose }: { guide: Guide; onClose: () => voi
         <Stack spacing={1.5}>
           <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
             <Box sx={{ flex: 1, minWidth: 0 }}>
-              <Typography color="text.secondary" sx={{ fontSize: '0.875rem', fontWeight: 650 }}>
+              <Typography color="text.secondary" sx={{ fontSize: '0.875rem', fontWeight: 600 }}>
                 {guide.title} · ขั้นที่ {index + 1} จาก {steps.length}
               </Typography>
               <Typography component="h2" variant="h2" id="guide-step-title" sx={{ mt: 0.5 }}>

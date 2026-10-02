@@ -204,7 +204,7 @@ function Banks() {
               อีเมลผู้ส่งต้องเป็นอีเมลของธนาคารที่ส่ง statement และโดเมนใช้ตรวจ <Box component="span" sx={dataTextSx}>DKIM</Box>
             </Alert>
             <Box component="fieldset" sx={{ m: 0, p: 0, minWidth: 0, border: 0 }}>
-              <FormLabel component="legend" sx={{ mb: 1.5, color: 'text.primary', fontWeight: 650 }}>ข้อมูลธนาคาร</FormLabel>
+              <FormLabel component="legend" sx={{ mb: 1.5, color: 'text.primary', fontWeight: 600 }}>ข้อมูลธนาคาร</FormLabel>
               <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 18rem), 1fr))' }}>
                 <TextField label="ชื่อธนาคาร" helperText="ชื่อที่แสดงในหน้าตั้งค่าบัญชี" value={form.name} onChange={setFormField('name')} required autoFocus />
                 <TextField select label="ตัวแกะข้อมูล" helperText="เลือก parser ที่ตรงกับรูปแบบ statement" value={form.parser_key} onChange={setFormField('parser_key')} required>
@@ -213,14 +213,14 @@ function Banks() {
               </Box>
             </Box>
             <Box component="fieldset" sx={{ m: 0, p: 0, minWidth: 0, border: 0 }}>
-              <FormLabel component="legend" sx={{ mb: 1.5, color: 'text.primary', fontWeight: 650 }}>การยืนยันผู้ส่ง</FormLabel>
+              <FormLabel component="legend" sx={{ mb: 1.5, color: 'text.primary', fontWeight: 600 }}>การยืนยันผู้ส่ง</FormLabel>
               <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 18rem), 1fr))' }}>
                 <TextField label="อีเมลผู้ส่งของธนาคาร" helperText="อีเมล From ที่ใช้ส่ง statement" value={form.sender_email} onChange={setFormField('sender_email')} required placeholder="statement@kasikornbank.com" />
                 <TextField label="โดเมนผู้ส่ง (ตรวจ DKIM)" helperText="โดเมนที่ต้องผ่านการยืนยัน DKIM" value={form.sender_domain} onChange={setFormField('sender_domain')} required placeholder="kasikornbank.com" />
               </Box>
             </Box>
             <Box component="fieldset" sx={{ m: 0, p: 0, minWidth: 0, border: 0 }}>
-              <FormLabel component="legend" sx={{ mb: 1.5, color: 'text.primary', fontWeight: 650 }}>รูปแบบการจับคู่ไฟล์</FormLabel>
+              <FormLabel component="legend" sx={{ mb: 1.5, color: 'text.primary', fontWeight: 600 }}>รูปแบบการจับคู่ไฟล์</FormLabel>
               <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 18rem), 1fr))' }}>
                 <TextField label="หัวข้ออีเมล statement รายเดือน (regex)" helperText="Regular expression สำหรับ statement รายเดือน" value={form.subject_monthly} onChange={setFormField('subject_monthly')} required />
                 <TextField label="หัวข้ออีเมล statement ที่ผู้ใช้ขอเอง (regex)" helperText="Regular expression สำหรับ statement ย้อนหลัง" value={form.subject_ondemand} onChange={setFormField('subject_ondemand')} required />

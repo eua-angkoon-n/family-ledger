@@ -226,7 +226,7 @@ export default function Accounts() {
               <Link href="/auth/google?add=1" sx={{ display: 'inline-block', mt: 1 }}>+ ต่อกล่องอีเมลอื่นเพิ่ม</Link>
             </Box>
             <Box component="fieldset" sx={{ m: 0, p: 0, minWidth: 0, border: 0 }}>
-              <FormLabel component="legend" sx={{ mb: 1.5, color: 'text.primary', fontWeight: 650 }}>การเชื่อมต่อ statement</FormLabel>
+              <FormLabel component="legend" sx={{ mb: 1.5, color: 'text.primary', fontWeight: 600 }}>การเชื่อมต่อ statement</FormLabel>
               <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 16rem), 1fr))' }}>
                 <TextField select label="ธนาคาร" helperText="เลือกธนาคารเจ้าของบัญชี" value={form.bank_id} onChange={setFormField('bank_id')} required autoFocus>
                   <MenuItem value=""><em>— เลือก —</em></MenuItem>
@@ -241,7 +241,7 @@ export default function Accounts() {
               </Box>
             </Box>
             <Box component="fieldset" sx={{ m: 0, p: 0, minWidth: 0, border: 0 }}>
-              <FormLabel component="legend" sx={{ mb: 1.5, color: 'text.primary', fontWeight: 650 }}>รายละเอียดบัญชี</FormLabel>
+              <FormLabel component="legend" sx={{ mb: 1.5, color: 'text.primary', fontWeight: 600 }}>รายละเอียดบัญชี</FormLabel>
               <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 16rem), 1fr))' }}>
                 <TextField label="ชื่อเล่น" helperText="ชื่อที่ช่วยให้จำบัญชีนี้ได้ง่าย" value={form.nickname} onChange={setFormField('nickname')} required slotProps={{ htmlInput: { maxLength: 60 } }} />
                 <TextField label="เลขที่บัญชี" helperText="กรอกตามที่แสดงใน statement" value={form.account_number} onChange={setFormField('account_number')} required slotProps={{ htmlInput: { maxLength: 40 } }} />
@@ -331,7 +331,7 @@ export default function Accounts() {
                 sx={{ alignItems: { sm: 'center' }, py: 1.5, borderBottom: 1, borderColor: 'divider', '&:last-child': { borderBottom: 0 } }}
               >
                 <Box sx={{ minWidth: 0, flexGrow: 1 }}>
-                  <Typography sx={{ ...dataTextSx, fontWeight: 650, overflowWrap: 'anywhere' }}>{mailbox.email}</Typography>
+                  <Typography sx={{ ...dataTextSx, fontWeight: 600, overflowWrap: 'anywhere' }}>{mailbox.email}</Typography>
                   <Typography variant="body2" color="text.secondary" sx={dataTextSx}>
                     {mailbox.last_synced_at ? `ซิงก์ล่าสุด ${formatDateTime(mailbox.last_synced_at)}` : 'ยังไม่เคยซิงก์'}
                   </Typography>

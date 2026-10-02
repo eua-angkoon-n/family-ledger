@@ -32,8 +32,8 @@ type Props = {
 const BAR_BOTTOM = { xs: 32, sm: 36 };
 const GAP_ABOVE_BAR = 16;
 
-// แถบลอยเหนือเนื้อหา = Floating Menu elevation 8 ของ DESIGN.md (เงาอธิบายการซ้อนชั้นจริง) และยังมี
-// เส้นขอบ เพราะบนพื้นมืดเงาแทบมองไม่เห็น z-index เท่า appBar: อยู่ใต้ snackbar
+// แถบลอยเหนือเนื้อหา = Floating Offset (elevation 8) ของ DESIGN.md และยังมี
+// เส้นขอบ z-index เท่า appBar: อยู่ใต้ snackbar
 export default function PlanSelectionBar(props: Props) {
   const { items, hiddenCount, payCount, skipCount, deleteCount, disabled, busy, onPay, onSkip, onDelete, onClear } = props;
   const desktop = useMediaQuery((theme: Theme) => theme.breakpoints.up('md'), { noSsr: true });
@@ -164,7 +164,7 @@ export default function PlanSelectionBar(props: Props) {
         {desktop ? (
           <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2 }}>
             <Box>
-              <Typography role="status" sx={{ fontWeight: 650 }}>
+              <Typography role="status" sx={{ fontWeight: 600 }}>
                 เลือก {items.length} รายการ{busyText}
               </Typography>
               {hidden}
@@ -177,7 +177,7 @@ export default function PlanSelectionBar(props: Props) {
           <>
             <Stack direction="row" sx={{ alignItems: 'center', gap: 0.5 }}>
               <Box sx={{ minWidth: 0, flexGrow: 1 }}>
-                <Typography role="status" sx={{ fontWeight: 650 }}>
+                <Typography role="status" sx={{ fontWeight: 600 }}>
                   เลือก {items.length} · เหลือ {available}
                   {busyText}
                 </Typography>

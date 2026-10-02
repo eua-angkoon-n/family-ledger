@@ -43,6 +43,7 @@ import SettingsRounded from '@mui/icons-material/SettingsRounded';
 import { req, type EmailAccount, type User } from './api.js';
 import Accounts from './Accounts.js';
 import Admin from './Admin.js';
+import ThemeModeToggle from './components/ThemeModeToggle.js';
 import { isPageEnabled } from './features.js';
 import { brandCopySx, dataTextSx, descriptionSx } from './theme.js';
 import { FeedbackSnackbar, PageHeader, TableSkeleton, VersionBadge, type Notice } from './ui.js';
@@ -132,8 +133,8 @@ function NavTab({ item, iconOnly, ...tabsProps }: { item: NavItem; iconOnly: boo
   );
 }
 
-// รายการที่เลือกใน drawer ใช้ accent แบบเดียวกับ tab ที่เลือก (พื้นจาง ๆ มาจาก Mui-selected ของ theme อยู่แล้ว)
-const drawerItemSx = { '&.Mui-selected, &.Mui-selected .MuiListItemIcon-root': { color: 'primary.main' } } as const;
+// รายการที่เลือกใน drawer เหมือน tab ที่เลือก: พื้น sidebar-accent มาจาก theme ส่วนนี้ทำให้ไอคอนใช้สีตัวอักษรเดียวกัน
+const drawerItemSx = { '&.Mui-selected, &.Mui-selected .MuiListItemIcon-root': { color: 'brand.sidebarAccentForeground' } } as const;
 
 // Tabs ต้อง value ตรงกับ value ของ Tab ลูกเป๊ะ — ตัดเหลือ segment แรกของ path (ตัด query/segment ย่อยทิ้ง
 // เช่น /transactions?month=... ยังนับเป็น /transactions) ไม่ตรงกับ NAV_ITEMS/settings เลย = ไม่มี tab ไหน active
@@ -181,6 +182,9 @@ function SettingsPage({ userId }: { userId: number }) {
 function AuthPanel({ children, version }: { children: ReactNode; version: string | null }) {
   return (
     <Box component="main" sx={{ minHeight: '100vh', display: 'grid', placeItems: 'center', p: { xs: 2, sm: 3 } }}>
+      <Box sx={{ position: 'fixed', top: { xs: 8, sm: 16 }, right: { xs: 8, sm: 16 } }}>
+        <ThemeModeToggle />
+      </Box>
       <Paper component="section" variant="outlined" sx={{ width: 'min(100%, 27rem)', p: { xs: 3, sm: 4 } }}>
         {children}
       </Paper>
@@ -349,6 +353,9 @@ export default function App() {
                 </IconButton>
               )}
             </Box>
+            {/* ทุกขนาดจอ: อยู่นอก nav "เมนูหลัก" (ไม่ใช่ปลายทางนำทาง และคู่มือไฮไลต์กล่อง nav ทั้งกล่อง)
+                ≥ md อยู่ก่อนไอคอนคู่มือ; < md อยู่ขวาของแบรนด์ (แบรนด์ mr: auto ดันไปชิดขวา) กดได้โดยไม่ต้องเปิด drawer */}
+            <ThemeModeToggle />
             {isDesktop && (
               <>
                 <Tooltip title="คู่มือการใช้งาน">
@@ -368,7 +375,7 @@ export default function App() {
         </Container>
       </AppBar>
 
-      {/* elevation 8 = Floating Menu ตาม DESIGN.md; ขอบขวาช่วยแยกขอบบนพื้นมืดที่เงาแทบมองไม่เห็น */}
+      {/* elevation 8 = Floating Offset (shadow-md) ตาม DESIGN.md; พื้น sidebar มาจาก theme; ขอบขวาแยก drawer ออกจากเนื้อหา */}
       <Drawer
         anchor="left"
         open={menuOpen}

@@ -64,7 +64,7 @@ export default function Help() {
                 <Stack spacing={2.5}>
                   {guide.steps.map((step, i) => (
                     <Box key={i}>
-                      <Typography component="h3" sx={{ fontWeight: 650 }}>{step.title}</Typography>
+                      <Typography component="h3" sx={{ fontWeight: 600 }}>{step.title}</Typography>
                       <Typography color="text.secondary" sx={{ mt: 0.5, maxWidth: '75ch', ...descriptionSx }}>
                         {step.body}
                       </Typography>
