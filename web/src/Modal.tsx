@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useId, useState, type ReactNode } from 'react';
 import { Button, Dialog, DialogActions, DialogContent, DialogTitle, IconButton, Stack, Typography } from '@mui/material';
 import CloseRounded from '@mui/icons-material/CloseRounded';
 import { ConfirmDialog } from './ui.js';
@@ -21,6 +21,8 @@ type Props = {
 
 export default function Modal({ open, title, onClose, children, busy = false, dirty = false, footer }: Props) {
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  // ชื่อ dialog = h2 อย่างเดียว ไม่รวมปุ่ม "ปิด" — DialogTitle รับ id ของ aria-labelledby จาก Dialog เป็นค่าเริ่มต้น จึงตั้ง id ของมันแยก
+  const titleId = useId();
   const requestClose = () => {
     if (busy) return;
     if (dirty) setConfirmDiscard(true);
@@ -28,10 +30,10 @@ export default function Modal({ open, title, onClose, children, busy = false, di
   };
   return (
     <>
-      <Dialog open={open} onClose={requestClose} maxWidth="md" fullWidth aria-labelledby="modal-title">
-        <DialogTitle component="div" id="modal-title">
+      <Dialog open={open} onClose={requestClose} maxWidth="md" fullWidth aria-labelledby={titleId}>
+        <DialogTitle component="div" id={`${titleId}-bar`}>
           <Stack direction="row" spacing={2} sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
-            <Typography component="h2" variant="h2">{title}</Typography>
+            <Typography component="h2" variant="h2" id={titleId}>{title}</Typography>
             {/* busy = aria-disabled: ปุ่มที่ถือ focus อยู่ไม่ทำ focus หลุดไป <body> (Buttons ใน DESIGN.md) */}
             <IconButton type="button" aria-label="ปิด" onClick={requestClose} aria-disabled={busy}><CloseRounded /></IconButton>
           </Stack>

@@ -32,9 +32,17 @@ const SPECS: Record<PaymentState, Spec> = {
 
 // รายการหักจากรายได้ไม่ได้จ่ายเอง (ถูกหักเมื่อบันทึกรายได้) และเงินกันไว้ไม่ใช่บิล — ยังไม่เกิดจึงไม่ใช่ "เกินกำหนด"
 // หรือ "ยังไม่จ่าย" API ส่ง unpaid ให้สองประเภทนี้ (overdue ของข้อมูลเก่าก็ถือเป็นค่าเดียวกัน) สีกลางเสมอ
-const PENDING_BY_KIND: Partial<Record<PlanKind, Spec>> = {
-  payroll_deduction: { label: 'รอบันทึกรายได้', color: 'default', icon: <HourglassEmptyRounded /> },
-  reserve: { label: 'ยังไม่ได้กัน', color: 'default', icon: <RadioButtonUncheckedRounded /> },
+// เงินกันไว้ใช้คำของการกันเงินแทนคำว่า "จ่าย" ทุกสถานะ (คู่กับปุ่ม "บันทึกว่ากันแล้ว" ในหน้าวางแผน)
+const DEDUCTION_PENDING: Spec = { label: 'รอบันทึกรายได้', color: 'default', icon: <HourglassEmptyRounded /> };
+const RESERVE_PENDING: Spec = { label: 'ยังไม่ได้กัน', color: 'default', icon: <RadioButtonUncheckedRounded /> };
+const BY_KIND: Partial<Record<PlanKind, Partial<Record<PaymentState, Spec>>>> = {
+  payroll_deduction: { unpaid: DEDUCTION_PENDING, overdue: DEDUCTION_PENDING },
+  reserve: {
+    unpaid: RESERVE_PENDING,
+    overdue: RESERVE_PENDING,
+    partial: { label: 'กันบางส่วน', color: 'default', icon: <DonutLargeRounded /> },
+    paid: { label: 'กันแล้ว', color: 'success', icon: <CheckCircleRounded /> },
+  },
 };
 
 // label ชุดเดียวกับชิป ให้ตัวกรองสถานะในหน้าวางแผนเรียกชื่อตรงกับที่เห็นในตาราง
@@ -43,7 +51,6 @@ export const PAYMENT_STATE_LABEL = Object.fromEntries(
 ) as Record<PaymentState, string>;
 
 export default function PaymentStatusChip({ state, kind }: { state: PaymentState; kind?: PlanKind }) {
-  const pending = (state === 'unpaid' || state === 'overdue') && kind != null ? PENDING_BY_KIND[kind] : undefined;
-  const spec = pending ?? SPECS[state] ?? SPECS.unpaid;
+  const spec = (kind != null ? BY_KIND[kind]?.[state] : undefined) ?? SPECS[state] ?? SPECS.unpaid;
   return <Chip size="small" icon={spec.icon} label={spec.label} color={spec.color} variant="outlined" />;
 }

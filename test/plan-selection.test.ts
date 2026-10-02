@@ -113,7 +113,7 @@ test('canDelete: ทุกเงื่อนไข', () => {
   assert.equal(canDelete(item({ income_record_id: 3 })), 'จัดการในส่วนรายได้');
   assert.equal(canDelete(item({ installment_due_id: 3 })), 'จัดการที่หน้าแผนผ่อน');
   assert.equal(canDelete(item({ recurring_rule_id: 3 })), 'รายการประจำ — ใช้ ข้าม แทน');
-  assert.equal(canDelete(item({ payments: [payment('cancelled'), payment('declared')] })), 'มีการประกาศจ่ายค้างอยู่');
+  assert.equal(canDelete(item({ payments: [payment('cancelled'), payment('declared')] })), 'มีการบันทึกจ่ายค้างอยู่');
 });
 
 test('matchesItemFilter: ชิป "ต้องจ่ายทั้งหมด" นับตรงกับ total_count (expense ที่ active)', () => {

@@ -47,7 +47,8 @@ export const BELOW_MD = { display: { md: 'none' } } as const;
  * action รองของแถวตาราง (The Row Action Rule): icon button + Tooltip — `label` คือชื่อเต็มสำหรับ screen reader
  * (ใส่ชื่อแถวด้วย เช่น "แก้ไข ค่าเช่าบ้าน") ส่วน `tooltip` คือคำสั้นที่ตาเห็น (ไม่ส่ง = ใช้ label)
  * `disabledReason` = ทำไม่ได้เพราะตัวรายการเอง: ปุ่มยังอยู่ในลำดับ tab (aria-disabled) tooltip บอกเหตุผล ทั้งเมาส์และ focus
- * span ห่อไว้เสมอ: Tooltip ของ MUI ฟัง event จากปุ่มที่ disabled ไม่ได้
+ * Tooltip ห่อปุ่มตรง ๆ เหตุผลจึงเป็น accessible description ของปุ่มเอง (describeChild: title ตอนปิด, aria-describedby ตอนเปิด)
+ * span ห่อเฉพาะตอน `disabled` จริง — Tooltip ของ MUI ฟัง event จากปุ่มที่ disabled ไม่ได้
  */
 export function RowIconButton({
   label,
@@ -58,19 +59,14 @@ export function RowIconButton({
   ...props
 }: { label: string; tooltip?: string; disabledReason?: string | null } & Omit<IconButtonProps, 'aria-label'>) {
   const blocked = disabledReason != null && disabledReason !== '';
+  const button = (
+    <IconButton size="small" aria-label={label} aria-disabled={blocked || undefined} onClick={blocked ? undefined : onClick} {...props}>
+      {children}
+    </IconButton>
+  );
   return (
     <Tooltip title={blocked ? disabledReason : (tooltip ?? label)} describeChild={blocked}>
-      <span>
-        <IconButton
-          size="small"
-          aria-label={label}
-          aria-disabled={blocked || undefined}
-          onClick={blocked ? undefined : onClick}
-          {...props}
-        >
-          {children}
-        </IconButton>
-      </span>
+      {props.disabled ? <span>{button}</span> : button}
     </Tooltip>
   );
 }
@@ -199,7 +195,7 @@ type ConfirmDialogProps = {
   description: ReactNode;
   confirmLabel: string;
   confirmColor?: ButtonProps['color'];
-  /** ปุ่มปิดโดยไม่ทำอะไร — ไม่ใช้ "ยกเลิก" เป็นค่าเริ่มต้น เพราะชนกับ action อย่าง "ยกเลิกแผน"/"ยกเลิกการจ่าย" */
+  /** ปุ่มปิดโดยไม่ทำอะไร — ไม่ใช้ "ยกเลิก" เป็นค่าเริ่มต้น เพราะชนกับ action อย่าง "ยกเลิกแผน"/"ยกเลิกการบันทึกจ่าย" */
   cancelLabel?: string;
   busy?: boolean;
   onClose: () => void;

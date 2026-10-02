@@ -117,7 +117,8 @@ export default function PlanSelectionBar(props: Props) {
     </Box>
   );
 
-  // มือถือ: ไม่มีไอคอน ป้ายสั้นลง ปุ่มยืดเต็มแถว ให้ 3 ปุ่มพอดีแถวเดียวที่จอ 320px (ยาวเกินค่อยตัดลงแถวใหม่)
+  // มือถือ: ไม่มีไอคอน ปุ่มยืดเต็มแถว ให้ 3 ปุ่มพอดีแถวเดียวที่จอ 320px (ยาวเกินค่อยตัดลงแถวใหม่)
+  // ป้ายเดียวกันทุกขนาดจอ — "บันทึกจ่าย" คำกริยาเดียวกับปุ่มบนแถว ("จ่ายแล้ว" เป็นชื่อสถานะ ไม่ใช่ action)
   const compact = !desktop;
   const actionSx = compact ? { flex: '1 1 auto', px: 1, whiteSpace: 'nowrap' } : { whiteSpace: 'nowrap' };
   // กดไม่ได้ = aria-disabled + กดแล้วไม่ทำอะไร (ทั้งตอนทำงานและตอนจำนวนเป็น 0) — dialog แบบกลุ่มปิดก่อนเริ่มยิง
@@ -126,7 +127,7 @@ export default function PlanSelectionBar(props: Props) {
   const actions = (
     <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1 }}>
       <Button variant="contained" startIcon={compact ? undefined : <PaidRounded />} {...guard(disabled || payCount === 0, onPay)} sx={actionSx}>
-        {compact ? 'จ่าย' : 'จ่ายแล้ว'} ({payCount})
+        บันทึกจ่าย ({payCount})
       </Button>
       <Button variant="outlined" color="inherit" startIcon={compact ? undefined : <SkipNextRounded />} {...guard(disabled || skipCount === 0, onSkip)} sx={actionSx}>
         ข้าม ({skipCount})

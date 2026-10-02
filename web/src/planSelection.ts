@@ -10,7 +10,7 @@ export const STATUS_ORDER: PaymentState[] = [
 // ค่า sentinel ของ "ไม่ระบุหมวด" ใน select — category_id จริงเป็นตัวเลขเสมอ จึงไม่ชนกัน
 export const NO_CATEGORY = 'none';
 
-/** ประโยคเดียวที่ใช้ทุกที่ในหน้าวางแผน (หัวหน้า, ประกาศจ่าย, รายได้, ปิดเดือน) — ADR-0004: แผนไม่จับคู่กับ statement */
+/** ADR-0004: แผนไม่จับคู่กับ statement — บอกครั้งเดียวใต้ชื่อหน้าวางแผน และในฟอร์มบันทึกจ่าย (ทีละรายการ/แบบกลุ่ม) ที่ผลของมันเกิดจริง */
 export const PLAN_NOT_MATCHED_NOTE = 'แผนไม่จับคู่กับ statement — ยอดจ่ายและรายได้นับตามที่คุณบันทึกเอง เงินเข้าออกจริงดูที่หน้าธุรกรรม';
 
 export type SelectionTotals = { income: number; deduction: number; expense: number; reserve: number; available: number };
@@ -31,8 +31,8 @@ export function sumPlanTotals(items: PlanItem[]): SelectionTotals {
 }
 
 // canX คืน null = ทำได้, ไม่งั้นคืนเหตุผลสั้น ๆ ไว้แสดงใน "ตัดออก" ของ dialog แบบกลุ่ม
-// ใช้กับปุ่มแบบกลุ่มเท่านั้น — ปุ่มรายแถวมีเงื่อนไขของตัวเอง (เช่น "จ่ายแล้ว" บนแถวที่จ่ายครบยังต้อง
-// เปิด modal ได้เพื่อยกเลิกการประกาศจ่าย) ส่วนเดือนที่ปิดแล้วผู้เรียกเช็กเอง
+// ใช้กับปุ่มแบบกลุ่มเท่านั้น — ปุ่มรายแถวมีเงื่อนไขของตัวเอง (เช่น "บันทึกจ่าย" บนแถวที่จ่ายครบยังต้อง
+// เปิด modal ได้เพื่อยกเลิกการบันทึกจ่าย) ส่วนเดือนที่ปิดแล้วผู้เรียกเช็กเอง
 export function canPay(item: PlanItem): string | null {
   if (item.kind === 'income') return 'บันทึกที่รายได้และรายการหัก';
   if (item.kind === 'payroll_deduction') return 'รายการหักจากรายได้ไม่ต้องจ่าย';
@@ -56,7 +56,7 @@ export function canDelete(item: PlanItem): string | null {
   if (item.income_record_id != null) return 'จัดการในส่วนรายได้';
   if (item.installment_due_id != null) return 'จัดการที่หน้าแผนผ่อน';
   if (item.recurring_rule_id != null) return 'รายการประจำ — ใช้ ข้าม แทน';
-  if (!item.payments.every((p) => p.status === 'cancelled')) return 'มีการประกาศจ่ายค้างอยู่';
+  if (!item.payments.every((p) => p.status === 'cancelled')) return 'มีการบันทึกจ่ายค้างอยู่';
   return null;
 }
 

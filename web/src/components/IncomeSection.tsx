@@ -5,7 +5,6 @@ import EditRounded from '@mui/icons-material/EditRounded';
 import { post, patch, req, type Account, type IncomeDeduction, type IncomeRecord, type PlanItem } from '../api.js';
 import Modal from '../Modal.js';
 import { AMOUNT_FORMAT_HINT, formatBaht, formatDate, parseBahtToSatang } from '../format.js';
-import { PLAN_NOT_MATCHED_NOTE } from '../planSelection.js';
 import { amountFieldHelp as amountHelp, BELOW_MD, LoadError, MD_UP, PageHeader, RowIconButton, TableSkeleton } from '../ui.js';
 import { dataTextSx } from '../theme.js';
 import Money from './Money.js';
@@ -23,7 +22,11 @@ function amount(value: string): number {
   return result;
 }
 
-export type IncomeSectionHandle = { openNewFor: (itemId: number) => void };
+export type IncomeSectionHandle = {
+  openNewFor: (itemId: number) => void;
+  /** true = เปิดฟอร์มแก้ไขรายได้แล้ว (เดือนนี้มีรายได้รายการเดียว) — false = เลื่อนไปที่ส่วนรายได้แทน */
+  linkDeduction: (itemId: number) => boolean;
+};
 
 export default forwardRef<IncomeSectionHandle, { month: string; closed: boolean; items: PlanItem[]; onChanged: () => Promise<void> }>(function IncomeSection({ month, closed, items, onChanged }, ref) {
   const [rows, setRows] = useState<IncomeRecord[]>([]);
@@ -53,22 +56,36 @@ export default forwardRef<IncomeSectionHandle, { month: string; closed: boolean;
   const startForm = (income: IncomeRecord | 'new', next: Form) => {
     setFormError(''); setEditing(income); setForm(next); setInitialForm(next);
   };
-  const openEditor = (income: IncomeRecord | 'new') => startForm(income, income === 'new' ? emptyForm() : {
+  const formFor = (income: IncomeRecord): Form => ({
     name: income.name, gross: formatBaht(income.gross_amount_satang), monthly_plan_item_id: String(income.monthly_plan_item_id),
     bank_account_id: income.bank_account_id == null ? '' : String(income.bank_account_id), income_date: income.income_date ?? '',
     deductions: income.deductions.map((d) => ({ deduction_type: d.deduction_type, name: d.name, amount: formatBaht(d.amount_satang), monthly_plan_item_id: String(d.monthly_plan_item_id) })),
   });
+  const openEditor = (income: IncomeRecord | 'new') => startForm(income, income === 'new' ? emptyForm() : formFor(income));
+  const scrollToSection = () => document.getElementById('income-section')?.scrollIntoView({ block: 'start' });
   const available = (kind: PlanItem['kind'], selected = '') => items.filter((item) =>
     item.kind === kind && (String(item.id) === selected || (item.income_record_id == null && item.installment_due_id == null && item.explicit_status === 'active' && !item.payments.some((p) => p.status !== 'cancelled'))));
   // ปุ่ม "บันทึกรายได้เต็ม" บนแถวของแผนเปิดฟอร์มใหม่ที่เชื่อมรายการนั้นไว้แล้ว — ผลเท่ากับเลือกใน
   // dropdown "เชื่อมรายได้ในแผน" เอง โหลดส่วนนี้ไม่สำเร็จ → เลื่อนไปให้เห็นปุ่มลองใหม่ ส่วนรายการที่ไม่อยู่ใน
   // dropdown (ผูกไปแล้ว/มีการจ่าย) ไม่เปิดฟอร์มว่าง เพราะจะได้รายได้ซ้ำที่ไม่ผูกกับแผน
+  //
+  // "ผูกกับรายได้" บนแถวรายการหักที่ค้าง "รอบันทึกรายได้" ในเดือนที่บันทึกรายได้ไปแล้ว — รายได้รายการเดียว = เปิดฟอร์มแก้ไข
+  // รายได้นั้นพร้อมแถวหักที่เชื่อมรายการนี้ไว้แล้ว (ผลเท่ากับกด "เพิ่มรายการหัก" แล้วเลือกเอง) หลายรายการ = ไม่เดาว่าหักจากรายได้ไหน
+  // เลื่อนไปให้ผู้ใช้กดแก้ไขรายได้ที่ถูกเอง (ผู้เรียกบอกวิธีใน snackbar)
   useImperativeHandle(ref, () => ({
     openNewFor: (itemId) => {
-      if (error) { document.getElementById('income-section')?.scrollIntoView({ block: 'start' }); return; }
+      if (error) { scrollToSection(); return; }
       const item = available('income').find((i) => i.id === itemId);
       if (!item) return;
       startForm('new', { ...emptyForm(), monthly_plan_item_id: String(item.id), name: item.name, gross: formatBaht(item.planned_amount_satang) });
+    },
+    linkDeduction: (itemId) => {
+      const item = available('payroll_deduction').find((i) => i.id === itemId);
+      const income = rows.length === 1 ? rows[0] : undefined;
+      if (error || !item || !income) { scrollToSection(); return false; }
+      const base = formFor(income);
+      startForm(income, { ...base, deductions: [...base.deductions, { deduction_type: 'other', name: item.name, amount: formatBaht(item.planned_amount_satang), monthly_plan_item_id: String(item.id) }] });
+      return true;
     },
   }));
   const updateDeduction = (index: number, changes: Partial<DeductionForm>) => setForm((f) => ({ ...f, deductions: f.deductions.map((d, i) => i === index ? { ...d, ...changes } : d) }));
@@ -95,7 +112,7 @@ export default forwardRef<IncomeSectionHandle, { month: string; closed: boolean;
 
   // เป้าของลิงก์ "จัดการในรายได้" บนแถวของแผน — scrollMarginTop กัน app bar แบบ sticky บังหัวข้อ (เหมือน #data-freshness)
   return <Box component="section" id="income-section" aria-labelledby="income-heading" sx={{ scrollMarginTop: 80 }}>
-    <PageHeader id="income-heading" title="รายได้และรายการหัก" description={`รายได้เต็มก่อนหักและรายการหัก ยอดสุทธิไว้อ้างอิง · ${PLAN_NOT_MATCHED_NOTE}`} action={<Button startIcon={<AddRounded />} variant="outlined" disabled={closed || loading || Boolean(error)} onClick={() => openEditor('new')}>เพิ่มรายได้เต็ม</Button>} />
+    <PageHeader id="income-heading" title="รายได้และรายการหัก" description="รายได้เต็มก่อนหักและรายการหัก ยอดสุทธิไว้อ้างอิง" action={<Button startIcon={<AddRounded />} variant="outlined" disabled={closed || loading || Boolean(error)} onClick={() => openEditor('new')}>เพิ่มรายได้เต็ม</Button>} />
     {error && <LoadError message={error} onRetry={() => setRevision((n) => n + 1)} />}
     {loading ? <TableSkeleton rows={2} /> : !error && (rows.length === 0 ? <Typography color="text.secondary" sx={{ mt: 2 }}>ยังไม่มีรายได้เต็มในเดือนนี้ เลือกเชื่อมรายได้เดิมในแผน หรือเพิ่มรายการใหม่ได้</Typography> :
       // < md เหลือ รายได้ · รายได้เต็ม · แก้ไข — หัก/สุทธิพับลงบรรทัดรอง ที่ 320px: กล่อง 286 − ยอด ~98 − ปุ่ม 56 ≈ ชื่อ 132px
