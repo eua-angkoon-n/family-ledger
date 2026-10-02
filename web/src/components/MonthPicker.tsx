@@ -41,14 +41,16 @@ export default function MonthPicker({ value, onChange, maxMonth, keyboardShortcu
     if (next && next !== value) onChange(next);
   };
 
-  // ไม่แย่งปุ่มลูกศรจากช่องกรอก/แท็บ/เมนู และไม่ทำงานระหว่างมี dialog เปิด (GuideTour เป็น role="dialog" และใช้ ←/→ เอง)
+  // ไม่แย่งปุ่มลูกศรจากช่องกรอก/แท็บ/เมนู/กราฟ และไม่ทำงานระหว่างมี dialog เปิด (GuideTour เป็น role="dialog" และใช้ ←/→ เอง)
+  // กราฟ: x-charts ใช้ ←/→ เลื่อน focus ระหว่างจุด แต่ที่จุดแรก/สุดท้ายมัน return โดยไม่ preventDefault — คีย์จึงหลุดมาเปลี่ยนเดือน
+  // svg ที่รับ focus อยู่ใน ChartCard role="figure" เสมอ
   useEffect(() => {
     if (!keyboardShortcut) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
       if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
       const target = e.target instanceof Element ? e.target : null;
-      if (target?.closest('input, textarea, select, [contenteditable="true"], [role="tablist"], [role="menu"], [role="listbox"], [role="slider"]')) return;
+      if (target?.closest('input, textarea, select, [contenteditable="true"], [role="tablist"], [role="menu"], [role="listbox"], [role="slider"], [role="figure"]')) return;
       if (document.querySelector('[role="dialog"], .MuiModal-root:not(.MuiModal-hidden)')) return;
       go(e.key === 'ArrowLeft' ? -1 : 1);
     };

@@ -181,7 +181,10 @@ export type AccountCoverage = {
   pending_statement_count: number;
   parse_failed_count: number;
   checksum_failed_count: number;
+  /** ขาด statement เกินช่วงผ่อนผัน — ขาด 2 เดือนขึ้นไป หรือขาดเดือนที่แล้วและวันนี้เลยวันที่ 10 แล้ว */
   statement_behind: boolean;
+  /** ขาดเฉพาะ statement ของเดือนที่แล้วและยังอยู่ในช่วงผ่อนผัน (วันที่ 1–10) — "รอ statement" ไม่นับว่าช้า */
+  statement_awaiting: boolean;
 };
 
 export type FailedStatement = {

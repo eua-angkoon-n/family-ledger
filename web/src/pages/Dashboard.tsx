@@ -103,18 +103,40 @@ function colorsByIdentity(ids: (number | null)[], palette: readonly string[]): s
   });
 }
 
-// จอสัมผัส (hover: none) ไม่มี hover ให้เห็น tooltip ก่อนกด — แตะแรกแค่โชว์ tooltip, แตะซ้ำจุดเดิมจึงไปหน้ารายการ
-// เมาส์/คีย์บอร์ดยังไปทันทีเหมือนเดิม key ต้องไม่ซ้ำข้ามกราฟ (ใส่ชื่อกราฟนำหน้า)
+// จอสัมผัส (hover: none) ไม่มี hover ให้เห็น tooltip ก่อนกด — แตะแรกแค่โชว์ tooltip, แตะซ้ำจุดเดิมภายใน 4 วินาทีจึงไปหน้ารายการ
+// (เกินนั้นนับเป็นแตะแรกใหม่) เมาส์/คีย์บอร์ดยังไปทันทีเหมือนเดิม key ต้องไม่ซ้ำข้ามกราฟ (ใส่ชื่อกราฟนำหน้า)
+// ไม่ยกเลิกตอน tooltip ปิด: บนจอสัมผัส x-charts ปิด tooltip ตอนยกนิ้ว (pointerleave หลัง pointerup) ซึ่งมาก่อน click
+// ถ้ายกเลิกตรงนั้น แตะที่สองจะกลายเป็นแตะแรกเสมอและไม่มีทางไปหน้ารายการได้
+const TAP_ARM_MS = 4000;
 function useTapToNavigate() {
   const touch = useMediaQuery('(hover: none)', { noSsr: true });
-  const armed = useRef<string | null>(null);
+  const armed = useRef<{ key: string; at: number } | null>(null);
   return (key: string, go: () => void) => {
-    if (touch && armed.current !== key) {
-      armed.current = key;
+    const a = armed.current;
+    if (touch && (a?.key !== key || Date.now() - a.at > TAP_ARM_MS)) {
+      armed.current = { key, at: Date.now() };
       return;
     }
     armed.current = null;
     go();
+  };
+}
+
+// คู่กับ useTapToNavigate: tooltip บนจอสัมผัสบอกว่าแตะซ้ำจะเปิดรายการ — tooltip ของ x-charts render ใน DOM ของกราฟ
+// (container = layer ของกราฟเอง) sx ของกราฟจึงไปถึง paper ของมัน
+const tapHintSx = {
+  '@media (hover: none)': {
+    '& .MuiChartsTooltip-paper::after': { content: '"แตะอีกครั้งเพื่อเปิดรายการ"', display: 'block', px: 1.5, pb: 1, fontSize: '0.75rem', color: 'text.secondary' },
+  },
+} as const;
+
+// สี chart ของธีมบางสีแทบเท่าพื้นการ์ด (สว่าง chart-3 1.10, มืด chart-5 1.07 — DESIGN.md Contrast) จึงไม่เปลี่ยนสี แต่ใส่ขอบ
+// muted-foreground ให้ชิ้น/จุด (บน card สว่าง 4.88 / มืด 6.75 ผ่าน 3:1) และช่องสีใน legend/tooltip (svg 13×13 ตัดขอบครึ่งนอกทิ้ง
+// เส้น 3 จึงเหลือเห็น 1.5 เท่าชิ้น) — selector ชิ้นของพาย ต้องเว้น focusIndicator (ใช้ class arc ร่วม) ไม่งั้นวง focus หนา 3 ถูกทับ
+function chartOutlineSx(itemSelector: string, stroke: string) {
+  return {
+    [itemSelector]: { stroke, strokeWidth: 1.5 },
+    '& rect.MuiChartsLabelMark-fill': { stroke, strokeWidth: 3 },
   };
 }
 
@@ -203,6 +225,15 @@ export default function Dashboard() {
       : `statement ช่วง ${formatMonth(fromMonth, '2-digit')} – ${formatMonth(month, '2-digit')} ยังไม่มา`;
   };
   const baht = (satang: number) => `฿${formatBaht(satang)}`;
+  // เดือนในกราฟ 6 เดือนที่อยู่หลังเดือนข้อมูลล่าสุด = statement ยังไม่มา ไม่ใช่ ฿0 — แท่งเป็น null (ไม่วาด) tooltip/ตารางบอก
+  // "ยังไม่มี statement" และบรรทัดช่วงเวลาบอกว่าเดือนไหน (เป็นช่วงท้ายติดกันเสมอ) · coverage ยังไม่มา = ยังไม่ตัดสิน
+  const noStatement = (m: string) => coverage != null && latestMonth != null && m > latestMonth;
+  const noStatementMonths = cashFlow?.rows.map((r) => r.month).filter(noStatement) ?? [];
+  const [firstNo, lastNo] = [noStatementMonths[0], noStatementMonths.at(-1)];
+  const noStatementNote = firstNo == null || lastNo == null ? ''
+    : ` · ${formatMonth(firstNo, 'none')}${lastNo !== firstNo ? `–${formatMonth(lastNo, 'none')}` : ''} ยังไม่มี statement`;
+  const cashValue = (satang: number, month: string) => (noStatement(month) ? null : satang / 100);
+  const cashFormatter = (v: number | null) => (v == null ? 'ยังไม่มี statement' : formatBaht(Math.round(v * 100)));
   // ตารางแทนกราฟเส้น: แถว = วันที่, คอลัมน์ = บัญชี (ยอดปิดวันนั้น, "—" = วันนั้นไม่มีรายการ ยอดเท่าวันก่อน)
   let balancesTable: ChartTable | undefined;
   if (balances) {
@@ -344,23 +375,29 @@ export default function Dashboard() {
           ) : (
             <>
               <Box sx={summaryRowSx(5)}>
+                {/* นับรายการของเดือนที่เลือก: เดือนที่ statement ยังไม่มาใช้เส้นประ + เหตุผลเดียวกับแถวเงินจริง (0 ที่นี่ไม่ได้แปลว่า
+                    จัดครบแล้ว) และรอ coverage เหมือนกัน ไม่งั้น 0 แวบก่อนเป็นเส้นประ · 0 = ไม่มีรายการให้ไปดู จึงไม่เป็นลิงก์ */}
                 <SummaryCard
                   dense
-                  loading={!summary}
+                  loading={moneyLoading}
+                  disabled={pendingReason != null}
+                  disabledReason={pendingReason ?? undefined}
                   title="ยังไม่ได้จัดหมวด"
                   icon={<CategoryRounded fontSize="small" />}
                   value={summary && <IssueCount n={summary.uncategorised_count} />}
                   caption="รายการ"
-                  to={txnLink({ uncategorised: '1' })}
+                  to={summary && summary.uncategorised_count > 0 ? txnLink({ uncategorised: '1' }) : undefined}
                 />
                 <SummaryCard
                   dense
-                  loading={!summary}
+                  loading={moneyLoading}
+                  disabled={pendingReason != null}
+                  disabledReason={pendingReason ?? undefined}
                   title="ยังไม่ตรวจสอบ"
                   icon={<FactCheckRounded fontSize="small" />}
                   value={summary && <IssueCount n={summary.unreviewed_count} />}
                   caption="รายการ"
-                  to={txnLink({ review_status: 'unreviewed' })}
+                  to={summary && summary.unreviewed_count > 0 ? txnLink({ review_status: 'unreviewed' }) : undefined}
                 />
                 {/* ทั้งสองใบไปที่รายการไฟล์ด้านล่าง (บอกสาเหตุและทางแก้ทีละไฟล์ เหมือนปุ่มในแถบ "ต้องจัดการ")
                     ศูนย์ = ไม่มีรายการให้ไปดู จึงไม่เป็นลิงก์ · ขอบเขต "นับทุกเดือน" อยู่ที่หัวรายการ ไม่ซ้ำในการ์ด */}
@@ -393,6 +430,7 @@ export default function Dashboard() {
                   icon={<EventBusyRounded fontSize="small" />}
                   value={coverage && <IssueCount n={behindCount} />}
                   caption="ดูรายละเอียดด้านล่าง"
+                  // เป็นลิงก์แม้นับได้ 0: รายการด้านล่างมีให้ดูเสมอ (ทุกบัญชี รวมบัญชีที่ "รอ statement" ซึ่งไม่นับว่าช้า)
                   to="#data-freshness"
                 />
               </Box>
@@ -479,14 +517,16 @@ export default function Dashboard() {
                 caption={
                   plan && (
                     <>
-                      {/* เกินกำหนดคือเรื่องที่ต้องทำก่อน — แยกบรรทัด สี warning + ไอคอน ไม่ซ่อนในบรรทัดเล็ก */}
+                      {/* เกินกำหนดคือเรื่องที่ต้องทำก่อน — แยกบรรทัด สี warning + ไอคอน ไม่ซ่อนในบรรทัดเล็ก
+                          unpaid_count ไม่รวม overdue (PAYMENT_STATE_SQL: ยังไม่จ่ายและยังไม่เลย/ไม่มีวันครบกำหนด) — ชื่อสถานะคง
+                          "ยังไม่จ่าย" ตรงกับหน้าวางแผน แต่ถ้ามีที่เกินกำหนดต้องบอกว่าไม่รวม ไม่งั้นอ่านเหมือนเกินกำหนดเป็นส่วนหนึ่งของมัน */}
                       {overdue > 0 && (
                         <Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'warning.main', fontWeight: 600, mb: 0.25 }}>
                           <WarningAmberRounded fontSize="small" aria-hidden />
                           เกินกำหนด {overdue} รายการ
                         </Box>
                       )}
-                      {`${overdue === 0 ? 'ไม่มีรายการเกินกำหนด · ' : ''}จ่ายบางส่วน ${plan.payment_status.partial_count} · ยังไม่จ่าย ${plan.payment_status.unpaid_count}`}
+                      {`${overdue === 0 ? 'ไม่มีรายการเกินกำหนด · ' : ''}จ่ายบางส่วน ${plan.payment_status.partial_count} · ยังไม่จ่าย${overdue > 0 ? ' (ไม่รวมที่เกินกำหนด)' : ''} ${plan.payment_status.unpaid_count}`}
                     </>
                   )
                 }
@@ -505,7 +545,7 @@ export default function Dashboard() {
           <Box sx={{ display: 'grid', gap: 2, alignItems: 'start', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))' }}>
             <ChartCard
               title="รายรับเทียบรายจ่ายรายเดือน"
-              period={`6 เดือนล่าสุด: ${formatMonth(from.slice(0, 7), '2-digit')} – ${formatMonth(month, '2-digit')}`}
+              period={`6 เดือนล่าสุด: ${formatMonth(from.slice(0, 7), '2-digit')} – ${formatMonth(month, '2-digit')}${noStatementNote}`}
               loading={cashFlowLoad.status === 'loading'}
               error={cashFlowLoad.status === 'error'}
               onRetry={retryCashFlow}
@@ -513,7 +553,9 @@ export default function Dashboard() {
               emptyMessage={pendingMessage(from.slice(0, 7))}
               table={cashFlow ? {
                 columns: ['เดือน', 'รายรับ', 'รายจ่าย'],
-                rows: cashFlow.rows.map((r) => [formatMonth(r.month), baht(r.money_in_satang), baht(r.money_out_satang)]),
+                rows: cashFlow.rows.map((r) => (noStatement(r.month)
+                  ? [formatMonth(r.month), 'ยังไม่มี statement', 'ยังไม่มี statement']
+                  : [formatMonth(r.month), baht(r.money_in_satang), baht(r.money_out_satang)])),
               } : undefined}
             >
               {cashFlow && (
@@ -533,14 +575,15 @@ export default function Dashboard() {
                   }]}
                   yAxis={[{ width: 56, valueFormatter: (v: number) => compactNumber.format(v) }]}
                   series={[
-                    { id: 'income', label: 'รายรับ', data: cashFlow.rows.map((r) => r.money_in_satang / 100), color: chartTokens.income, valueFormatter: (v: number | null) => formatBaht(Math.round((v ?? 0) * 100)) },
-                    { id: 'expense', label: 'รายจ่าย', data: cashFlow.rows.map((r) => r.money_out_satang / 100), color: chartTokens.expense, valueFormatter: (v: number | null) => formatBaht(Math.round((v ?? 0) * 100)) },
+                    { id: 'income', label: 'รายรับ', data: cashFlow.rows.map((r) => cashValue(r.money_in_satang, r.month)), color: chartTokens.income, valueFormatter: cashFormatter },
+                    { id: 'expense', label: 'รายจ่าย', data: cashFlow.rows.map((r) => cashValue(r.money_out_satang, r.month)), color: chartTokens.expense, valueFormatter: cashFormatter },
                   ]}
                   // income/expense ธีมสว่างต่างกันแค่ hue (ความสว่างแทบเท่ากัน 1.01:1) — แท่งรายจ่ายจึงเป็นสีอ่อน + ขอบทึบ
                   // ทั้งแท่งและช่องสีใน legend (ทั้งสองอยู่ใต้ [data-series="expense"]) แยกออกได้แม้ไม่เห็นสี ใช้ได้ทั้งสองโหมด
                   // ขอบใช้สี expense เต็ม (บน card 4.81 สว่าง / 4.63 มืด) ขอบแท่งจึงยังผ่าน 3:1
                   // ช่องสีใน legend เป็น svg 13×13 ที่ตัดขอบครึ่งนอกทิ้ง จึงใช้เส้นหนา 3 ให้เหลือเห็น 1.5 เท่าแท่ง
                   sx={{
+                    ...tapHintSx,
                     '& [data-series="expense"] .MuiBarChart-element': { fillOpacity: 0.35, stroke: chartTokens.expense, strokeWidth: 1.5 },
                     '& [data-series="expense"] .MuiChartsLabelMark-fill': { fillOpacity: 0.35, stroke: chartTokens.expense, strokeWidth: 3 },
                   }}
@@ -579,6 +622,7 @@ export default function Dashboard() {
                       valueFormatter: (item: { value: number }) => formatBaht(Math.round(item.value * 100)),
                       innerRadius: 40,
                     }]}
+                    sx={{ ...tapHintSx, ...chartOutlineSx('& .MuiPieChart-arc:not(.MuiPieChart-focusIndicator)', chartTokens.mutedForeground) }}
                     onItemClick={(_event, item) => {
                       const row = breakdown.rows[item.dataIndex];
                       if (!row) return;
@@ -609,6 +653,7 @@ export default function Dashboard() {
                 // (ไม่ใช่ "ไม่มีข้อมูล" แต่ "ยอดไม่เปลี่ยนวันนั้น") connectNulls ลากเส้นทับช่องว่างนั้นให้ถูกต้อง
                 const dates = Array.from(new Set(balances.rows.map((r) => r.txn_date))).sort();
                 const accountIds = Array.from(new Set(balances.rows.map((r) => r.bank_account_id)));
+                const seriesColor = (i: number) => categoryPalette[i % categoryPalette.length]!;
                 return (
                   <LineChart
                     height={280}
@@ -627,11 +672,19 @@ export default function Dashboard() {
                         id: String(id),
                         label: nickname,
                         data: dates.map((d) => byDate.get(d) ?? null),
-                        color: categoryPalette[i % categoryPalette.length],
+                        color: seriesColor(i),
                         valueFormatter: (v: number | null) => (v == null ? '' : formatBaht(Math.round(v * 100))),
                         connectNulls: true,
+                        // x-charts 9 ไม่วาดจุดถ้าไม่สั่ง — ไม่มีจุด onMarkClick ก็ไม่มีวันถูกเรียก (คลิก/Enter บนเส้นไม่เจาะดูรายการ)
+                        showMark: true,
                       };
                     })}
+                    // จุดเป็นวงสีของบัญชี + ขอบ chart outline — เส้นสีที่จมหายบนการ์ด (มืด chart-5) ยังเห็นได้จากจุดของมัน
+                    sx={{
+                      ...tapHintSx,
+                      ...chartOutlineSx('& .MuiLineChart-mark', chartTokens.mutedForeground),
+                      ...Object.fromEntries(accountIds.map((id, i) => [`& [data-series="${id}"] .MuiLineChart-mark`, { fill: seriesColor(i) }])),
+                    }}
                     onMarkClick={(_event, item) => tapToNavigate(`line:${item.seriesId}:${item.dataIndex ?? ''}`, () => navigate(txnLink({ bank_account_id: String(item.seriesId) })))}
                     slotProps={{ legend: { direction: 'horizontal', position: { vertical: 'top', horizontal: 'end' } } }}
                   />
