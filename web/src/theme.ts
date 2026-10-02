@@ -50,9 +50,9 @@ declare module '@mui/material/styles' {
  *   muted-foreground #7a7a7a → #676767 ................... 4.70/4.88/5.65
  *   destructive #f96f70 → #bd373f ........................ 4.62/4.80/5.56, ขาวบนปุ่มลบ 2.79 → 5.56
  *   ring #e670ab → #d15d98 (ต้อง ≥ 3:1) .................. 3.05/3.16/3.66
- *   input (ขอบช่องกรอก) #e4e4e4 → #868686 (ต้อง ≥ 3:1) ... 3.03/3.15/3.65
+ *   input (ขอบช่องกรอก) #e4e4e4 → #868686 (ต้อง ≥ 3:1) ... 3.03/3.14/3.64
  * dark
- *   accent-foreground (ตัวอักษรตอน hover บน accent #c67b96) #f3e3ea → #12242e ... 2.54 → 5.06
+ *   accent-foreground (ตัวอักษรตอน hover บน accent #c67b96) #f3e3ea → #12242e ... 2.54 → 5.07
  *   destructive #e35ea4 → #e66aaa ........................ 5.30/4.67/4.67, destructive-foreground #12242e บนปุ่ม 4.85 → 5.30
  *   input (ขอบช่องกรอก) #20333d → #5d7c90 (ต้อง ≥ 3:1) ... 3.61/3.17/3.17 — พื้นช่องกรอก (inputBg) ยังเป็น #20333d/30 ตามธีม
  *
@@ -292,13 +292,23 @@ const theme = createTheme({
     },
     MuiButton: {
       defaultProps: { disableElevation: true },
+      // aria-disabled = ปุ่มที่ถือ focus อยู่แล้วกดไม่ได้ชั่วคราว (กำลังบันทึก, ปลายรายการ) — หน้าตาเดียวกับ disabled ของ MUI
+      // ทุก variant แต่ยังอยู่ในลำดับ tab (disabled ถอดออกแล้ว focus ตกไป <body>) ผู้เรียกทำให้ onClick ไม่ทำอะไรเอง
       styleOverrides: {
-        root: {
+        root: ({ theme }) => ({
           minHeight: 40,
           paddingInline: 16,
           borderRadius: radii.md,
           transition: 'background-color 180ms cubic-bezier(0.16, 1, 0.3, 1), border-color 180ms cubic-bezier(0.16, 1, 0.3, 1)',
-        },
+          '&[aria-disabled="true"], &[aria-disabled="true"]:hover': {
+            color: theme.vars.palette.action.disabled,
+            cursor: 'default',
+            boxShadow: 'none',
+            '&.MuiButton-text': { backgroundColor: 'transparent' },
+            '&.MuiButton-outlined': { backgroundColor: 'transparent', borderColor: theme.vars.palette.action.disabledBackground },
+            '&.MuiButton-contained': { backgroundColor: theme.vars.palette.action.disabledBackground },
+          },
+        }),
       },
     },
     MuiIconButton: {

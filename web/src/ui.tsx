@@ -105,16 +105,18 @@ type EmptyStateProps = {
   title: string;
   description: string;
   action?: ReactNode;
+  /** ระดับหัวข้อตามตำแหน่ง — ใต้ h1 ของหน้าตรง ๆ = 2, ในส่วนที่มีหัวข้อ h2 = 3 (ค่าเริ่มต้น) */
+  headingLevel?: 2 | 3;
 };
 
-export function EmptyState({ icon, title, description, action }: EmptyStateProps) {
+export function EmptyState({ icon, title, description, action, headingLevel = 3 }: EmptyStateProps) {
   return (
     <Paper
       variant="outlined"
       sx={{ mt: 3, px: { xs: 2, sm: 4 }, py: { xs: 4, sm: 5 }, textAlign: 'center' }}
     >
       <Box sx={{ color: 'text.secondary', display: 'inline-flex', mb: 1.5 }}>{icon}</Box>
-      <Typography component="h3" variant="h2">{title}</Typography>
+      <Typography component={headingLevel === 2 ? 'h2' : 'h3'} variant="h2">{title}</Typography>
       <Typography color="text.secondary" sx={{ mt: 1, mx: 'auto', maxWidth: '60ch', ...descriptionSx }}>
         {description}
       </Typography>
@@ -179,23 +181,33 @@ export function ConfirmDialog({
   onExited,
 }: ConfirmDialogProps) {
   return (
-    <Dialog open={open} onClose={busy ? undefined : onClose} maxWidth="xs" fullWidth aria-labelledby="confirm-title" slotProps={{ transition: { onExited } }}>
+    <Dialog
+      open={open}
+      onClose={busy ? undefined : onClose}
+      maxWidth="xs"
+      fullWidth
+      aria-labelledby="confirm-title"
+      aria-describedby="confirm-description"
+      slotProps={{ transition: { onExited } }}
+    >
       <DialogTitle id="confirm-title">{title}</DialogTitle>
       <DialogContent>
-        {/* DialogContentText เป็น <p> — รายการ (<ul>) ข้างในผิด nesting จึงเปลี่ยนเป็น div เมื่อไม่ใช่ข้อความล้วน */}
+        {/* DialogContentText เป็น <p> — รายการ (<ul>) ข้างในผิด nesting จึงเปลี่ยนเป็น div เมื่อไม่ใช่ข้อความล้วน
+            (Alert error ที่ผู้เรียกใส่มาใน description จึงอยู่ใน aria-describedby ด้วย) */}
         {typeof description === 'string' ? (
-          <DialogContentText>{description}</DialogContentText>
+          <DialogContentText id="confirm-description">{description}</DialogContentText>
         ) : (
-          <DialogContentText component="div">{description}</DialogContentText>
+          <DialogContentText id="confirm-description" component="div">{description}</DialogContentText>
         )}
       </DialogContent>
-      {/* gap แทน margin ของ MUI — สามปุ่มที่ 320px ตัดขึ้นบรรทัดใหม่โดยไม่เยื้อง */}
+      {/* gap แทน margin ของ MUI — สามปุ่มที่ 320px ตัดขึ้นบรรทัดใหม่โดยไม่เยื้อง
+          busy = aria-disabled + กดแล้วไม่ทำอะไร ไม่ใช่ disabled — ปุ่มยืนยันที่ถือ focus อยู่ไม่ทำ focus หลุดไป <body> */}
       <DialogActions disableSpacing sx={{ flexWrap: 'wrap', gap: 1 }}>
-        <Button color="inherit" onClick={onClose} disabled={busy} autoFocus>ยกเลิก</Button>
+        <Button color="inherit" onClick={busy ? undefined : onClose} aria-disabled={busy} autoFocus>ยกเลิก</Button>
         {secondaryLabel && onSecondary && (
-          <Button color={secondaryColor} onClick={onSecondary} disabled={busy}>{secondaryLabel}</Button>
+          <Button color={secondaryColor} onClick={busy ? undefined : onSecondary} aria-disabled={busy}>{secondaryLabel}</Button>
         )}
-        <Button variant="contained" color={confirmColor} onClick={onConfirm} disabled={busy} aria-busy={busy}>
+        <Button variant="contained" color={confirmColor} onClick={busy ? undefined : onConfirm} aria-disabled={busy} aria-busy={busy}>
           {busy ? 'กำลังดำเนินการ…' : confirmLabel}
         </Button>
       </DialogActions>

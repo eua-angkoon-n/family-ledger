@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Box,
@@ -23,9 +23,9 @@ import { FloatingSelectionBar } from '../components/PlanSelectionBar.js';
 import ReviewDrawer from '../components/ReviewDrawer.js';
 import TransactionTable, { UNCATEGORISED_LABEL } from '../components/TransactionTable.js';
 import { TAX_PAGES_ENABLED } from '../features.js';
-import { formatBaht, formatDate, parseBahtToSatang } from '../format.js';
+import { AMOUNT_FORMAT_HINT, formatBaht, formatDate, parseBahtToSatang } from '../format.js';
 import { dataTextSx } from '../theme.js';
-import { EmptyState, FeedbackSnackbar, LoadError, PageHeader, TableSkeleton, type Notice } from '../ui.js';
+import { EmptyState, FeedbackSnackbar, LoadError, PageHeader, TableSkeleton, visuallyHiddenSx, type Notice } from '../ui.js';
 
 const LIMIT = 50;
 const COVERAGE_NOTE = 'ข้อมูลเงินจริงคำนวณจาก bank statement ที่นำเข้าสู่ระบบเท่านั้น ไม่รวมเงินสดและ e-Wallet';
@@ -35,11 +35,13 @@ const HIDDEN_FILTER_KEYS = ['bank_id', 'category_id', 'direction', 'account_purp
 // "ล้างตัวกรอง" ล้างทุกอย่างยกเว้นเดือน/ช่วงวันที่และบัญชี
 const CLEAR_ALL_PATCH = Object.fromEntries([...HIDDEN_FILTER_KEYS, 'q', 'review_status', 'uncategorised'].map((k) => [k, null]));
 const PAGINATION_ARIA: Record<string, string> = { first: 'หน้าแรก', last: 'หน้าสุดท้าย', next: 'หน้าถัดไป', previous: 'หน้าก่อนหน้า' };
-const AMOUNT_FORMAT_HINT = 'ใส่ตัวเลข เช่น 1,500.50';
 const bahtLabel = (raw: string) => {
   const satang = parseBahtToSatang(raw);
   return satang == null ? raw : `฿${formatBaht(satang)}`;
 };
+// ชื่อ chip คิวงาน + จำนวนในขอบเขตเดือน/บัญชี (ตัวเลขผ่าน dataTextSx) — ยังไม่รู้จำนวนแสดงแค่ชื่อ
+const queueLabel = (label: string, count: number | undefined) =>
+  count == null ? label : <>{label} <Box component="span" sx={dataTextSx}>{count}</Box></>;
 const parseTxnId = (raw: string | null) => {
   const id = Number(raw);
   return raw != null && Number.isSafeInteger(id) && id > 0 ? id : null;
@@ -156,10 +158,15 @@ export default function Transactions() {
     })();
   }, []);
 
-  const queryString = useMemo(() => {
+  // ขอบเขตของหน้า (เดือน/ช่วงวันที่ + บัญชี) — ตัวกรองอื่นซ้อนบนนี้ และตัวนับบน chip คิวงานนับในขอบเขตนี้
+  const scopeParams = useMemo(() => {
     const p = new URLSearchParams();
     if (rangeMode) { p.set('from', rangeFrom!); p.set('to', rangeTo!); } else { p.set('month', month); }
     if (bankAccountId) p.set('bank_account_id', bankAccountId);
+    return p.toString();
+  }, [rangeMode, rangeFrom, rangeTo, month, bankAccountId]);
+  const queryString = useMemo(() => {
+    const p = new URLSearchParams(scopeParams);
     if (bankId) p.set('bank_id', bankId);
     if (categoryId) p.set('category_id', categoryId);
     if (uncategorised) p.set('uncategorised', 'true');
@@ -177,15 +184,40 @@ export default function Transactions() {
     p.set('limit', String(LIMIT));
     p.set('offset', String((page - 1) * LIMIT));
     return p.toString();
-  }, [rangeMode, rangeFrom, rangeTo, month, bankAccountId, bankId, categoryId, uncategorised, direction, accountPurpose, isInternalTransfer, reviewStatus, taxTreatment, taxEntityIdFilter, minBaht, maxBaht, q, page]);
+  }, [scopeParams, bankId, categoryId, uncategorised, direction, accountPurpose, isInternalTransfer, reviewStatus, taxTreatment, taxEntityIdFilter, minBaht, maxBaht, q, page]);
 
   // background=true (บันทึกใน drawer / ตรวจแบบกลุ่ม) = คำขอเดิมซ้ำ ไม่ใช่ filter เปลี่ยน — ไม่ unmount ตารางเป็น
   // skeleton (ปุ่มในแถวที่จะคืน focus ให้ยังอยู่) และ error จากคำขอ background ไม่ล้างแถวเดิมทิ้ง (ยังถูกต้องอยู่ก่อน
   // บันทึกครั้งนี้) ต่างจาก error ตอน filter เปลี่ยนจริง
   // requestIdRef กัน response ที่มาไม่เรียงลำดับ (เช่น สลับบัญชีเร็ว ๆ) เขียนทับผลของคำขอล่าสุด
+  // ตัวเลขบน chip "ยังไม่ตรวจ" / "ยังไม่จัดหมวด" = total_count ของ list ที่กรองแค่ขอบเขต + คิวนั้น (limit=1) — ไม่ใช้
+  // /reports/summary เพราะไม่กรองบัญชีและไม่นับโอนภายใน/ไม่นับรวม ตัวเลขจะไม่ตรงกับรายการที่ chip เปิด
+  // โหลดไม่ได้ = chip มีแค่ชื่อ ไม่แสดง 0 (The Section Failure Rule) · โหลดใหม่เมื่อขอบเขตเปลี่ยนและหลังบันทึก (reload background)
+  const [queueCounts, setQueueCounts] = useState<{ unreviewed: number; uncategorised: number } | null>(null);
+  const countsRequestRef = useRef(0);
+  const reloadCounts = async () => {
+    const requestId = ++countsRequestRef.current;
+    const count = (queue: string) => req<TxnListResponse>(`/api/transactions?${scopeParams}&${queue}&limit=1`).then((r) => r.total_count);
+    try {
+      const [unreviewed, uncategorised] = await Promise.all([count('review_status=unreviewed'), count('uncategorised=true')]);
+      if (requestId === countsRequestRef.current) setQueueCounts({ unreviewed, uncategorised });
+    } catch {
+      if (requestId === countsRequestRef.current) setQueueCounts(null);
+    }
+  };
+  useEffect(() => {
+    setQueueCounts(null);
+    void reloadCounts();
+  }, [scopeParams]);
+
   const reload = async (background = false) => {
     const requestId = ++requestIdRef.current;
-    if (background) setRefreshing(true); else setLoading(true);
+    if (background) {
+      setRefreshing(true);
+      void reloadCounts();
+    } else {
+      setLoading(true);
+    }
     setError('');
     try {
       const result = await req<TxnListResponse>(`/api/transactions?${queryString}`);
@@ -249,7 +281,7 @@ export default function Transactions() {
   const clearAllButton = (
     <Button color="inherit" onClick={() => { setFilter(CLEAR_ALL_PATCH); searchRef.current?.focus(); }}>ล้างตัวกรอง</Button>
   );
-  // เอา chip ออก: focus ไป chip ที่เลื่อนขึ้นมาแทน ไม่มีแล้วไป "ตัวกรองเพิ่มเติม" (อยู่ตลอด)
+  // เอา chip ออก: focus ไป chip ที่เลื่อนขึ้นมาแทน (เอาตัวท้ายออก = ตัวก่อนหน้า) ไม่เหลือแล้วไป "ตัวกรองเพิ่มเติม" (อยู่ตลอด)
   const removeHiddenFilter = (key: string, index: number) => {
     focusFilterChipAtRef.current = index;
     setFilter({ [key]: null });
@@ -259,7 +291,7 @@ export default function Transactions() {
     if (index == null) return;
     focusFilterChipAtRef.current = null;
     const chips = filterChipRowRef.current?.querySelectorAll<HTMLElement>('[data-filter-chip]');
-    (chips?.[index] ?? moreFiltersRef.current)?.focus();
+    (chips?.[index] ?? chips?.[index - 1] ?? moreFiltersRef.current)?.focus();
   }, [searchParams]);
   const emptyTitle = hiddenFilters.length > 0 || q !== ''
     ? 'ไม่พบธุรกรรมในเงื่อนไขนี้'
@@ -276,17 +308,52 @@ export default function Transactions() {
   const anchorIndex = currentIndex >= 0 ? currentIndex : selectedIndexRef.current;
   const prevRow = anchorIndex >= 0 ? rows[anchorIndex - 1] : undefined;
   const nextRow = currentIndex >= 0 ? rows[currentIndex + 1] : anchorIndex >= 0 ? rows[anchorIndex] : undefined;
-  // ก่อนหน้า/ถัดไปไล่ได้เฉพาะแถวของหน้านี้ — มีหลายหน้าจึงบอก "ในหน้านี้" ไม่งั้น "จาก 120" อ่านเหมือนไล่ได้ครบ
-  const inPage = totalCount > rows.length ? ' ในหน้านี้' : '';
+  // ก่อนหน้า/ถัดไปข้ามหน้าได้ ตำแหน่งจึงนับทั้งรายการ — offset จากคำตอบ (ไม่ใช่ ?page=) ให้ตรงกับแถวที่แสดงอยู่ระหว่างโหลดหน้าใหม่
+  const listOffset = data?.offset ?? 0;
+  const hasNextPage = listOffset + rows.length < totalCount;
   const position = currentIndex >= 0
-    ? `รายการที่ ${currentIndex + 1} จาก ${rows.length}${inPage}`
-    : anchorIndex >= 0 ? `เหลือ ${rows.length} รายการ${inPage}` : undefined;
+    ? `รายการที่ ${listOffset + currentIndex + 1} จาก ${totalCount}`
+    : anchorIndex >= 0 ? `เหลือ ${totalCount} รายการ` : undefined;
   const openTxn = (id: number, fromDrawer = false) => {
     selectedIndexRef.current = rows.findIndex((r) => r.id === id);
     setSelectedTxnId(id);
     if (!fromDrawer) pushedTxnRef.current = true;
     writeTxnParam(id, fromDrawer);
   };
+  // ข้ามหน้าจาก drawer: เปลี่ยน ?page= แบบ replace แล้วเปิดแถวแรก/สุดท้ายของหน้าใหม่เมื่อโหลดเสร็จ — entry ที่ push
+  // ตอนเปิดเป็นของหน้าเดิม ปิดจึงต้อง replace (อยู่หน้าใหม่) ไม่ย้อนกลับไปหน้าเดิม
+  const pageTurnRef = useRef<'first' | 'last' | null>(null);
+  const turnPage = (to: number, open: 'first' | 'last') => {
+    pageTurnRef.current = open;
+    pushedTxnRef.current = false;
+    setFilter({ page: String(to) }, true);
+  };
+  // ถัดไปที่แถวสุดท้ายของหน้า: โหลดหน้านี้ซ้ำก่อน — แถวที่เพิ่งบันทึกอาจหลุดจากคิวแล้วแถวแรกของหน้าถัดไปเลื่อนขึ้นมา
+  // แทนในหน้านี้ (ไปหน้าถัดไปตรง ๆ จะข้ามแถวนั้น) แล้วค่อยเลือก: แถวถัดไปในหน้านี้ หรือแถวแรกของหน้าถัดไป
+  const advanceRef = useRef(false);
+  const advance = () => {
+    advanceRef.current = true;
+    void reload(true);
+  };
+  // layout effect: เปิดแถวใหม่ก่อน paint — ตำแหน่ง "เหลือ N รายการ" ของจังหวะที่แถวเดิมหายจากหน้าใหม่ไม่ขึ้นจอ
+  useLayoutEffect(() => {
+    if (loading || refreshing) return;
+    if (advanceRef.current) {
+      advanceRef.current = false;
+      const index = rows.findIndex((r) => r.id === selectedTxnId);
+      const target = rows[index >= 0 ? index + 1 : selectedIndexRef.current];
+      if (target) openTxn(target.id, true);
+      else if (hasNextPage) turnPage(page + 1, 'first');
+      return;
+    }
+    const turn = pageTurnRef.current;
+    if (turn == null || rows.length === 0) return;
+    pageTurnRef.current = null;
+    openTxn(rows[turn === 'first' ? 0 : rows.length - 1]!.id, true);
+  }, [data, loading, refreshing]);
+  const onPrev = prevRow ? () => openTxn(prevRow.id, true) : anchorIndex === 0 && page > 1 ? () => turnPage(page - 1, 'last') : undefined;
+  const onNext = nextRow ? () => openTxn(nextRow.id, true) : anchorIndex >= 0 && hasNextPage ? advance : undefined;
+
   const closeTxn = () => {
     setSelectedTxnId(null);
     if (pushedTxnRef.current) {
@@ -385,7 +452,7 @@ export default function Transactions() {
           <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
             <Chip
               ref={reviewChipRef}
-              label="ยังไม่ตรวจ"
+              label={queueLabel('ยังไม่ตรวจ', queueCounts?.unreviewed)}
               variant={reviewStatus === 'unreviewed' ? 'filled' : 'outlined'}
               color={reviewStatus === 'unreviewed' ? 'primary' : 'default'}
               onClick={() => setFilter({ review_status: reviewStatus === 'unreviewed' ? null : 'unreviewed' })}
@@ -394,7 +461,7 @@ export default function Transactions() {
             />
             {/* เลือกหมวดใดหมวดหนึ่งกับ "ยังไม่จัดหมวด" ขัดกัน — เปิดอันนี้จึงล้าง category_id (เหมือนช่องหมวดในแผง) */}
             <Chip
-              label={UNCATEGORISED_LABEL}
+              label={queueLabel(UNCATEGORISED_LABEL, queueCounts?.uncategorised)}
               variant={uncategorised ? 'filled' : 'outlined'}
               color={uncategorised ? 'primary' : 'default'}
               onClick={() => setFilter({ uncategorised: uncategorised ? null : '1', category_id: null })}
@@ -515,12 +582,17 @@ export default function Transactions() {
         )}
       </Stack>
 
+      {/* ผลการกรองสำหรับ screen reader — อยู่นอกส่วนที่สลับเป็น skeleton จึงอยู่ใน DOM ก่อนข้อความเปลี่ยนเสมอ */}
+      <Box role="status" sx={visuallyHiddenSx}>
+        {loading || (error && rows.length === 0) ? '' : rows.length === 0 ? emptyTitle : `${totalCount} รายการ`}
+      </Box>
       {error && <LoadError message={error} onRetry={rows.length === 0 ? () => void reload() : undefined} />}
 
       {loading ? (
         <TableSkeleton rows={8} />
       ) : error && rows.length === 0 ? null : rows.length === 0 ? (
         <EmptyState
+          headingLevel={2}
           icon={<ReceiptLongRounded sx={{ fontSize: 40 }} />}
           title={emptyTitle}
           description={clearable ? 'ลองเปลี่ยนเดือน หรือล้างตัวกรองที่ตั้งไว้' : 'ลองเปลี่ยนเดือนหรือบัญชี'}
@@ -570,10 +642,28 @@ export default function Transactions() {
               เลือก {checkedIds.length} รายการ{bulkBusy ? ' · กำลังดำเนินการ…' : ''}
             </Typography>
             <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1 }}>
-              <Button variant="contained" startIcon={<DoneAllRounded />} disabled={bulkBusy} aria-busy={bulkBusy} onClick={() => void bulkReview()}>
+              {/* กำลังทำ = aria-disabled + กดแล้วไม่ทำอะไร — ปุ่มที่ถือ focus อยู่คง focus ไว้ (ทำไม่สำเร็จแถบยังอยู่ กดซ้ำได้เลย) */}
+              <Button
+                variant="contained"
+                startIcon={<DoneAllRounded />}
+                aria-disabled={bulkBusy}
+                aria-busy={bulkBusy}
+                onClick={() => { if (!bulkBusy) void bulkReview(); }}
+              >
                 ทำเครื่องหมายตรวจแล้ว ({checkedIds.length})
               </Button>
-              <Button color="inherit" disabled={bulkBusy} onClick={() => setChecked(new Set())}>ล้างที่เลือก</Button>
+              {/* แถบหายไปพร้อมปุ่มนี้ — focus ไปกล่องตาราง */}
+              <Button
+                color="inherit"
+                aria-disabled={bulkBusy}
+                onClick={() => {
+                  if (bulkBusy) return;
+                  setChecked(new Set());
+                  focusTable(null, -1);
+                }}
+              >
+                ล้างที่เลือก
+              </Button>
             </Stack>
           </Stack>
         </FloatingSelectionBar>
@@ -587,8 +677,8 @@ export default function Transactions() {
         onExited={() => focusTable(lastTxnIdRef.current, selectedIndexRef.current)}
         onSaved={() => void reload(true)}
         onNotice={setNotice}
-        onPrev={prevRow ? () => openTxn(prevRow.id, true) : undefined}
-        onNext={nextRow ? () => openTxn(nextRow.id, true) : undefined}
+        onPrev={onPrev}
+        onNext={onNext}
         position={position}
         onDirtyChange={(dirty) => { drawerDirtyRef.current = dirty; }}
         closeRequest={closeRequest}

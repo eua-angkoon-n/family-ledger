@@ -20,7 +20,7 @@ import SwapHorizRounded from '@mui/icons-material/SwapHorizRounded';
 import CheckRounded from '@mui/icons-material/CheckRounded';
 import RadioButtonUncheckedRounded from '@mui/icons-material/RadioButtonUncheckedRounded';
 import type { ReviewStatus, TxnListRow } from '../api.js';
-import { formatDate, formatDayMonth } from '../format.js';
+import { formatBaht, formatDate, formatDayMonth } from '../format.js';
 import { visuallyHiddenSx } from '../ui.js';
 import Money from './Money.js';
 
@@ -54,6 +54,37 @@ const reviewLabel = (status: ReviewStatus) => (status === 'reviewed' ? 'ตร�
 const categoryNames = (row: TxnListRow) => row.categories.map((c) => c.category_name).join(', ');
 // ≥ md บัญชี/หมวดอยู่บรรทัดเดียวที่ 1280px — ชื่อยาวตัดด้วย … ชื่อเต็มอยู่ใน title (กล่องข้างในเพราะ max-width ของ td ไม่มีผล)
 const ELLIPSIS_SX = { maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } as const;
+
+// KBank เขียนคำอธิบายเป็น "<ชื่อรายการ>: <รายละเอียด>" (src/parsers/kbank.ts) — ชื่อรายการซ้ำกันเกือบทุกแถว ตารางจึงขึ้น
+// รายละเอียด (ผู้รับ/ร้าน) ก่อน ชื่อรายการเป็นสีรองต่อท้าย · รูปแบบอื่น (SCB, ธนาคารที่ยังไม่รู้จัก) แสดงตามเดิม
+// เฉพาะการแสดงผล — title, ชื่อสำหรับ screen reader, drawer และการค้นหายังเป็นข้อความเต็ม
+const BANK_ITEM_PREFIX = /^(รับโอนเงิน|โอนเงิน|หักบัญชี|ชำระเงิน|ชำระด้วยบัตรเดบิต|รายการแก้ไข|ถอนเงินสด): (.+)$/;
+function splitBankPrefix(description: string): { lead: string; item: string } | null {
+  const m = BANK_ITEM_PREFIX.exec(description);
+  return m ? { lead: m[2]!, item: m[1]! } : null;
+}
+
+function Description({ text }: { text: string }) {
+  const parts = splitBankPrefix(text);
+  if (!parts) return <>{text}</>;
+  return (
+    <>
+      <Box component="span" aria-hidden>
+        {parts.lead}
+        <Box component="span" sx={{ color: 'text.secondary' }}> · {parts.item}</Box>
+      </Box>
+      <Box component="span" sx={visuallyHiddenSx}>{text}</Box>
+    </>
+  );
+}
+
+// ชื่อปุ่มลูกศร: วันที่ ยอด และต้นข้อความ ~30 ตัวอักษร (ไม่ใช่ข้อความดิบทั้งก้อน) — ตัดตรงสระ/วรรณยุกต์ได้ ยอมรับ
+const SHORT_NAME_LENGTH = 30;
+function rowName(row: TxnListRow) {
+  const text = splitBankPrefix(row.description)?.lead ?? row.description;
+  const short = text.length > SHORT_NAME_LENGTH ? `${text.slice(0, SHORT_NAME_LENGTH)}…` : text;
+  return `${formatDate(row.txn_date)} ${row.direction === 'debit' ? '−' : '+'}฿${formatBaht(row.amount_satang)} ${short}`;
+}
 
 function CategoryCell({ row }: { row: TxnListRow }) {
   if (row.split_count === 0) {
@@ -164,16 +195,17 @@ export default function TransactionTable({ rows, showRunningBalance, onRowClick,
                     sx={{
                       display: '-webkit-box',
                       WebkitBoxOrient: 'vertical',
-                      WebkitLineClamp: { xs: 3, md: 2 },
+                      WebkitLineClamp: 2,
                       overflow: 'hidden',
                       overflowWrap: 'anywhere',
                     }}
                   >
-                    {row.description}
+                    <Description text={row.description} />
                   </Box>
-                  <Typography variant="body2" color="text.secondary" sx={{ ...BELOW_MD, overflowWrap: 'anywhere' }}>{row.account_nickname}</Typography>
-                  {/* < md ไม่มีคอลัมน์หมวด/สถานะ — สรุปไว้ใต้ชื่อบัญชี มือถือจึงยังเห็นว่าแถวไหนต้องจัดการ */}
+                  {/* < md ไม่มีคอลัมน์บัญชี/หมวด/สถานะ — สรุปเป็นบรรทัดรองบรรทัดเดียว มือถือจึงยังเห็นว่าแถวไหนต้องจัดการ */}
                   <Typography variant="body2" component="div" sx={{ ...BELOW_MD, overflowWrap: 'anywhere' }}>
+                    <Box component="span" sx={{ color: 'text.secondary' }}>{row.account_nickname}</Box>
+                    {' '}<Box component="span" aria-hidden sx={{ color: 'text.secondary' }}>·</Box>{' '}
                     <Box component="span" sx={todoSx(row.review_status !== 'reviewed')}>{reviewLabel(row.review_status)}</Box>
                     {' '}<Box component="span" aria-hidden sx={{ color: 'text.secondary' }}>·</Box>{' '}
                     <Box component="span" sx={todoSx(row.split_count === 0)}>{row.split_count === 0 ? UNCATEGORISED_LABEL : categoryNames(row)}</Box>
@@ -203,7 +235,7 @@ export default function TransactionTable({ rows, showRunningBalance, onRowClick,
                     <IconButton
                       size="small"
                       data-txn-id={row.id}
-                      aria-label={`ดูรายละเอียดธุรกรรม ${row.description} วันที่ ${formatDate(row.txn_date)}`}
+                      aria-label={`ดูรายละเอียด ${rowName(row)}`}
                       onClick={(event) => { event.stopPropagation(); onRowClick(row.id); }}
                     >
                       <ChevronRightRounded />
