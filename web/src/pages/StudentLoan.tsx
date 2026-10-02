@@ -27,7 +27,7 @@ import SavingsRounded from '@mui/icons-material/SavingsRounded';
 import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded';
 import { put, req, type StudentLoanResponse, type StudentLoanScenario } from '../api.js';
 import Money from '../components/Money.js';
-import SummaryCard from '../components/SummaryCard.js';
+import SummaryCard, { summaryRowSx } from '../components/SummaryCard.js';
 import Modal from '../Modal.js';
 import { formatBaht, formatDate, parseBahtToSatang } from '../format.js';
 import { createFormFieldChangeHandler } from '../form.js';
@@ -317,7 +317,7 @@ export default function StudentLoan() {
           </ToggleButtonGroup>
           <Typography variant="body2" color="text.secondary" sx={{ mt: -2 }}>{SCENARIO_HINT[scenario]}</Typography>
 
-          <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(4, 1fr)' } }}>
+          <Box sx={summaryRowSx(4)}>
             <SummaryCard
               title="ปิดหนี้ได้เมื่อ"
               icon={<EventAvailableRounded fontSize="small" />}
