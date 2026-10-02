@@ -17,7 +17,7 @@ type SummaryCardProps = {
 };
 
 // การ์ดสรุปตัวเดียว ไม่ซ้อน Paper ใน Paper (Don't ของ DESIGN.md) — value ผ่าน dataTextSx เสมอ
-// (ตัวเลข/เงินห้ามใช้ iannnnn-DOG ตาม Financial Clarity Rule) ต่างจาก title/caption ที่เป็นคำอธิบาย
+// (ตัวเลข/เงินตาม Financial Clarity Rule) ต่างจาก title/caption ที่เป็นคำอธิบาย
 export default function SummaryCard({ title, icon, value, caption, onClick, disabled, disabledReason, dense = false }: SummaryCardProps) {
   // ไม่ใส่ปุ่ม ⓘ ในการ์ดที่กดได้ทั้งใบ (button ซ้อน button ผิด HTML) — ใช้ caption เป็นบรรทัดตามเดิม
   const captionAsTip = dense && caption != null && !disabled && !onClick;
@@ -29,7 +29,7 @@ export default function SummaryCard({ title, icon, value, caption, onClick, disa
           margin ติดลบของปุ่ม ⓘ ด้านล่างจึงหายเงียบ ๆ แล้วปุ่ม 40px ดันการ์ดที่มี caption ให้ตัวเลขต่ำกว่าใบอื่น */}
       <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', color: 'text.secondary' }}>
         {icon}
-        <Typography variant="body2" sx={{ fontWeight: 650 }}>{title}</Typography>
+        <Typography variant="body2" sx={{ fontWeight: 600 }}>{title}</Typography>
         {captionAsTip && (
           // enterTouchDelay 0: บนมือถือแตะครั้งเดียวต้องเห็นคำอธิบาย ไม่ใช่ต้องกดค้าง
           // margin ติดลบให้ปุ่ม 40px (พื้นที่กดยังครบ) ไม่ดันแถวหัวการ์ดให้สูงขึ้น
@@ -83,6 +83,8 @@ export default function SummaryCard({ title, icon, value, caption, onClick, disa
           minWidth: 0,
           ...fill,
           borderRadius: '10px',
+          // ButtonBase รีเซ็ตพื้นเป็น transparent ทับพื้นของ Paper — การ์ดที่กดได้ต้องใส่ paper คืนเอง
+          bgcolor: 'background.paper',
           transition: 'background-color 200ms',
           '&:hover': { bgcolor: 'action.hover' },
           '@media (prefers-reduced-motion: reduce)': { transition: 'none' },

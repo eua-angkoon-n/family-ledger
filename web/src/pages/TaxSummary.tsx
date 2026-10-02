@@ -186,7 +186,7 @@ export default function TaxSummary() {
         <>
           {summary.unrecorded_income_txns.length > 0 && (
             <Alert severity="warning" sx={{ mt: 3 }}>
-              <Typography sx={{ fontWeight: 650, mb: 0.5 }}>
+              <Typography sx={{ fontWeight: 600, mb: 0.5 }}>
                 เจอเงินเข้าที่น่าจะเป็นรายได้ประจำ {summary.unrecorded_income_txns.length} รายการ ยังไม่ได้นับเป็นรายได้
               </Typography>
               <Typography variant="body2" sx={{ mb: 1 }}>

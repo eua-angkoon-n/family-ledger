@@ -9,7 +9,7 @@ type ChartCardProps = {
   children: ReactNode;
 };
 
-// กรอบมาตรฐานของกราฟทุกตัวในแดชบอร์ด — ไม่ซ้อน Paper ใน Paper, หัวข้อใช้ h2 (เป็นหัวข้อ ไม่ใช่ข้อมูล จึงใช้ iannnnn-DOG ได้)
+// กรอบมาตรฐานของกราฟทุกตัวในแดชบอร์ด — ไม่ซ้อน Paper ใน Paper, หัวข้อใช้ h2
 export default function ChartCard({ title, empty, emptyMessage, height = 280, children }: ChartCardProps) {
   return (
     <Paper variant="outlined" sx={{ p: 3 }}>

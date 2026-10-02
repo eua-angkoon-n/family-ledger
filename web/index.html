@@ -1,9 +1,23 @@
 <!doctype html>
-<html lang="th" data-theme="dark">
+<html lang="th">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="preload" href="/fonts/iannnnn-DOG-Regular.ttf" as="font" type="font/ttf" crossorigin />
+    <!-- ตั้งธีมก่อน paint แรก: อ่าน localStorage คีย์เดียวกับ MUI ThemeProvider (main.tsx) ไม่งั้นคนที่ใช้ธีมมืด
+         จะเห็นหน้าสว่างแวบหนึ่งระหว่างรอ JS (InitColorSchemeScript ของ MUI ใช้ไม่ได้ เพราะมันออกสคริปต์เฉพาะตอน server render) -->
+    <script>
+      (function () {
+        try {
+          var mode = localStorage.getItem('mui-mode') || 'system';
+          var dark = mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          document.documentElement.setAttribute('data-mui-color-scheme', dark ? 'dark' : 'light');
+        } catch (e) {}
+      })();
+    </script>
+    <!-- ฟอนต์ของธีม Bubblegum: Poppins (UI ทั้งหมด), Fira Code (code), Lora (serif token) — อักษรไทยตกไป Noto Sans Thai/ระบบ -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Lora:wght@400;600&family=Poppins:wght@400;500;600;700&display=swap" />
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" sizes="192x192" href="/logo-192.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />

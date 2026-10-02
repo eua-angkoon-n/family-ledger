@@ -23,7 +23,7 @@ export default function DataFreshness({ accounts }: { accounts: AccountCoverage[
             sx={{ alignItems: { sm: 'center' }, justifyContent: 'space-between', py: 1, borderBottom: 1, borderColor: 'divider', '&:last-child': { borderBottom: 0, pb: 0 } }}
           >
             <Box sx={{ minWidth: 0 }}>
-              <Typography sx={{ fontWeight: 650 }}>{a.account_nickname}</Typography>
+              <Typography sx={{ fontWeight: 600 }}>{a.account_nickname}</Typography>
               <Typography variant="body2" color="text.secondary">{a.bank_name}</Typography>
             </Box>
             <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexShrink: 0 }}>

@@ -161,7 +161,7 @@ export default function TaxDocumentDrawer({ docId, taxEntities, onClose, onSaved
           <Stack spacing={3}>
             <Box>
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
-                <Typography sx={{ fontWeight: 650 }}>{detail.issuer_name}</Typography>
+                <Typography sx={{ fontWeight: 600 }}>{detail.issuer_name}</Typography>
                 <TaxDocumentStatusChip status={detail.status} />
               </Stack>
               <Typography variant="body2" color="text.secondary" sx={dataTextSx}>
@@ -231,7 +231,7 @@ export default function TaxDocumentDrawer({ docId, taxEntities, onClose, onSaved
                 {savingLinks ? 'กำลังบันทึก…' : 'บันทึกการเชื่อม'}
               </Button>
 
-              <Typography variant="body2" sx={{ fontWeight: 650, mb: 1 }}>ค้นหาธุรกรรมเพื่อเพิ่ม</Typography>
+              <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>ค้นหาธุรกรรมเพื่อเพิ่ม</Typography>
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 1 }}>
                 <MonthPicker value={searchMonth} onChange={setSearchMonth} />
                 <TextField
