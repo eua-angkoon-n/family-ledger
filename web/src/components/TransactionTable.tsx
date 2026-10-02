@@ -179,7 +179,7 @@ export default function TransactionTable({ rows, showRunningBalance, onRowClick,
         <TableBody>
           {rows.map((row) => {
             // โอนภายในไม่ใช่ทั้งรายรับและรายจ่าย — สีกลาง (The Money Color Rule)
-            const tone = row.is_internal_transfer ? 'neutral' : row.direction === 'credit' ? 'income' : 'expense';
+            const tone = row.classification === 'internal_transfer' ? 'neutral' : row.direction === 'credit' ? 'income' : 'expense';
             const amount = <Money satang={row.amount_satang} tone={tone} />;
             return (
               <TableRow key={row.id} hover onClick={() => onRowClick(row.id)} sx={{ cursor: 'pointer' }}>
@@ -231,7 +231,7 @@ export default function TransactionTable({ rows, showRunningBalance, onRowClick,
                       </Fragment>
                     ))}
                   </Typography>
-                  {row.is_internal_transfer && (
+                  {row.classification === 'internal_transfer' && (
                     <Typography variant="body2" color="text.secondary">
                       <SwapHorizRounded aria-hidden fontSize="inherit" sx={{ verticalAlign: '-0.125em', mr: 0.5 }} />
                       โอนภายใน

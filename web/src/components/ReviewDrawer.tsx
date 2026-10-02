@@ -493,7 +493,7 @@ export default function ReviewDrawer({
               <Box sx={{ mt: 0.5 }}><ReviewStatusLabel status={detail.review_status} /></Box>
               <Money
                 satang={detail.direction === 'debit' ? -detail.amount_satang : detail.amount_satang}
-                tone={detail.is_internal_transfer ? 'neutral' : detail.direction === 'credit' ? 'income' : 'expense'}
+                tone={detail.classification === 'internal_transfer' ? 'neutral' : detail.direction === 'credit' ? 'income' : 'expense'}
                 showSign
                 sx={{ fontSize: '1.75rem', display: 'block', mt: 1 }}
               />
