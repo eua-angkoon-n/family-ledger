@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Box, Button, Collapse, IconButton, Paper, Stack, Tooltip, Typography, useMediaQuery, type Theme } from '@mui/material';
 import CloseRounded from '@mui/icons-material/CloseRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
@@ -33,11 +33,8 @@ const BAR_BOTTOM = { xs: 32, sm: 36 };
 const GAP_ABOVE_BAR = 16;
 
 // แถบลอยเหนือเนื้อหา = Floating Offset (elevation 8) ของ DESIGN.md และยังมี
-// เส้นขอบ z-index เท่า appBar: อยู่ใต้ snackbar
-export default function PlanSelectionBar(props: Props) {
-  const { items, hiddenCount, payCount, skipCount, deleteCount, disabled, busy, onPay, onSkip, onDelete, onClear } = props;
-  const desktop = useMediaQuery((theme: Theme) => theme.breakpoints.up('md'), { noSsr: true });
-  const [expanded, setExpanded] = useState(false);
+// เส้นขอบ z-index เท่า appBar: อยู่ใต้ snackbar — ใช้ร่วมกันระหว่างหน้าวางแผนและหน้าธุรกรรม (Floating Selection Bar Rule)
+export function FloatingSelectionBar({ label, children }: { label: string; children: ReactNode }) {
   // ความสูงจริงของแถบ (ตัดขึ้น 2–3 แถวที่ 900–1200px และสูงขึ้นตอนกางบนมือถือ) — ตัวเว้นที่ท้ายหน้า
   // ต้องสูงตาม ไม่งั้นแถวสุดท้ายของตารางเลื่อนขึ้นมาพ้นแถบไม่ได้
   const barRef = useRef<HTMLDivElement>(null);
@@ -50,11 +47,49 @@ export default function PlanSelectionBar(props: Props) {
     return () => observer.disconnect();
   }, []);
 
-  const totals = sumPlanTotals(items);
-  // Money แสดงค่าสัมบูรณ์ ติดลบต้องมีเครื่องหมายด้วย ไม่ใช่บอกด้วยสีแดงอย่างเดียว (Semantic Color Rule)
-  const available = (
-    <Money satang={totals.available} tone={totals.available < 0 ? 'expense' : 'income'} showSign={totals.available < 0} />
+  return (
+    <>
+      {/* ตัวเว้นท้ายหน้าเท่าแถบ + ระยะจากขอบล่าง + ช่องไฟ — แถวสุดท้ายเลื่อนขึ้นมาพ้นแถบได้เสมอ */}
+      <Box
+        aria-hidden
+        sx={{
+          height: {
+            xs: barHeight + BAR_BOTTOM.xs + GAP_ABOVE_BAR,
+            sm: barHeight + BAR_BOTTOM.sm + GAP_ABOVE_BAR,
+          },
+        }}
+      />
+      <Paper
+        ref={barRef}
+        elevation={8}
+        role="region"
+        aria-label={label}
+        sx={{
+          position: 'fixed',
+          bottom: BAR_BOTTOM,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          // กว้างเท่าเนื้อหาใน Container lg (1200 − gutter 24 × 2) ให้ขอบแถบตรงกับขอบตาราง
+          width: (theme) => `min(100% - 32px, ${theme.breakpoints.values.lg}px - ${theme.spacing(6)})`,
+          zIndex: (theme) => theme.zIndex.appBar,
+          border: 1,
+          borderColor: 'divider',
+          p: 2,
+        }}
+      >
+        {children}
+      </Paper>
+    </>
   );
+}
+
+export default function PlanSelectionBar(props: Props) {
+  const { items, hiddenCount, payCount, skipCount, deleteCount, disabled, busy, onPay, onSkip, onDelete, onClear } = props;
+  const desktop = useMediaQuery((theme: Theme) => theme.breakpoints.up('md'), { noSsr: true });
+  const [expanded, setExpanded] = useState(false);
+
+  const totals = sumPlanTotals(items);
+  const available = <Money satang={totals.available} tone={totals.available < 0 ? 'expense' : 'income'} />;
 
   const figures = (
     <Box
@@ -132,84 +167,55 @@ export default function PlanSelectionBar(props: Props) {
   const busyText = busy ? ' · กำลังดำเนินการ…' : '';
 
   return (
-    <>
-      {/* ตัวเว้นท้ายหน้าเท่าแถบ + ระยะจากขอบล่าง + ช่องไฟ — แถวสุดท้ายเลื่อนขึ้นมาพ้นแถบได้เสมอ */}
-      <Box
-        aria-hidden
-        sx={{
-          height: {
-            xs: barHeight + BAR_BOTTOM.xs + GAP_ABOVE_BAR,
-            sm: barHeight + BAR_BOTTOM.sm + GAP_ABOVE_BAR,
-          },
-        }}
-      />
-      <Paper
-        ref={barRef}
-        elevation={8}
-        role="region"
-        aria-label="รายการที่เลือก"
-        sx={{
-          position: 'fixed',
-          bottom: BAR_BOTTOM,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          // กว้างเท่าเนื้อหาใน Container lg (1200 − gutter 24 × 2) ให้ขอบแถบตรงกับขอบตาราง
-          width: (theme) => `min(100% - 32px, ${theme.breakpoints.values.lg}px - ${theme.spacing(6)})`,
-          zIndex: (theme) => theme.zIndex.appBar,
-          border: 1,
-          borderColor: 'divider',
-          p: 2,
-        }}
-      >
-        {desktop ? (
-          <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2 }}>
-            <Box>
+    <FloatingSelectionBar label="รายการที่เลือก">
+      {desktop ? (
+        <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2 }}>
+          <Box>
+            <Typography role="status" sx={{ fontWeight: 600 }}>
+              เลือก {items.length} รายการ{busyText}
+            </Typography>
+            {hidden}
+          </Box>
+          {figures}
+          {actions}
+        </Stack>
+      ) : (
+        // พับได้เฉพาะยอดรวม 5 ช่อง — ปุ่มจัดการต้องเห็นตลอดแม้แถบพับอยู่
+        <>
+          <Stack direction="row" sx={{ alignItems: 'center', gap: 0.5 }}>
+            <Box sx={{ minWidth: 0, flexGrow: 1 }}>
               <Typography role="status" sx={{ fontWeight: 600 }}>
-                เลือก {items.length} รายการ{busyText}
+                เลือก {items.length} · เหลือ {available}
+                {busyText}
               </Typography>
               {hidden}
             </Box>
-            {figures}
-            {actions}
+            {/* span: Tooltip ของ MUI ฟัง event จากปุ่มที่ disabled ไม่ได้ (ท่าเดียวกับปุ่มออกจากระบบใน App.tsx) */}
+            <Tooltip title="ล้างที่เลือก">
+              <span>
+                <IconButton aria-label="ล้างที่เลือก" disabled={busy} onClick={onClear}>
+                  <CloseRounded />
+                </IconButton>
+              </span>
+            </Tooltip>
+            <IconButton
+              aria-label="ยอดรวมของรายการที่เลือก"
+              aria-expanded={expanded}
+              aria-controls="plan-selection-details"
+              onClick={() => setExpanded((v) => !v)}
+            >
+              {expanded ? <ExpandMoreRounded /> : <ExpandLessRounded />}
+            </IconButton>
           </Stack>
-        ) : (
-          // พับได้เฉพาะยอดรวม 5 ช่อง — ปุ่มจัดการต้องเห็นตลอดแม้แถบพับอยู่
-          <>
-            <Stack direction="row" sx={{ alignItems: 'center', gap: 0.5 }}>
-              <Box sx={{ minWidth: 0, flexGrow: 1 }}>
-                <Typography role="status" sx={{ fontWeight: 600 }}>
-                  เลือก {items.length} · เหลือ {available}
-                  {busyText}
-                </Typography>
-                {hidden}
-              </Box>
-              {/* span: Tooltip ของ MUI ฟัง event จากปุ่มที่ disabled ไม่ได้ (ท่าเดียวกับปุ่มออกจากระบบใน App.tsx) */}
-              <Tooltip title="ล้างที่เลือก">
-                <span>
-                  <IconButton aria-label="ล้างที่เลือก" disabled={busy} onClick={onClear}>
-                    <CloseRounded />
-                  </IconButton>
-                </span>
-              </Tooltip>
-              <IconButton
-                aria-label="ยอดรวมของรายการที่เลือก"
-                aria-expanded={expanded}
-                aria-controls="plan-selection-details"
-                onClick={() => setExpanded((v) => !v)}
-              >
-                {expanded ? <ExpandMoreRounded /> : <ExpandLessRounded />}
-              </IconButton>
-            </Stack>
-            {/* ระยะห่างเป็น padding ข้างใน Collapse ไม่ใช่ spacing ของ Stack — ตอนพับจะได้ไม่เหลือช่องว่างค้าง */}
-            <Collapse in={expanded}>
-              <Box id="plan-selection-details" sx={{ pt: 1.5 }}>
-                {figures}
-              </Box>
-            </Collapse>
-            <Box sx={{ pt: 1.5 }}>{actions}</Box>
-          </>
-        )}
-      </Paper>
-    </>
+          {/* ระยะห่างเป็น padding ข้างใน Collapse ไม่ใช่ spacing ของ Stack — ตอนพับจะได้ไม่เหลือช่องว่างค้าง */}
+          <Collapse in={expanded}>
+            <Box id="plan-selection-details" sx={{ pt: 1.5 }}>
+              {figures}
+            </Box>
+          </Collapse>
+          <Box sx={{ pt: 1.5 }}>{actions}</Box>
+        </>
+      )}
+    </FloatingSelectionBar>
   );
 }

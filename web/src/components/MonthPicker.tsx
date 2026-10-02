@@ -29,7 +29,7 @@ export function validMonth(value: string | null | undefined, max: string): strin
 
 // maxMonth: หน้าแดชบอร์ด/ธุรกรรมดูได้ถึงเดือนปัจจุบัน (ไม่มีข้อมูลจริงของอนาคต) แต่หน้าวางแผน
 // ต้องเลือกเดือนข้างหน้าได้ (API จำกัดไว้ 12 เดือน) จึงส่งค่ามาทับได้
-// keyboardShortcut: ←/→ ทั้งหน้าเปลี่ยนเดือน (แดชบอร์ด) — tooltip ของลูกศรบอกคีย์ลัดเฉพาะหน้าที่เปิดไว้
+// keyboardShortcut: ←/→ ทั้งหน้าเปลี่ยนเดือน (แดชบอร์ด, ธุรกรรม) — tooltip ของลูกศรบอกคีย์ลัดเฉพาะหน้าที่เปิดไว้
 type MonthPickerProps = { value: string; onChange: (month: string) => void; maxMonth?: string; keyboardShortcut?: boolean };
 
 // เบราว์เซอร์ที่มี type=month จริง (Chrome/Edge/มือถือ) — Firefox/Safari เดสก์ท็อปตีเป็นช่องข้อความ อ่าน type กลับได้ 'text'
@@ -64,14 +64,14 @@ export default function MonthPicker({ value, onChange, maxMonth, keyboardShortcu
 
   // ไม่แย่งปุ่มลูกศรจากช่องกรอก/แท็บ/เมนู/กราฟ และไม่ทำงานระหว่างมี dialog เปิด (GuideTour เป็น role="dialog" และใช้ ←/→ เอง)
   // กราฟ: x-charts ใช้ ←/→ เลื่อน focus ระหว่างจุด แต่ที่จุดแรก/สุดท้ายมัน return โดยไม่ preventDefault — คีย์จึงหลุดมาเปลี่ยนเดือน
-  // svg ที่รับ focus อยู่ใน ChartCard role="figure" เสมอ
+  // svg ที่รับ focus อยู่ใน ChartCard role="figure" เสมอ · ตาราง: กล่องตาราง (tabIndex 0) ใช้ ←/→ เลื่อนแนวนอน — ทุกอย่างในกล่องจึงข้ามด้วย
   useEffect(() => {
     if (!keyboardShortcut) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
       if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
       const target = e.target instanceof Element ? e.target : null;
-      if (target?.closest('input, textarea, select, [contenteditable="true"], [role="tablist"], [role="menu"], [role="listbox"], [role="slider"], [role="figure"]')) return;
+      if (target?.closest('input, textarea, select, [contenteditable="true"], [role="tablist"], [role="menu"], [role="listbox"], [role="slider"], [role="figure"], .MuiTableContainer-root')) return;
       if (document.querySelector('[role="dialog"], .MuiModal-root:not(.MuiModal-hidden)')) return;
       go(e.key === 'ArrowLeft' ? -1 : 1);
     };

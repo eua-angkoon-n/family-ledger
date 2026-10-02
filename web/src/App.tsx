@@ -382,7 +382,8 @@ export default function App() {
         </Container>
       </AppBar>
 
-      {/* elevation 8 = Floating Offset (shadow-md) ตาม DESIGN.md; พื้น sidebar มาจาก theme; ขอบขวาแยก drawer ออกจากเนื้อหา */}
+      {/* elevation 8 = Floating Offset (shadow-md) ตาม DESIGN.md; พื้น sidebar เฉพาะเมนูนี้ (drawer เนื้อหาใช้ popover จาก theme);
+          ขอบขวาแยก drawer ออกจากเนื้อหา */}
       <Drawer
         anchor="left"
         open={menuOpen}
@@ -394,7 +395,7 @@ export default function App() {
             role: 'dialog',
             'aria-modal': true,
             'aria-label': 'เมนูทั้งหมด',
-            sx: { width: 'min(85vw, 300px)', borderRight: 1, borderColor: 'divider' },
+            sx: { width: 'min(85vw, 300px)', bgcolor: 'brand.sidebar', borderRight: 1, borderColor: 'divider' },
           },
         }}
       >

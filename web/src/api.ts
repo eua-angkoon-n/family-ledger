@@ -92,6 +92,10 @@ export type TxnListRow = {
   split_count: number;
 };
 
+// POST /api/transactions/review { txn_ids: number[] } (1–200 ตัว, ต้องเป็นของผู้ใช้ทั้งหมด) — ตั้ง review_status = reviewed
+// ทีละหลายแถวโดยไม่แตะ classification/note/ภาษี/การแยกยอด · reviewed = จำนวนแถวที่เปลี่ยนจริง (แถวที่ตรวจแล้วอยู่ก่อนไม่นับ)
+export type BulkReviewResponse = { reviewed: number };
+
 export type TxnListResponse = {
   from: string;
   to: string;

@@ -314,8 +314,17 @@ const theme = createTheme({
     MuiAppBar: {
       styleOverrides: { root: { backgroundImage: 'none' } },
     },
+    // drawer เนื้อหา (ReviewDrawer, TaxDocumentDrawer) ใช้พื้น popover เหมือน dialog — พื้น sidebar (#f8d8ea) ทำตัวอักษรรอง/
+    // primary/error เหลือ 4.23–4.31 และขอบช่องกรอก/ring 2.77/2.79 ในธีมสว่าง ส่วนเมนูบนมือถือตั้งพื้น sidebar เองใน App.tsx
+    // ขอบซ้ายแยก drawer ขวาออกจากเนื้อหา เพราะเงา hard offset (3px ขวา/ล่าง) ตกนอกจอ
     MuiDrawer: {
-      styleOverrides: { paper: ({ theme }) => ({ backgroundColor: theme.vars.palette.brand.sidebar }) },
+      styleOverrides: {
+        // ownerState ไม่ใช่ class anchorRight — overridesResolver ของ Drawer ไม่ส่ง styleOverrides ของ anchor* ให้ (MUI 9)
+        paper: ({ theme, ownerState }) => ({
+          backgroundColor: theme.vars.palette.brand.popover,
+          ...(ownerState.anchor === 'right' && { borderLeft: `1px solid ${theme.vars.palette.divider}` }),
+        }),
+      },
     },
     MuiPopover: {
       // Menu ใช้ PopoverPaper ด้วย จึงได้ค่าเดียวกัน; เงา md มาจาก elevation 8
@@ -415,9 +424,16 @@ const theme = createTheme({
       },
     },
     MuiTableRow: {
-      // hover ใช้ action.hover (= accent) ของ MUI อยู่แล้ว
       styleOverrides: {
         root: ({ theme }) => ({
+          // hover ไม่ใช้ action.hover (= accent): ตัวอักษรในแถวไม่เปลี่ยนสีตาม จึงเหลือ 4.38–4.45 (สว่าง) และ 1.04–2.54 (มืด,
+          // รายจ่าย 1.04) — ใช้ popover (สว่าง #fff) / muted (มืด #24272b) ที่ทุกคู่ตัวอักษร/เงินผ่าน 4.5 (ดู DESIGN.md Tables)
+          // :not(.Mui-selected) — กฎของธีมมืด (มี attribute selector นำหน้า) เจาะจงกว่ากฎ selected ด้านล่าง ไม่งั้นแถวที่เลือก
+          // ตอน hover ได้พื้น muted กับตัวอักษร sidebar-accent-foreground (1.02:1)
+          '&.MuiTableRow-hover:hover:not(.Mui-selected)': {
+            backgroundColor: theme.vars.palette.brand.popover,
+            ...theme.applyStyles('dark', { backgroundColor: theme.vars.palette.brand.muted }),
+          },
           '&.Mui-selected, &.Mui-selected:hover': {
             backgroundColor: theme.vars.palette.brand.sidebarAccent,
             '& > .MuiTableCell-root': { color: theme.vars.palette.brand.sidebarAccentForeground },

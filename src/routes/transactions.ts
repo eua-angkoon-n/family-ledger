@@ -192,6 +192,58 @@ transactionsRouter.patch('/transactions/:id/annotation', requireUser(async (req,
   res.json(row);
 }));
 
+// POST /transactions/review — ตั้ง reviewed ทีละหลายแถวโดยไม่แตะ classification/note/ภาษี/split
+// แถวที่ยังไม่มี annotation ได้แถวใหม่ที่ classification = ค่าตาม direction (ชั้นสุดท้ายของ EFFECTIVE_CLASSIFICATION_SQL)
+// ห้ามใส่ EFFECTIVE_CLASSIFICATION_SQL ทั้งก้อน: txn ที่เป็น internal_transfer เพราะ t.is_internal_transfer จะถูกแช่
+// 'internal_transfer' ลง annotation แล้วค้างอยู่แม้ reject คู่โอนจนล้าง flag ไปแล้ว (IS_INTERNAL_TRANSFER_SQL อ่านทั้งสองที่)
+// แถวไม่มี annotation ถือว่า reviewed อยู่แล้ว (EFFECTIVE_REVIEW_STATUS_SQL) จึงไม่นับใน reviewed
+transactionsRouter.post('/transactions/review', requireUser(async (req, res, user) => {
+  const raw = (req.body as Body).txn_ids;
+  if (!Array.isArray(raw) || raw.length < 1 || raw.length > 200) {
+    throw new HttpError(400, 'txn_ids ต้องเป็นรายการธุรกรรม 1–200 รายการ');
+  }
+  // isSafeInteger ไม่ใช่ isInteger — 1e300 ผ่าน isInteger แล้ว pg ส่ง "1e+300" เป็น bigint กลายเป็น 500 (เหมือน satang())
+  if (!raw.every((v) => Number.isSafeInteger(v) && (v as number) > 0)) {
+    throw new HttpError(400, 'txn_ids ต้องเป็นรหัสธุรกรรมที่ถูกต้อง');
+  }
+  // ต้อง dedupe — ด่าน ownership เทียบ count(*) กับ ids.length ถ้า id ซ้ำ ([5,6,5]) จะได้ 2 ≠ 3 แล้ว 404 ผิด ๆ
+  const ids = [...new Set(raw as number[])];
+
+  const reviewed = await tx(async (c) => {
+    const owned = await c.query<{ n: number }>(
+      `select count(*)::int as n from txn t join bank_account a on a.id = t.bank_account_id
+       where a.user_id = $1 and t.id = any($2)`,
+      [user.id, ids],
+    );
+    if (owned.rows[0]!.n !== ids.length) throw new HttpError(404, 'ไม่พบธุรกรรม');
+
+    const beforeRows = (await c.query('select * from txn_annotation where txn_id = any($1)', [ids])).rows;
+    const before = new Map(beforeRows.map((r) => [Number(r.txn_id), r]));
+
+    // where บน do update = แถวที่ reviewed อยู่แล้วไม่ถูกแตะและไม่ถูก returning
+    const { rows } = await c.query(
+      `insert into txn_annotation (txn_id, classification, review_status, reviewed_at, updated_at)
+       select t.id, case when t.direction = 'credit' then 'income' else 'expense' end, 'reviewed', now(), now()
+       from txn t join bank_account a on a.id = t.bank_account_id
+       where a.user_id = $1 and t.id = any($2)
+       on conflict (txn_id) do update set review_status = 'reviewed', reviewed_at = now(), updated_at = now()
+       where txn_annotation.review_status = 'unreviewed'
+       returning *`,
+      [user.id, ids],
+    );
+
+    let changed = 0;
+    for (const after of rows) {
+      const txnId = Number(after.txn_id);
+      const prev = before.get(txnId) ?? null;
+      if (prev) changed++;
+      await audit(c, { userId: user.id, action: 'txn.review', entityType: 'txn', entityId: txnId, before: prev, after, ip: req.ip ?? null });
+    }
+    return changed;
+  });
+  res.json({ reviewed });
+}));
+
 type SplitInput = { category_id: number; amount_satang: number; note: string | null };
 
 function parseSplits(body: unknown): SplitInput[] {
