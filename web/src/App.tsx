@@ -25,7 +25,6 @@ import {
   useMediaQuery,
   type Theme,
 } from '@mui/material';
-import AccountBalanceWalletRounded from '@mui/icons-material/AccountBalanceWalletRounded';
 import AccountBalanceRounded from '@mui/icons-material/AccountBalanceRounded';
 import AssessmentRounded from '@mui/icons-material/AssessmentRounded';
 import CalculateRounded from '@mui/icons-material/CalculateRounded';
@@ -193,7 +192,7 @@ export default function App() {
     return (
       <AuthPanel version={version}>
         <Stack spacing={2} role="status" aria-label="กำลังโหลดข้อมูลผู้ใช้">
-          <Skeleton variant="circular" width={44} height={44} />
+          <Skeleton variant="circular" width={72} height={72} />
           <Skeleton width="55%" height={38} />
           <Skeleton width="90%" height={24} />
           <Skeleton variant="rounded" height={40} sx={{ mt: 1 }} />
@@ -206,9 +205,7 @@ export default function App() {
     return (
       <AuthPanel version={version}>
         <Stack spacing={3} sx={{ alignItems: 'center', textAlign: 'center' }}>
-          <Box sx={{ display: 'grid', placeItems: 'center', width: 56, height: 56, border: 1, borderColor: 'divider', borderRadius: 2, bgcolor: 'background.default', color: 'text.primary' }}>
-            <AccountBalanceWalletRounded sx={{ fontSize: 34 }} />
-          </Box>
+          <Box component="img" src="/logo-192.png" alt="" width={72} height={72} sx={{ display: 'block' }} />
           <Box>
             <Typography variant="h1">Hyacinthia Ledger</Typography>
             <Typography color="text.secondary" sx={{ mt: 1, ...descriptionSx }}>
@@ -260,7 +257,7 @@ export default function App() {
         <Container maxWidth="lg">
           <Toolbar disableGutters sx={{ minHeight: { xs: 56, sm: 64 }, gap: { xs: 0.5, sm: 2 } }}>
             <Stack direction="row" spacing={1} sx={{ mr: 'auto', alignItems: 'center' }}>
-              <AccountBalanceWalletRounded sx={{ color: 'text.primary' }} />
+              <Box component="img" src="/logo-192.png" alt="" width={32} height={32} sx={{ display: 'block' }} />
               <Typography sx={{ whiteSpace: 'nowrap', ...brandCopySx }}>
                 Hyacinthia Ledger
               </Typography>
