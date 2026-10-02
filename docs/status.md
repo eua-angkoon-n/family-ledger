@@ -23,7 +23,7 @@
 
 ## Slice 2 — ท่อรับอีเมล: เสร็จและผ่าน Gmail จริง
 
-- poll Gmail, incremental history + full-sync fallback
+- poll Gmail: ค้น `from:<ผู้ส่งธนาคาร>` (incremental เพิ่ม `after:` = `last_synced_at` − 2 วัน; 1.4.0 เลิกใช้ history.list)
 - ตรวจ From + DKIM จาก `Authentication-Results` ของ `mx.google.com`
 - SCB ส่ง PDF เป็น `application/octet-stream`: รับเฉพาะชื่อที่ตรง patternและ magic bytes `%PDF-`
 - รองรับหลาย PDF ต่ออีเมล (อีเมลย้อนหลัง SCB จริงแนบ 8 ไฟล์)
@@ -378,7 +378,7 @@ Slice 4A–8 เสร็จครบตามแผน — ตัดสิน�
   `category.create/update`, `tax_entity.create/update`, `recurring_rule.create/update/archive`,
   `income_record.create/update/match/unmatch` (`match/unmatch` หายไปพร้อม ADR-0004), `tax_document.upload/update/archive`,
   `installment_due.skip/restore`, `email_account.sync`, `app_user.update`
-- เหตุการณ์ auth: `auth.login` / `auth.signup` / `auth.mailbox_add` / `auth.logout` — `logout` อ่าน
+- เหตุการณ์ auth: `auth.login` / `auth.signup` / `auth.mailbox_add` / `auth.mailbox_reconnect` / `auth.logout` — `logout` อ่าน
   `session.userId` ก่อน `destroy` และ audit ล้มห้ามกันคนออกจากระบบ (catch → stdout)
 - **ที่ล้มเหลวลง stdout เท่านั้น** (`logAuthFailure`) เพราะ `audit_log.user_id` เป็น
   `not null references app_user(id)` — เหตุการณ์ที่ยังไม่มีเจ้าของเขียนลงตารางไม่ได้โดยโครงสร้าง และ

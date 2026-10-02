@@ -7,14 +7,12 @@ import { decrypt } from './crypto.js';
 import { pool, query, tx } from './db.js';
 import { env } from './env.js';
 import {
-  GmailHistoryStaleError,
+  GmailReauthRequiredError,
   dkimPasses,
   fromAddress,
   getAttachment,
   getMessage,
-  getProfile,
   hasPdfMagic,
-  listHistory,
   listMessagesFromSender,
   pickPdfAttachments,
   refreshAccessToken,
@@ -39,6 +37,9 @@ type BankAccountCandidate = { id: number; bank_id: number; account_number: strin
 
 export type SyncSummary = { messages_scanned: number; statements_inserted: number; skipped: number };
 
+/** ขอ access token ไม่สำเร็จแบบชั่วคราว (5xx/เน็ตหลุด) — แยกจาก error ของ DB/โค้ด ให้ route ตอบ 502 ได้ถูกตัว */
+export class GmailUnavailableError extends Error {}
+
 // ponytail: กัน sync ซ้อนต่อกล่องอีเมลเดียวด้วย memory Set พอสำหรับ instance เดียว
 // ถ้าสเกลหลาย instance ค่อยย้ายไป pg_advisory_lock ต่อ email_account_id
 const running = new Set<number>();
@@ -54,45 +55,51 @@ export async function syncEmailAccount(emailAccountId: number, opts: { full?: bo
   }
 }
 
-async function fullSync(accessToken: string, banks: Bank[]): Promise<{ messageIds: string[]; historyId: string }> {
-  // historyId ต้องอ่านก่อน list เสมอ ไม่งั้นเมลที่เข้ามาระหว่าง sync หายถาวร
-  const profile = await getProfile(accessToken);
-  const ids = new Set<string>();
-  for (const bank of banks) {
-    for (const id of await listMessagesFromSender(accessToken, bank.sender_email)) ids.add(id);
-  }
-  return { messageIds: [...ids], historyId: profile.historyId };
-}
-
 async function doSync(emailAccountId: number, requestFull: boolean): Promise<SyncSummary> {
   const summary: SyncSummary = { messages_scanned: 0, statements_inserted: 0, skipped: 0 };
 
-  const { rows } = await query<{ id: number; user_id: number; refresh_token_enc: string; history_id: string | null }>(
-    'select id, user_id, refresh_token_enc, history_id from email_account where id = $1',
+  const { rows } = await query<{
+    id: number; user_id: number; refresh_token_enc: string; last_synced_at: Date | null; reauth_required_at: Date | null;
+  }>(
+    'select id, user_id, refresh_token_enc, last_synced_at, reauth_required_at from email_account where id = $1',
     [emailAccountId],
   );
   const account = rows[0];
   if (!account) return summary;
+  // รู้อยู่แล้วว่า refresh token ใช้ไม่ได้ — ไม่ยิง Google ซ้ำจนกว่าผู้ใช้จะเชื่อมใหม่ (auth.ts ล้างค่านี้ตอน upsert)
+  if (account.reauth_required_at) throw new GmailReauthRequiredError('กล่องนี้ต้องเชื่อม Gmail ใหม่ก่อน');
 
   const banks = (await query<Bank>('select * from bank where is_active = true')).rows;
   if (!banks.length) return summary;
 
-  const accessToken = await refreshAccessToken(decrypt(account.refresh_token_enc));
+  const refreshToken = decrypt(account.refresh_token_enc);
+  let accessToken: string;
+  try {
+    accessToken = await refreshAccessToken(refreshToken);
+  } catch (e) {
+    if (!(e instanceof GmailReauthRequiredError)) throw new GmailUnavailableError('ติดต่อ Google ไม่ได้ชั่วคราว', { cause: e });
+    // เทียบ ciphertext เดิม — ถ้าผู้ใช้เชื่อมใหม่สำเร็จระหว่างรอ Google ตอบ แถวใหม่ต้องไม่โดนตั้งสถานะทับ
+    await query('update email_account set reauth_required_at = now() where id = $1 and refresh_token_enc = $2', [
+      emailAccountId,
+      account.refresh_token_enc,
+    ]);
+    throw e;
+  }
 
-  let sync: { messageIds: string[]; historyId: string };
-  if (requestFull || !account.history_id) {
-    sync = await fullSync(accessToken, banks);
-  } else {
-    try {
-      sync = await listHistory(accessToken, account.history_id);
-    } catch (e) {
-      if (e instanceof GmailHistoryStaleError) sync = await fullSync(accessToken, banks);
-      else throw e;
-    }
+  // จับเวลาก่อน list — เมลที่เข้ามาระหว่าง list จะอยู่ในช่วงของรอบหน้า ไม่ตกรอยต่อ
+  const startedAt = new Date();
+  // ย้อนซ้อนรอบก่อน 2 วันได้เพราะไฟล์ที่เคยนำเข้าแล้วถูกข้ามด้วย pdf_sha256 ใน processMessage อยู่แล้ว
+  const after = requestFull || !account.last_synced_at
+    ? undefined
+    : new Date(account.last_synced_at.getTime() - 2 * 24 * 60 * 60 * 1000);
+  // ค้นต่อผู้ส่งของธนาคารเท่านั้น (Gmail กรองฝั่งเซิร์ฟเวอร์) — ไม่ดึงเมลอื่นในกล่องมาดูเลย
+  const messageIds = new Set<string>();
+  for (const bank of banks) {
+    for (const id of await listMessagesFromSender(accessToken, bank.sender_email, after)) messageIds.add(id);
   }
 
   // ความล้มเหลวต่อ 1 ข้อความถูกกันไว้ในนี้ ไม่ให้ข้อความเดียวที่พังทำให้ทั้งกล่องไม่ขยับ cursor
-  for (const messageId of sync.messageIds) {
+  for (const messageId of messageIds) {
     summary.messages_scanned++;
     try {
       const inserted = await processMessage(accessToken, messageId, emailAccountId, banks);
@@ -106,10 +113,7 @@ async function doSync(emailAccountId: number, requestFull: boolean): Promise<Syn
   }
 
   // สำเร็จทั้งรอบ (list ได้ครบ) ถึงขยับ cursor — ถ้า list เองล้มเหลว (throw ก่อนถึงตรงนี้) cursor จะไม่ขยับ
-  await query('update email_account set history_id = $2, last_synced_at = now() where id = $1', [
-    emailAccountId,
-    sync.historyId,
-  ]);
+  await query('update email_account set last_synced_at = $2 where id = $1', [emailAccountId, startedAt]);
 
   // จับคู่โอนภายในหลังเขียน txn ของรอบนี้เสร็จ — คู่ชัดเจนยืนยันเอง กรณีคลุมเครือเก็บเป็น suggestion
   // ไม่ผูกกับ tx() ของ statement ไหนโดยเฉพาะ พังแล้วไม่ควรทำให้ sync รอบนี้ fail ทั้งรอบ
@@ -429,7 +433,7 @@ export function startWorker(): void {
   const HOUR = 60 * 60 * 1000;
 
   const tick = async (): Promise<void> => {
-    const { rows } = await query<{ id: number }>('select id from email_account');
+    const { rows } = await query<{ id: number }>('select id from email_account where reauth_required_at is null');
     for (const { id } of rows) {
       try {
         const summary = await syncEmailAccount(id);

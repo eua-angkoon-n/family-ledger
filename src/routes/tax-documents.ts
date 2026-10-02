@@ -18,6 +18,9 @@ const STATUSES = ['draft', 'verified', 'submitted'] as const;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const LIST_LIMIT_DEFAULT = 50;
 const LIST_LIMIT_MAX = 200;
+// ปิดคู่กับ TAX_PAGES_ENABLED ใน web/src/features.ts — สองเส้นนี้ค้นทั้งกล่อง (has:attachment) ไม่ใช่เฉพาะเมลธนาคาร
+// ก่อนเปิดต้องเขียนใน web/public/privacy.html ก่อนว่าค้น Gmail แบบนี้
+const TAX_GMAIL_ENABLED: boolean = false;
 
 // ไม่ select storage_path/file_sha256 ออกไปทาง API — path บนดิสก์ไม่ใช่ข้อมูลที่ client ต้องรู้
 const TAX_DOC_COLUMNS = `id, tax_entity_id, document_type, tax_year, issuer_name, issuer_tax_id, recipient_tax_id,
@@ -192,6 +195,7 @@ taxDocumentsRouter.get('/tax-documents/gmail-attachments', requireUser(async (re
     [emailAccountId, user.id],
   );
   if (!acct.rowCount) throw new HttpError(403, 'กล่องอีเมลนี้ไม่ใช่ของคุณ');
+  if (!TAX_GMAIL_ENABLED) throw new HttpError(404, 'ฟีเจอร์นำเข้าจาก Gmail ปิดอยู่');
 
   const accessToken = await refreshAccessToken(decrypt(acct.rows[0]!.refresh_token_enc));
   const gmailQuery = searchTerm ? `has:attachment ${searchTerm}` : 'has:attachment';
@@ -239,6 +243,7 @@ taxDocumentsRouter.post('/tax-documents/from-gmail', requireUser(async (req, res
     [emailAccountId, user.id],
   );
   if (!acct.rowCount) throw new HttpError(403, 'กล่องอีเมลนี้ไม่ใช่ของคุณ');
+  if (!TAX_GMAIL_ENABLED) throw new HttpError(404, 'ฟีเจอร์นำเข้าจาก Gmail ปิดอยู่');
 
   const accessToken = await refreshAccessToken(decrypt(acct.rows[0]!.refresh_token_enc));
   const buf = await getAttachment(accessToken, gmailMessageId, gmailAttachmentId);

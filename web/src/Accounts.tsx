@@ -23,9 +23,13 @@ import {
 import AccountBalanceRounded from '@mui/icons-material/AccountBalanceRounded';
 import AddRounded from '@mui/icons-material/AddRounded';
 import ArchiveOutlined from '@mui/icons-material/ArchiveOutlined';
+import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded';
 import EditRounded from '@mui/icons-material/EditRounded';
+import LinkOffRounded from '@mui/icons-material/LinkOffRounded';
+import MailOutlineRounded from '@mui/icons-material/MailOutlineRounded';
 import { del, patch, post, req, type Account, type Bank, type EmailAccount, type TaxEntity, type TaxEntityType } from './api.js';
 import { createFormFieldChangeHandler } from './form.js';
+import { formatDateTime } from './format.js';
 import Modal from './Modal.js';
 import { TAX_ENTITY_TYPE_LABEL } from './taxDocumentLabels.js';
 import { dataTextSx, descriptionSx } from './theme.js';
@@ -301,6 +305,51 @@ export default function Accounts() {
           }
         }}
       />
+      <Box component="section" aria-labelledby="mailboxes-heading" sx={{ mt: 5 }}>
+        <PageHeader
+          level={2}
+          id="mailboxes-heading"
+          title="กล่องอีเมล"
+          description="กล่อง Gmail ที่ระบบค้นเฉพาะอีเมล statement จากธนาคาร"
+          action={<Button variant="outlined" startIcon={<AddRounded />} href="/auth/google?add=1" sx={{ whiteSpace: 'nowrap' }}>ต่อกล่องอีเมลอื่นเพิ่ม</Button>}
+        />
+        {loading ? null : mailboxes.length === 0 ? (
+          <EmptyState
+            icon={<MailOutlineRounded sx={{ fontSize: 40 }} />}
+            title="ยังไม่ได้เชื่อม Gmail"
+            description="เชื่อมกล่อง Gmail ที่รับ statement จากธนาคาร ระบบจึงจะนำเข้ารายการให้อัตโนมัติ"
+            action={<Button variant="outlined" href="/auth/google?add=1">เชื่อม Gmail</Button>}
+          />
+        ) : (
+          // ใช้แถวแบบ DataFreshness แทนตาราง — มีไม่กี่กล่อง ไม่ต้องเลื่อนแนวนอนที่ 320px
+          <Paper variant="outlined" sx={{ mt: 3, px: 2 }}>
+            {mailboxes.map((mailbox) => (
+              <Stack
+                key={mailbox.id}
+                direction={{ xs: 'column', sm: 'row' }}
+                spacing={{ xs: 1, sm: 2 }}
+                sx={{ alignItems: { sm: 'center' }, py: 1.5, borderBottom: 1, borderColor: 'divider', '&:last-child': { borderBottom: 0 } }}
+              >
+                <Box sx={{ minWidth: 0, flexGrow: 1 }}>
+                  <Typography sx={{ ...dataTextSx, fontWeight: 650, overflowWrap: 'anywhere' }}>{mailbox.email}</Typography>
+                  <Typography variant="body2" color="text.secondary" sx={dataTextSx}>
+                    {mailbox.last_synced_at ? `ซิงก์ล่าสุด ${formatDateTime(mailbox.last_synced_at)}` : 'ยังไม่เคยซิงก์'}
+                  </Typography>
+                </Box>
+                {mailbox.reauth_required_at ? (
+                  <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
+                    <Chip size="small" icon={<LinkOffRounded />} label="ต้องเชื่อม Gmail ใหม่" color="error" variant="outlined" />
+                    <Button variant="contained" href={`/auth/google?reconnect=${mailbox.id}`} sx={{ whiteSpace: 'nowrap' }}>เชื่อม Gmail ใหม่</Button>
+                  </Stack>
+                ) : (
+                  <Chip size="small" icon={<CheckCircleRounded />} label="ใช้งานได้" color="success" variant="outlined" sx={{ alignSelf: { xs: 'flex-start', sm: 'center' } }} />
+                )}
+              </Stack>
+            ))}
+          </Paper>
+        )}
+      </Box>
+
       <Box component="section" aria-labelledby="tax-entities-heading" sx={{ mt: 5 }}>
         <PageHeader
           level={2}

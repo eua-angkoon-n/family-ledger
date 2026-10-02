@@ -40,7 +40,7 @@ import ReceiptLongRounded from '@mui/icons-material/ReceiptLongRounded';
 import ReceiptRounded from '@mui/icons-material/ReceiptRounded';
 import SchoolRounded from '@mui/icons-material/SchoolRounded';
 import SettingsRounded from '@mui/icons-material/SettingsRounded';
-import { req, type User } from './api.js';
+import { req, type EmailAccount, type User } from './api.js';
 import Accounts from './Accounts.js';
 import Admin from './Admin.js';
 import { isPageEnabled } from './features.js';
@@ -59,6 +59,43 @@ const AuditLog = lazy(() => import('./pages/AuditLog.js'));
 const Help = lazy(() => import('./pages/Help.js'));
 
 type SettingsTab = 'banks' | 'users' | 'audit';
+
+// ?gmail=<code> ที่ OAuth callback ส่งกลับมาหลังเชื่อม/เชื่อม Gmail ใหม่ — โค้ดที่ไม่รู้จักไม่แสดงอะไร
+const GMAIL_NOTICE: Record<string, Notice> = {
+  connected: { message: 'เชื่อม Gmail สำเร็จ', severity: 'success' },
+  not_granted: { message: 'ยังไม่ได้เชื่อม Gmail: ต้องติ๊กอนุญาตให้อ่านอีเมลในหน้าของ Google ระบบจึงนำเข้า statement ได้', severity: 'error' },
+  denied: { message: 'ยกเลิกการเชื่อม Gmail แล้ว ไม่มีอะไรเปลี่ยน', severity: 'info' },
+  wrong_account: { message: 'บัญชี Google ที่เลือกไม่ตรงกับกล่องอีเมลที่จะเชื่อมใหม่ ลองอีกครั้งแล้วเลือกบัญชีให้ถูก', severity: 'error' },
+  no_refresh_token: { message: 'Google ไม่ได้ส่งสิทธิ์ระยะยาวกลับมา ลองเชื่อม Gmail ใหม่อีกครั้ง', severity: 'error' },
+};
+
+// แถบเตือนทุกหน้า: กล่องอีเมลที่ Google ปฏิเสธสิทธิ์ (invalid_grant) หรือยังไม่มีกล่องอีเมลเลย — ทั้งสองกรณีนำเข้า statement ไม่ได้
+// ปุ่มไป /auth/google ต้องเป็น <a href> (โหลดทั้งหน้าไป OAuth) ไม่ใช่ Link ของ router; ปุ่มอยู่ใต้ข้อความ ไม่ใช้ action
+// ของ Alert เพราะที่ 320px ข้อความจะเหลือที่แคบมาก
+function GmailBanner({ mailboxes }: { mailboxes: EmailAccount[] | null }) {
+  if (!mailboxes) return null;
+  if (mailboxes.length === 0) {
+    return (
+      <Alert severity="info" sx={{ mb: 3, ...descriptionSx }}>
+        ยังไม่ได้เชื่อม Gmail — ระบบยังนำเข้า statement ไม่ได้
+        <Box sx={{ mt: 1 }}><Button variant="outlined" color="inherit" href="/auth/google?add=1">เชื่อม Gmail</Button></Box>
+      </Alert>
+    );
+  }
+  const broken = mailboxes.filter((m) => m.reauth_required_at);
+  if (broken.length === 0) return null;
+  return (
+    <Alert severity="error" sx={{ mb: 3, ...descriptionSx }}>
+      ต้องเชื่อม Gmail ใหม่: สิทธิ์อ่านอีเมลของ <Box component="span" sx={{ ...dataTextSx, overflowWrap: 'anywhere' }}>{broken.map((m) => m.email).join(', ')}</Box>{' '}
+      หมดอายุหรือถูกยกเลิก ระบบจึงหยุดนำเข้า statement จากกล่องอีเมลนี้
+      <Box sx={{ mt: 1 }}>
+        {broken.length === 1
+          ? <Button variant="outlined" color="inherit" href={`/auth/google?reconnect=${broken[0].id}`}>เชื่อม Gmail ใหม่</Button>
+          : <Button variant="outlined" color="inherit" component={Link} to="/accounts">เชื่อม Gmail ใหม่</Button>}
+      </Box>
+    </Alert>
+  );
+}
 
 const NAV_ITEMS = [
   { path: '/dashboard', label: 'แดชบอร์ด', icon: <AssessmentRounded /> },
@@ -157,7 +194,12 @@ export default function App() {
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const [version, setVersion] = useState<string | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
-  const [notice, setNotice] = useState<Notice | null>(null);
+  // OAuth callback ส่งผลกลับมาเป็น ?auth_error= / ?gmail= — อ่านตอน render แรก (ก่อน `/` ถูก Navigate ไป /dashboard จน query หาย)
+  const [oauthParams] = useState(() => new URLSearchParams(window.location.search));
+  const authError = oauthParams.get('auth_error');
+  const [notice, setNotice] = useState<Notice | null>(() => GMAIL_NOTICE[oauthParams.get('gmail') ?? ''] ?? null);
+  // null = ยังโหลดไม่เสร็จ/โหลดไม่ได้ → ไม่แสดงแถบ (กันแถบ "ยังไม่ได้เชื่อม Gmail" แวบขึ้นก่อนข้อมูลมา)
+  const [mailboxes, setMailboxes] = useState<EmailAccount[] | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   // noSsr: ไม่งั้น render แรกได้ false เสมอ แล้วจอกว้างจะเห็นปุ่ม ☰ แวบหนึ่งก่อนสลับเป็น tabs
   const isDesktop = useMediaQuery((theme: Theme) => theme.breakpoints.up('md'), { noSsr: true });
@@ -166,6 +208,20 @@ export default function App() {
 
   // ปิด drawer เมื่อเปลี่ยนหน้า (รวมกด back/forward) และเมื่อขยายจอข้าม md ไม่ให้ค้างเปิดอยู่หลัง tabs
   useEffect(() => setMenuOpen(false), [routerLocation.pathname, isDesktop]);
+
+  // ลบ query ของ OAuth ออกจาก URL หลังอ่านแล้ว ไม่ให้ refresh/แชร์ลิงก์แล้วข้อความขึ้นซ้ำ
+  useEffect(() => {
+    if (!oauthParams.has('auth_error') && !oauthParams.has('gmail')) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete('auth_error');
+    url.searchParams.delete('gmail');
+    window.history.replaceState(window.history.state, '', url);
+  }, [oauthParams]);
+
+  useEffect(() => {
+    if (user?.status !== 'approved') return;
+    req<EmailAccount[]>('/api/email-accounts').then(setMailboxes).catch(() => {}); // แถบเสริม — โหลดไม่ได้ก็ไม่แสดง
+  }, [user?.status]);
 
   useEffect(() => {
     req<{ user: User | null; version: string }>('/api/me')
@@ -212,6 +268,11 @@ export default function App() {
               เปลี่ยน statement จากธนาคารให้เป็นภาพรวมการเงินที่ถูกต้องและดูแลง่าย
             </Typography>
           </Box>
+          {authError && (
+            <Alert severity={authError === 'access_denied' ? 'info' : 'error'} sx={{ width: '100%', textAlign: 'left', ...descriptionSx }}>
+              {authError === 'access_denied' ? 'คุณยกเลิกการเข้าสู่ระบบกับ Google' : 'เข้าสู่ระบบกับ Google ไม่สำเร็จ ลองใหม่อีกครั้ง'}
+            </Alert>
+          )}
           <Button fullWidth variant="contained" startIcon={<LoginRounded />} onClick={() => { location.href = '/auth/google'; }}>
             เข้าสู่ระบบด้วย Google
           </Button>
@@ -366,6 +427,7 @@ export default function App() {
       </Drawer>
 
       <Container component="main" maxWidth="lg" sx={{ py: { xs: 3, sm: 4 }, pb: 8 }}>
+        <GmailBanner mailboxes={mailboxes} />
         <Suspense fallback={<TableSkeleton rows={6} />}>
           <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
