@@ -20,8 +20,9 @@ const TONE_COLOR: Record<Tone, string | undefined> = {
 };
 
 // แสดงจำนวนเงิน — dataTextSx เสมอ (Financial Clarity Rule); Poppins ไม่มี tnum ตัวเลขจึงยังกว้างไม่เท่ากัน
+// ติดลบมี "−" เสมอ (ไม่บอกด้วยสีอย่างเดียว — Semantic Color Rule) showSign เพิ่ม "+" ให้ค่าบวก ผู้เรียกที่อยากได้ค่าสัมบูรณ์ส่ง Math.abs มาเอง
 export default function Money({ satang, tone = 'neutral', showSign = false, sx }: MoneyProps) {
-  const sign = showSign ? (satang > 0 ? '+' : satang < 0 ? '−' : '') : '';
+  const sign = satang < 0 ? '−' : showSign && satang > 0 ? '+' : '';
   // ศูนย์ไม่ใช่ทั้งรายรับและรายจ่าย — สีกลางเสมอ ไม่งั้น ฿0.00 สีเขียว/แดงอ่านเหมือนมีเงินเข้า/ออก
   const color = satang === 0 ? undefined : TONE_COLOR[tone];
   return (

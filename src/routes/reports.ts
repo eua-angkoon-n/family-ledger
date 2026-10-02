@@ -5,6 +5,7 @@ import {
   EFFECTIVE_REVIEW_STATUS_SQL,
   EXCLUDED_FROM_FLOW_SQL,
   IS_INTERNAL_TRANSFER_SQL,
+  IS_UNCATEGORISED_SQL,
   OWNED_TXN_FROM,
   accountCoverage,
   parseRange,
@@ -49,7 +50,7 @@ reportsRouter.get('/reports/summary', requireUser(async (req, res, user) => {
      ),
      quality as (
        select
-         count(*) filter (where not exists (select 1 from txn_split s where s.txn_id = t.id)) as uncategorised_count,
+         count(*) filter (where ${IS_UNCATEGORISED_SQL}) as uncategorised_count,
          count(*) filter (where ${EFFECTIVE_REVIEW_STATUS_SQL} = 'unreviewed') as unreviewed_count
        ${OWNED_TXN_FROM}
        where a.user_id = $1 and t.txn_date >= $2 and t.txn_date < $3
@@ -117,12 +118,14 @@ reportsRouter.get('/reports/category-breakdown', requireUser(async (req, res, us
   const { from, to } = parseRange(req.query as Record<string, unknown>);
 
   // left join txn_split + coalesce (ไม่ union all): txn 3 split ออกมา 3 แถว, txn 0 split ออกมา 1 แถวที่
-  // category_id เป็น null ตกไปกลุ่ม "ไม่ได้จัดหมวด" โดยไม่ซ้ำแถวและไม่ต้องเขียน WHERE สองที่
+  // category_id เป็น null ตกไปกลุ่ม "ยังไม่จัดหมวด" โดยไม่ซ้ำแถวและไม่ต้องเขียน WHERE สองที่
+  // กลุ่มนี้ = IS_UNCATEGORISED_SQL ∩ debit (WHERE ตัด EXCLUDED_FROM_FLOW_SQL อยู่แล้ว) — drill-down
+  // direction=debit&uncategorised=true จึงได้ชุดเดียวกันเป๊ะ
   // group by s.category_id, c.name (ไม่ใช่ c.id) — Postgres สืบ c.name จาก s.category_id ข้ามตารางไม่ได้
   // filter t.direction = 'debit' ไม่ใช่ c.kind = 'expense' — debit ที่ผู้ใช้แยกเข้าหมวด income โดยพลาดต้องยังโผล่
   // ที่นี่ ไม่งั้น sum(breakdown) จะไม่เท่ากับ money_out_satang อีกต่อไป
   const { rows } = await query<{ category_id: number | null; category_name: string; total_satang: number; txn_count: number }>(
-    `select s.category_id, coalesce(c.name, 'ไม่ได้จัดหมวด') as category_name,
+    `select s.category_id, coalesce(c.name, 'ยังไม่จัดหมวด') as category_name,
             sum(coalesce(s.amount_satang, t.amount_satang))::bigint as total_satang,
             count(distinct t.id)::int as txn_count
      from txn t

@@ -46,22 +46,22 @@ declare module '@mui/material/styles' {
  * รายการเดียวกับ DESIGN.md หัวข้อ "Contrast"
  *
  * light
- *   primary (ตัวอักษร/ลิงก์ + พื้นปุ่มหลัก) #d04f99 → #b43481 ... 4.67/4.85/5.61, ขาวบนปุ่ม 3.99 → 5.61
- *   muted-foreground #7a7a7a → #676767 ................... 4.70/4.88/5.65
- *   destructive #f96f70 → #bd373f ........................ 4.62/4.80/5.56, ขาวบนปุ่มลบ 2.79 → 5.56
+ *   primary (ตัวอักษร/ลิงก์ + พื้นปุ่มหลัก) #d04f99 → #b43481 ... 4.66/4.84/5.60, ขาวบนปุ่ม 3.99 → 5.60
+ *   muted-foreground #7a7a7a → #676767 ................... 4.71/4.88/5.66
+ *   destructive #f96f70 → #bd373f ........................ 4.62/4.79/5.55, ขาวบนปุ่มลบ 2.79 → 5.55
  *   ring #e670ab → #d15d98 (ต้อง ≥ 3:1) .................. 3.05/3.16/3.66
- *   input (ขอบช่องกรอก) #e4e4e4 → #868686 (ต้อง ≥ 3:1) ... 3.03/3.15/3.65
+ *   input (ขอบช่องกรอก) #e4e4e4 → #868686 (ต้อง ≥ 3:1) ... 3.03/3.14/3.64
  * dark
- *   accent-foreground (ตัวอักษรตอน hover บน accent #c67b96) #f3e3ea → #12242e ... 2.54 → 5.06
- *   destructive #e35ea4 → #e66aaa ........................ 5.30/4.67/4.67, destructive-foreground #12242e บนปุ่ม 4.85 → 5.30
+ *   accent-foreground (ตัวอักษรตอน hover บน accent #c67b96) #f3e3ea → #12242e ... 2.54 → 5.07
+ *   destructive #e35ea4 → #e66aaa ........................ 5.32/4.68/4.68, destructive-foreground #12242e บนปุ่ม 4.86 → 5.32
  *   input (ขอบช่องกรอก) #20333d → #5d7c90 (ต้อง ≥ 3:1) ... 3.61/3.17/3.17 — พื้นช่องกรอก (inputBg) ยังเป็น #20333d/30 ตามธีม
  *
  * ที่ยังไม่ผ่าน (ผู้ใช้ให้คงสีกราฟตามธีม): ธีมสว่าง chart-1..4 บน card 1.10–2.49 (chart-3 #fbe2a7 = 1.10 แทบมองไม่เห็น;
  * chart-5 #d7488e ผ่าน 3.48), ธีมมืด chart-5 #24272b 1.07 (มองไม่เห็น), chart-4 #175c6c 1.86 — ทุกอนุกรมจึงต้องมี label
  *
  * warning ไม่มีในธีม — เลือกให้ผ่าน AA เป็นตัวอักษรทั้งสองโหมด (alert เตือนและตัวนับปัญหาที่ > 0)
- *   สว่าง #9a4d00: 5.08/5.27/6.10 บน background/card/popover, ขาวบนพื้นนี้ 6.11
- *   มืด #ffa726 (= ค่าเริ่มต้นของ MUI ตั้งไว้ชัด ๆ): 8.18/7.20/7.20, ดำ 87% บนพื้นนี้ 9.16
+ *   สว่าง #9a4d00: 5.09/5.28/6.11 บน background/card/popover, ขาวบนพื้นนี้ 6.11
+ *   มืด #ffa726 (= ค่าเริ่มต้นของ MUI ตั้งไว้ชัด ๆ): 8.20/7.22/7.22, ดำ 87% บนพื้นนี้ 9.16
  */
 export const tokens = {
   light: {
@@ -292,13 +292,23 @@ const theme = createTheme({
     },
     MuiButton: {
       defaultProps: { disableElevation: true },
+      // aria-disabled = ปุ่มที่ถือ focus อยู่แล้วกดไม่ได้ชั่วคราว (กำลังบันทึก, ปลายรายการ) — หน้าตาเดียวกับ disabled ของ MUI
+      // ทุก variant แต่ยังอยู่ในลำดับ tab (disabled ถอดออกแล้ว focus ตกไป <body>) ผู้เรียกทำให้ onClick ไม่ทำอะไรเอง
       styleOverrides: {
-        root: {
+        root: ({ theme }) => ({
           minHeight: 40,
           paddingInline: 16,
           borderRadius: radii.md,
           transition: 'background-color 180ms cubic-bezier(0.16, 1, 0.3, 1), border-color 180ms cubic-bezier(0.16, 1, 0.3, 1)',
-        },
+          '&[aria-disabled="true"], &[aria-disabled="true"]:hover': {
+            color: theme.vars.palette.action.disabled,
+            cursor: 'default',
+            boxShadow: 'none',
+            '&.MuiButton-text': { backgroundColor: 'transparent' },
+            '&.MuiButton-outlined': { backgroundColor: 'transparent', borderColor: theme.vars.palette.action.disabledBackground },
+            '&.MuiButton-contained': { backgroundColor: theme.vars.palette.action.disabledBackground },
+          },
+        }),
       },
     },
     MuiIconButton: {
@@ -314,8 +324,17 @@ const theme = createTheme({
     MuiAppBar: {
       styleOverrides: { root: { backgroundImage: 'none' } },
     },
+    // drawer เนื้อหา (ReviewDrawer, TaxDocumentDrawer) ใช้พื้น popover เหมือน dialog — พื้น sidebar (#f8d8ea) ทำตัวอักษรรอง/
+    // primary/error เหลือ 4.23–4.31 และขอบช่องกรอก/ring 2.77/2.79 ในธีมสว่าง ส่วนเมนูบนมือถือตั้งพื้น sidebar เองใน App.tsx
+    // ขอบซ้ายแยก drawer ขวาออกจากเนื้อหา เพราะเงา hard offset (3px ขวา/ล่าง) ตกนอกจอ
     MuiDrawer: {
-      styleOverrides: { paper: ({ theme }) => ({ backgroundColor: theme.vars.palette.brand.sidebar }) },
+      styleOverrides: {
+        // ownerState ไม่ใช่ class anchorRight — overridesResolver ของ Drawer ไม่ส่ง styleOverrides ของ anchor* ให้ (MUI 9)
+        paper: ({ theme, ownerState }) => ({
+          backgroundColor: theme.vars.palette.brand.popover,
+          ...(ownerState.anchor === 'right' && { borderLeft: `1px solid ${theme.vars.palette.divider}` }),
+        }),
+      },
     },
     MuiPopover: {
       // Menu ใช้ PopoverPaper ด้วย จึงได้ค่าเดียวกัน; เงา md มาจาก elevation 8
@@ -415,9 +434,16 @@ const theme = createTheme({
       },
     },
     MuiTableRow: {
-      // hover ใช้ action.hover (= accent) ของ MUI อยู่แล้ว
       styleOverrides: {
         root: ({ theme }) => ({
+          // hover ไม่ใช้ action.hover (= accent): ตัวอักษรในแถวไม่เปลี่ยนสีตาม จึงเหลือ 4.38–4.45 (สว่าง) และ 1.04–2.54 (มืด,
+          // รายจ่าย 1.04) — ใช้ popover (สว่าง #fff) / muted (มืด #24272b) ที่ทุกคู่ตัวอักษร/เงินผ่าน 4.5 (ดู DESIGN.md Tables)
+          // :not(.Mui-selected) — กฎของธีมมืด (มี attribute selector นำหน้า) เจาะจงกว่ากฎ selected ด้านล่าง ไม่งั้นแถวที่เลือก
+          // ตอน hover ได้พื้น muted กับตัวอักษร sidebar-accent-foreground (1.02:1)
+          '&.MuiTableRow-hover:hover:not(.Mui-selected)': {
+            backgroundColor: theme.vars.palette.brand.popover,
+            ...theme.applyStyles('dark', { backgroundColor: theme.vars.palette.brand.muted }),
+          },
           '&.Mui-selected, &.Mui-selected:hover': {
             backgroundColor: theme.vars.palette.brand.sidebarAccent,
             '& > .MuiTableCell-root': { color: theme.vars.palette.brand.sidebarAccentForeground },
@@ -430,7 +456,26 @@ const theme = createTheme({
     },
     MuiChip: {
       // มุม md ตาม Badge ของ shadcn (rounded-md)
-      styleOverrides: { root: { fontWeight: 600, borderRadius: radii.md }, sizeSmall: { minHeight: 28 } },
+      // outlined สีปกติ (ตัวกรอง/toggle ที่ไม่ได้เลือก, หมวดในตาราง): ขอบเดิมของ MUI 1.56 (สว่าง) / 2.57 (มืด) และไอคอนลบ
+      // text.primary/26% 1.44 / 2.12 บน background — ใช้ขอบ input (สว่าง 3.03/3.14/3.64, มืด 3.61/3.17 บน background/card/popover) และไอคอน
+      // text.secondary (4.71 / 7.67 บน background) · hover พื้น accent ใช้ accent-foreground เหมือน tab (มืดเดิม 2.54 → 5.07)
+      // scope ที่ colorDefault — chip outlined สีสถานะ (success "ยืนยันแล้ว") คงขอบสีของมันเอง
+      styleOverrides: {
+        root: ({ theme }) => ({
+          fontWeight: 600,
+          borderRadius: radii.md,
+          '&.MuiChip-outlined.MuiChip-colorDefault': {
+            borderColor: theme.vars.palette.brand.input,
+            '& .MuiChip-deleteIcon, & .MuiChip-deleteIcon:hover': { color: theme.vars.palette.text.secondary },
+            '&.MuiChip-clickable:hover, &.MuiChip-clickable:hover .MuiChip-deleteIcon': { color: theme.vars.palette.brand.accentForeground },
+          },
+        }),
+        sizeSmall: { minHeight: 28 },
+      },
+    },
+    // หัวกลุ่มในเมนู (หมวดรายรับ/รายจ่าย) — ค่าเริ่มต้นเป็น background.paper (= card ครีม) เป็นแถบสีกลางเมนูพื้น popover
+    MuiListSubheader: {
+      styleOverrides: { root: ({ theme }) => ({ backgroundColor: theme.vars.palette.brand.popover }) },
     },
     MuiDialog: {
       styleOverrides: {

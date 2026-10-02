@@ -864,4 +864,19 @@ test('cross-user authorization: Slice 4A endpoints', async (t) => {
       assert.ok(!payload.includes('pdf_password_enc'), 'ciphertext ของรหัสผ่าน PDF หลุดเข้า audit_log');
     }
   });
+
+  await t.test('45. POST /api/transactions/review — ปน txn ของ B มาแม้ตัวเดียว ต้อง 404 และไม่เปลี่ยนอะไรเลย', async () => {
+    const ownTxn = await seedTxn(stmtA, accountA, { amount: 3000, direction: 'debit', runningBalance: 87000 });
+    await db.pool.query(
+      `insert into txn_annotation (txn_id, classification, review_status) values ($1, 'expense', 'unreviewed')`,
+      [ownTxn],
+    );
+    await loginAs(userA);
+    const res = await request('/api/transactions/review', post({ txn_ids: [ownTxn, txnB] }));
+    assert.equal(res.status, 404);
+    const own = await db.pool.query('select review_status from txn_annotation where txn_id = $1', [ownTxn]);
+    assert.equal(own.rows[0]!.review_status, 'unreviewed');
+    const foreign = await db.pool.query('select count(*)::int as n from txn_annotation where txn_id = $1', [txnB]);
+    assert.equal(foreign.rows[0]!.n, 0);
+  });
 });

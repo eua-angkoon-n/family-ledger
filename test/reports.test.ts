@@ -176,7 +176,7 @@ test('reports API + transaction list/detail', async (t) => {
     assert.equal(row3?.total_satang, 30_000);
 
     const uncategorised = body.rows.find((r) => r.category_id === null);
-    assert.equal(uncategorised?.category_name, 'ไม่ได้จัดหมวด');
+    assert.equal(uncategorised?.category_name, 'ยังไม่จัดหมวด');
     assert.equal(uncategorised?.total_satang, 300_000);
     assert.equal(uncategorised?.txn_count, 1);
 
@@ -216,6 +216,26 @@ test('reports API + transaction list/detail', async (t) => {
     };
     const total = breakdown.rows.reduce((sum, r) => sum + r.total_satang, 0);
     assert.equal(total, after.money_out_satang);
+  });
+
+  await t.test('uncategorised=true ใช้นิยามเดียวกับ uncategorised_count ของแดชบอร์ด — คู่โอนภายในไม่ค้างในคิว', async () => {
+    type ListBody = { rows: { id: number }[]; total_count: number };
+    const summary = (await (await request('/api/reports/summary?month=2026-08')).json()) as { uncategorised_count: number };
+    const list = (await (await request('/api/transactions?month=2026-08&uncategorised=true')).json()) as ListBody;
+
+    // creditTxn1 + debitTxn1 (0 split ทั้งคู่) — debitTxn2 มี split, สองขาโอนที่ confirm แล้วไม่ต้องจัดหมวด
+    assert.equal(list.total_count, summary.uncategorised_count);
+    assert.equal(list.total_count, 2);
+    const ids = list.rows.map((r) => r.id);
+    assert.ok(ids.includes(creditTxn1) && ids.includes(debitTxn1));
+    assert.ok(!ids.includes(transferDebitLeg) && !ids.includes(transferCreditLeg));
+
+    // drill-down จากกลุ่ม "ยังไม่จัดหมวด" ของ category-breakdown ต้องได้จำนวนเท่าที่กลุ่มนั้นบอก
+    const breakdown = (await (await request('/api/reports/category-breakdown?month=2026-08')).json()) as {
+      rows: { category_id: number | null; txn_count: number }[];
+    };
+    const drill = (await (await request('/api/transactions?month=2026-08&direction=debit&uncategorised=true')).json()) as ListBody;
+    assert.equal(drill.total_count, breakdown.rows.find((r) => r.category_id === null)?.txn_count);
   });
 
   // ---- ข้อ 5: accountCoverage / statement_behind — seed period_end สัมพัทธ์กับ current_date เท่านั้น ----

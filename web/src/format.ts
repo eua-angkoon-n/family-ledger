@@ -40,6 +40,9 @@ export function parseBahtToSatang(input: string): number | null {
   return Number(intPart) * 100 + Number(satangFraction);
 }
 
+/** ข้อความ error ของช่องยอดเงินที่ parseBahtToSatang อ่านไม่ได้ — บอกรูปแบบที่ถูก ไม่ใช่แค่ "ผิด" */
+export const AMOUNT_FORMAT_HINT = 'ใส่ตัวเลข เช่น 1,500.50';
+
 export function formatDateTime(isoTimestamp: string): string {
   return new Date(isoTimestamp).toLocaleString('th-TH', {
     day: 'numeric',

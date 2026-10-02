@@ -20,8 +20,14 @@ end`;
 export const EFFECTIVE_REVIEW_STATUS_SQL = "coalesce(an.review_status, 'reviewed')";
 
 // รายงาน (summary/cash-flow/category-breakdown) ตัดทั้งคู่โอนภายในและรายการที่ผู้ใช้ excluded เอง —
-// แต่ list ธุรกรรม (TXN_FILTER_SQL) ต้องไม่ใช้ตัวนี้ ผู้ใช้ต้องยังเห็น internal transfer ในตารางได้ (§8.3/§8.4)
+// แต่ list ธุรกรรม (TXN_FILTER_SQL) ห้ามใช้ตัวนี้กรองทั้งรายการ ผู้ใช้ต้องยังเห็น internal transfer ในตารางได้ (§8.3/§8.4)
+// ยกเว้นผ่าน IS_UNCATEGORISED_SQL ด้านล่างเท่านั้น
 export const EXCLUDED_FROM_FLOW_SQL = `(${IS_INTERNAL_TRANSFER_SQL} or coalesce(an.classification, '') = 'excluded')`;
+
+// "ยังไม่จัดหมวด" นิยามเดียวทั้งระบบ: ไม่มี split และอยู่ใน flow รายรับ/รายจ่าย — คู่โอนภายใน/excluded ไม่ต้องจัดหมวด
+// ใช้ร่วมกันระหว่าง uncategorised_count ของ /reports/summary กับ filter uncategorised=true ของ /transactions
+// ถ้าแยกเขียนสองที่ chip หน้าธุรกรรมกับการ์ดแดชบอร์ดจะนับไม่ตรงกัน และคู่โอนจะค้างในคิวตลอดไป
+export const IS_UNCATEGORISED_SQL = `(not exists (select 1 from txn_split s where s.txn_id = t.id) and not ${EXCLUDED_FROM_FLOW_SQL})`;
 
 /**
  * "ผู้ใช้มี Tax Entity ที่ใช้งานอยู่แค่ตัวเดียว → คืน id ของตัวนั้น ไม่งั้นคืน NULL"
@@ -208,7 +214,7 @@ export const TXN_FILTER_SQL = `
     and ($4::bigint is null or t.bank_account_id = $4)
     and ($5::bigint is null or a.bank_id = $5)
     and ($6::bigint is null or exists (select 1 from txn_split s where s.txn_id = t.id and s.category_id = $6))
-    and ($7::boolean is false or not exists (select 1 from txn_split s2 where s2.txn_id = t.id))
+    and ($7::boolean is false or ${IS_UNCATEGORISED_SQL})
     and ($8::text is null or t.direction = $8)
     and ($9::text is null or a.account_purpose = $9)
     and ($10::boolean is null or (${IS_INTERNAL_TRANSFER_SQL}) = $10)

@@ -800,11 +800,9 @@ export default function MonthlyPlan() {
                 dense
                 title="เงินเหลือใช้ตามแผน"
                 value={
-                  // Money แสดงค่าสัมบูรณ์ ติดลบต้องมี "−" ด้วย ไม่ใช่บอกด้วยสีแดงอย่างเดียว (Semantic Color Rule)
                   <Money
                     satang={plan.totals.planned_available_satang}
                     tone={plan.totals.planned_available_satang < 0 ? 'expense' : 'income'}
-                    showSign={plan.totals.planned_available_satang < 0}
                   />
                 }
                 caption="รายได้เต็ม − รายการหัก − รายจ่ายตามแผน − เงินกันไว้"
@@ -1022,7 +1020,7 @@ export default function MonthlyPlan() {
                                         {item.paid_satang < item.planned_amount_satang
                                           ? 'ต่ำกว่าประมาณ '
                                           : 'สูงกว่าประมาณ '}
-                                        <Money satang={item.paid_satang - item.planned_amount_satang} />
+                                        <Money satang={Math.abs(item.paid_satang - item.planned_amount_satang)} />
                                       </Typography>
                                     )}
                                 </Stack>

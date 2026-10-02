@@ -229,7 +229,7 @@ export default function Dashboard() {
         { label: 'statement ที่มีปัญหา', n: parseFailed + checksumFailed, to: '#statement-failures' },
         { label: 'บัญชีข้อมูลช้า', n: behindCount, to: '#data-freshness' },
         { label: 'ยังไม่จัดหมวด', n: summary?.uncategorised_count ?? 0, to: txnLink({ uncategorised: '1' }) },
-        { label: 'ยังไม่ตรวจสอบ', n: summary?.unreviewed_count ?? 0, to: txnLink({ review_status: 'unreviewed' }) },
+        { label: 'ยังไม่ตรวจ', n: summary?.unreviewed_count ?? 0, to: txnLink({ review_status: 'unreviewed' }) },
       ].filter((i) => i.n > 0)
     : [];
   const hadIssues = useRef(false);
@@ -425,7 +425,7 @@ export default function Dashboard() {
                   loading={moneyLoading}
                   disabled={pendingReason != null}
                   disabledReason={pendingReason ?? undefined}
-                  title="ยังไม่ตรวจสอบ"
+                  title="ยังไม่ตรวจ"
                   icon={<FactCheckRounded fontSize="small" />}
                   value={summary && <IssueCount n={summary.unreviewed_count} />}
                   caption="รายการ"
@@ -523,7 +523,7 @@ export default function Dashboard() {
                 loading={!plan}
                 title="เงินเหลือใช้ตามแผน"
                 icon={<EventRepeatRounded fontSize="small" />}
-                value={plan && <Money satang={plan.totals.planned_available_satang} tone={plan.totals.planned_available_satang < 0 ? 'expense' : 'income'} showSign={plan.totals.planned_available_satang < 0} />}
+                value={plan && <Money satang={plan.totals.planned_available_satang} tone={plan.totals.planned_available_satang < 0 ? 'expense' : 'income'} />}
                 caption="รายได้เต็ม − รายการหัก − รายจ่ายตามแผน − เงินกันไว้"
                 // GET /monthly-plans/:month สร้างแถวแผนให้เองแบบ lazy เพราะฉะนั้น plan ไม่เคยเป็น null
                 // สำหรับเดือนที่เปิดดูได้ — เช็ค items.length ด้วย ไม่งั้นเดือนที่ไม่มีแผนเลยจะโชว์ ฿0.00
