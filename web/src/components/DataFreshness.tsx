@@ -45,45 +45,53 @@ export default function DataFreshness({ accounts }: { accounts: AccountCoverage[
         </Button>
       </Stack>
       <Stack spacing={1.5}>
-        {accounts.map((a) => (
-          <Stack
-            key={a.bank_account_id}
-            direction={{ xs: 'column', sm: 'row' }}
-            spacing={{ xs: 0.5, sm: 2 }}
-            sx={{ alignItems: { sm: 'center' }, justifyContent: 'space-between', py: 1, borderBottom: 1, borderColor: 'divider', '&:last-child': { borderBottom: 0, pb: 0 } }}
-          >
-            <Box sx={{ minWidth: 0 }}>
-              <Typography sx={{ fontWeight: 600 }}>{a.account_nickname}</Typography>
-              {/* ชื่อเรียกที่ตั้งเป็นชื่อธนาคารอยู่แล้ว ("KBank") ไม่ต้องซ้ำอีกบรรทัด */}
-              {a.bank_name !== a.account_nickname && (
-                <Typography variant="body2" color="text.secondary">{a.bank_name}</Typography>
-              )}
-              <Typography variant="body2" color="text.secondary" sx={dataTextSx}>
-                {a.latest_txn_date ? `รายการล่าสุด ${formatDate(a.latest_txn_date)} (${ago(a.latest_txn_date)})` : 'ยังไม่มีรายการ'}
-                {a.last_synced_at && ` · ซิงก์ล่าสุด ${formatDateTime(a.last_synced_at)}`}
-              </Typography>
-              {a.statement_behind && !a.reauth_required_at && (
-                <Typography variant="body2" sx={{ ...dataTextSx, color: 'warning.main' }}>{behindText(a)}</Typography>
-              )}
-              {a.statement_awaiting && !a.statement_behind && !a.reauth_required_at && (
-                <Typography variant="body2" color="text.secondary" sx={dataTextSx}>{awaitingText}</Typography>
-              )}
-            </Box>
-            <Box sx={{ flexShrink: 0 }}>
-              {a.reauth_required_at ? (
-                // ซิงก์หยุดแล้วจนกว่าจะเชื่อมใหม่ — สำคัญกว่าสถานะความครบของ statement จึงแสดงแทน
-                // ไม่ทำเป็นลิงก์เพราะ chip เล็กสูง 28px ต่ำกว่า tap target 40px — ปุ่มไปหน้าบัญชีของฉันอยู่หัวกล่องนี้
-                <Chip size="small" icon={<LinkOffRounded />} label="ต้องเชื่อม Gmail ใหม่" color="error" variant="outlined" />
-              ) : a.statement_behind ? (
-                <Chip size="small" icon={<WarningAmberRounded />} label="ข้อมูลช้า" color="warning" variant="outlined" />
-              ) : a.statement_awaiting ? (
-                <Chip size="small" icon={<HourglassEmptyRounded />} label="รอ statement" variant="outlined" />
-              ) : (
-                <Chip size="small" icon={<CheckCircleRounded />} label="ข้อมูลล่าสุด" color="success" variant="outlined" />
-              )}
-            </Box>
-          </Stack>
-        ))}
+        {accounts.map((a) => {
+          const calm = !a.statement_behind && !a.reauth_required_at;
+          return (
+            <Stack
+              key={a.bank_account_id}
+              direction={{ xs: 'column', sm: 'row' }}
+              spacing={{ xs: 0.5, sm: 2 }}
+              sx={{ alignItems: { sm: 'center' }, justifyContent: 'space-between', py: 1, borderBottom: 1, borderColor: 'divider', '&:last-child': { borderBottom: 0, pb: 0 } }}
+            >
+              <Box sx={{ minWidth: 0 }}>
+                <Typography sx={{ fontWeight: 600 }}>{a.account_nickname}</Typography>
+                {/* ชื่อเรียกที่ตั้งเป็นชื่อธนาคารอยู่แล้ว ("KBank") ไม่ต้องซ้ำอีกบรรทัด */}
+                {a.bank_name !== a.account_nickname && (
+                  <Typography variant="body2" color="text.secondary">{a.bank_name}</Typography>
+                )}
+                {/* แถวที่ปกติ/รอ statement: บรรทัดหลักคือ statement ครอบคลุมถึงวันไหน — "(59 วันที่แล้ว)" ของรายการล่าสุดอ่านขัดกับ chip
+                    ที่บอกว่าปกติ (บัญชีที่ไม่ค่อยมีรายการ) จึงเหลือแค่วันที่ในบรรทัดรอง อายุของรายการเก็บไว้เฉพาะแถวข้อมูลช้า/ต้องเชื่อมใหม่ */}
+                {calm && a.latest_parsed_period_end && (
+                  <Typography variant="body2" sx={dataTextSx}>statement ล่าสุดถึง {formatDate(a.latest_parsed_period_end)}</Typography>
+                )}
+                {a.statement_awaiting && calm && (
+                  <Typography variant="body2" color="text.secondary" sx={dataTextSx}>{awaitingText}</Typography>
+                )}
+                <Typography variant="body2" color="text.secondary" sx={dataTextSx}>
+                  {a.latest_txn_date ? `รายการล่าสุด ${formatDate(a.latest_txn_date)}${calm ? '' : ` (${ago(a.latest_txn_date)})`}` : 'ยังไม่มีรายการ'}
+                  {a.last_synced_at && ` · ซิงก์ล่าสุด ${formatDateTime(a.last_synced_at)}`}
+                </Typography>
+                {a.statement_behind && !a.reauth_required_at && (
+                  <Typography variant="body2" sx={{ ...dataTextSx, color: 'warning.main' }}>{behindText(a)}</Typography>
+                )}
+              </Box>
+              <Box sx={{ flexShrink: 0 }}>
+                {a.reauth_required_at ? (
+                  // ซิงก์หยุดแล้วจนกว่าจะเชื่อมใหม่ — สำคัญกว่าสถานะความครบของ statement จึงแสดงแทน
+                  // ไม่ทำเป็นลิงก์เพราะ chip เล็กสูง 28px ต่ำกว่า tap target 40px — ปุ่มไปหน้าบัญชีของฉันอยู่หัวกล่องนี้
+                  <Chip size="small" icon={<LinkOffRounded />} label="ต้องเชื่อม Gmail ใหม่" color="error" variant="outlined" />
+                ) : a.statement_behind ? (
+                  <Chip size="small" icon={<WarningAmberRounded />} label="ข้อมูลช้า" color="warning" variant="outlined" />
+                ) : a.statement_awaiting ? (
+                  <Chip size="small" icon={<HourglassEmptyRounded />} label="รอ statement" variant="outlined" />
+                ) : (
+                  <Chip size="small" icon={<CheckCircleRounded />} label="ข้อมูลล่าสุด" color="success" variant="outlined" />
+                )}
+              </Box>
+            </Stack>
+          );
+        })}
       </Stack>
     </Paper>
   );

@@ -1,7 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { Box, IconButton, Stack, TextField, Tooltip } from '@mui/material';
 import ChevronLeftRounded from '@mui/icons-material/ChevronLeftRounded';
 import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded';
+import CalendarMonthRounded from '@mui/icons-material/CalendarMonthRounded';
 import { dataTextSx } from '../theme.js';
 import { formatMonth } from '../format.js';
 import { visuallyHiddenSx } from '../ui.js';
@@ -31,9 +32,29 @@ export function validMonth(value: string | null | undefined, max: string): strin
 // keyboardShortcut: ←/→ ทั้งหน้าเปลี่ยนเดือน (แดชบอร์ด) — tooltip ของลูกศรบอกคีย์ลัดเฉพาะหน้าที่เปิดไว้
 type MonthPickerProps = { value: string; onChange: (month: string) => void; maxMonth?: string; keyboardShortcut?: boolean };
 
+// เบราว์เซอร์ที่มี type=month จริง (Chrome/Edge/มือถือ) — Firefox/Safari เดสก์ท็อปตีเป็นช่องข้อความ อ่าน type กลับได้ 'text'
+const nativeMonthInput = typeof document !== 'undefined' && (() => {
+  const input = document.createElement('input');
+  input.type = 'month';
+  return input.type === 'month';
+})();
+
+// ช่องจริงโปร่งใส (opacity 0) จึงไม่เห็นไอคอนปฏิทินของเบราว์เซอร์ — คลิก/Enter/Space เปิด picker ให้แทน (Chrome เดสก์ท็อปคลิกที่ตัวช่อง
+// แค่เลือกส่วนของวันที่) ถ้า showPicker ไม่ได้ (ไม่มีเมธอด/ไม่มี user activation) ช่องยังเป็น input ของเบราว์เซอร์ที่แก้ด้วย ↑/↓
+// กดไอคอนปฏิทินที่อยู่ใต้ไอคอนของเรา และแตะเปิดเองบนมือถือได้ ไม่มีทางตัน
+function openPicker(input: HTMLInputElement) {
+  try {
+    input.showPicker();
+  } catch {
+    // ไม่มี picker ให้เปิด — ปล่อยตามปกติของเบราว์เซอร์
+  }
+}
+
 // input[type=month] ของเบราว์เซอร์เอง — ไม่ต้องพึ่ง date picker library (§8.1: เปิดที่เดือนปัจจุบัน เลือกย้อนหลังได้)
-// ข้อความในช่องเป็นภาษาของเบราว์เซอร์ ("September 2026" ยาวสุด) — มือถือให้ช่องยืดเต็มแถวแทนความกว้างตายตัว
-// ที่ 320px: 288 − ลูกศร 2×40 − ช่องไฟ 2×4 ≈ 200px ไม่ตัดคำ และลูกศรถัดไปไม่หลุดจอ
+// ข้อความของเบราว์เซอร์เป็นภาษา/ปฏิทินของเครื่อง ("October 2026") ไม่ตรงกับ live region และทั้งแอป ("ตุลาคม 2569") — เบราว์เซอร์ที่มี
+// type=month จึงทำช่องจริงให้โปร่งใส (ยังรับ focus, ชื่อ "เดือน" จาก label, picker ของเบราว์เซอร์) แล้ววางเดือนไทย พ.ศ. + ไอคอนปฏิทินทับ
+// (aria-hidden, pointer-events none — คลิกทะลุถึงช่องจริง ไอคอนอยู่ตรงปุ่มปฏิทินของเบราว์เซอร์) เบราว์เซอร์ที่ไม่มี type=month ใช้ช่องเดิมตรง ๆ
+// มือถือให้ช่องยืดเต็มแถวแทนความกว้างตายตัว ที่ 320px: 288 − ลูกศร 2×40 − ช่องไฟ 2×4 ≈ 200px ("พฤศจิกายน 2569" ยาวสุด) ลูกศรถัดไปไม่หลุดจอ
 export default function MonthPicker({ value, onChange, maxMonth, keyboardShortcut = false }: MonthPickerProps) {
   const max = maxMonth ?? currentMonth();
   const go = (delta: number) => {
@@ -76,7 +97,30 @@ export default function MonthPicker({ value, onChange, maxMonth, keyboardShortcu
           const next = validMonth(event.target.value, max);
           if (next) onChange(next);
         }}
-        slotProps={{ htmlInput: { max, sx: dataTextSx } }}
+        slotProps={nativeMonthInput ? {
+          input: {
+            startAdornment: (
+              <Box
+                component="span"
+                aria-hidden
+                sx={{ ...dataTextSx, position: 'absolute', inset: 0, px: 1.75, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, pointerEvents: 'none', whiteSpace: 'nowrap', overflow: 'hidden' }}
+              >
+                {formatMonth(value, 'numeric', 'long')}
+                <CalendarMonthRounded fontSize="small" sx={{ color: 'action.active' }} />
+              </Box>
+            ),
+          },
+          htmlInput: {
+            max,
+            sx: { ...dataTextSx, opacity: 0, cursor: 'pointer' },
+            onClick: (event: ReactMouseEvent<HTMLInputElement>) => openPicker(event.currentTarget),
+            onKeyDown: (event: ReactKeyboardEvent<HTMLInputElement>) => {
+              if (event.key !== 'Enter' && event.key !== ' ') return;
+              event.preventDefault();
+              openPicker(event.currentTarget);
+            },
+          },
+        } : { htmlInput: { max, sx: dataTextSx } }}
         sx={{ flex: { xs: 1, sm: 'none' }, minWidth: 0, width: { sm: 196 } }}
       />
       <Tooltip title={`เดือนถัดไป${hintNext}`}>

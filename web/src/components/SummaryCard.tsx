@@ -5,6 +5,7 @@ import type { SxProps, Theme } from '@mui/material/styles';
 import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded';
 import InfoOutlined from '@mui/icons-material/InfoOutlined';
 import { dataTextSx, radii } from '../theme.js';
+import { visuallyHiddenSx } from '../ui.js';
 
 type SummaryCardProps = {
   title: string;
@@ -80,7 +81,13 @@ export default function SummaryCard({ title, icon, value, caption, to, onClick, 
           fontSize: dense ? { xs: '1.25rem', md: '1.125rem', lg: '1.5rem' } : { xs: '1.25rem', sm: '1.5rem', lg: '1.75rem' },
         }}
       >
-        {loading ? <Skeleton width="60%" /> : disabled ? '—' : value}
+        {/* "—" ล้วน screen reader อ่านเป็น "ขีด" หรือข้ามไป — ซ่อนจาก AT แล้วให้ข้อความแทน */}
+        {loading ? <Skeleton width="60%" /> : disabled ? (
+          <>
+            <span aria-hidden>—</span>
+            <Box component="span" sx={visuallyHiddenSx}>ยังไม่มีข้อมูล</Box>
+          </>
+        ) : value}
       </Box>
       {!loading && ((caption != null && !captionAsTip) || (disabled && disabledReason)) && (
         <Typography variant="body2" color="text.secondary">

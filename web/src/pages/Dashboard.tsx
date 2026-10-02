@@ -32,7 +32,7 @@ import {
 import ChartCard, { type ChartTable } from '../components/ChartCard.js';
 import DataFreshness from '../components/DataFreshness.js';
 import Money from '../components/Money.js';
-import MonthPicker, { currentMonth, validMonth } from '../components/MonthPicker.js';
+import MonthPicker, { currentMonth, shiftMonth, validMonth } from '../components/MonthPicker.js';
 import SummaryCard, { summaryRowSx } from '../components/SummaryCard.js';
 import { dataTextSx, tokens } from '../theme.js';
 import { formatBaht, formatDate, formatDateTime, formatDayMonth, formatMonth } from '../format.js';
@@ -103,15 +103,23 @@ function colorsByIdentity(ids: (number | null)[], palette: readonly string[]): s
   });
 }
 
-// จอสัมผัส (hover: none) ไม่มี hover ให้เห็น tooltip ก่อนกด — แตะแรกแค่โชว์ tooltip, แตะซ้ำจุดเดิมภายใน 4 วินาทีจึงไปหน้ารายการ
-// (เกินนั้นนับเป็นแตะแรกใหม่) เมาส์/คีย์บอร์ดยังไปทันทีเหมือนเดิม key ต้องไม่ซ้ำข้ามกราฟ (ใส่ชื่อกราฟนำหน้า)
+// นิ้วไม่มี hover ให้เห็น tooltip ก่อนกด — แตะแรกแค่โชว์ tooltip, แตะซ้ำจุดเดิมภายใน 4 วินาทีจึงไปหน้ารายการ
+// (เกินนั้นนับเป็นแตะแรกใหม่) key ต้องไม่ซ้ำข้ามกราฟ (ใส่ชื่อกราฟนำหน้า)
+// ดูที่ "เหตุการณ์" ไม่ใช่ "อุปกรณ์": click ที่มี pointerdown แบบ touch นำหน้าเท่านั้นที่ต้องแตะซ้ำ — เมาส์/ปากกา และ Enter จาก
+// คีย์บอร์ด (keyboardActivation ไม่มี pointerdown นำ) ไปทันทีแม้บนจอสัมผัส · pointerType ถูกอ่านแล้วล้างทุกครั้ง และนับเฉพาะ
+// pointerdown ภายใน 1 วินาทีก่อน click ไม่งั้นแตะที่ว่างแล้วกด Enter ทีหลังจะถูกนับเป็นแตะแรก
 // ไม่ยกเลิกตอน tooltip ปิด: บนจอสัมผัส x-charts ปิด tooltip ตอนยกนิ้ว (pointerleave หลัง pointerup) ซึ่งมาก่อน click
 // ถ้ายกเลิกตรงนั้น แตะที่สองจะกลายเป็นแตะแรกเสมอและไม่มีทางไปหน้ารายการได้
 const TAP_ARM_MS = 4000;
+const POINTER_TO_CLICK_MS = 1000;
 function useTapToNavigate() {
-  const touch = useMediaQuery('(hover: none)', { noSsr: true });
+  const pointer = useRef<{ type: string; at: number } | null>(null);
   const armed = useRef<{ key: string; at: number } | null>(null);
-  return (key: string, go: () => void) => {
+  const onPointerDownCapture = (e: { pointerType: string }) => { pointer.current = { type: e.pointerType, at: Date.now() }; };
+  const tap = (key: string, go: () => void) => {
+    const p = pointer.current;
+    pointer.current = null;
+    const touch = p?.type === 'touch' && Date.now() - p.at < POINTER_TO_CLICK_MS;
     const a = armed.current;
     if (touch && (a?.key !== key || Date.now() - a.at > TAP_ARM_MS)) {
       armed.current = { key, at: Date.now() };
@@ -120,23 +128,27 @@ function useTapToNavigate() {
     armed.current = null;
     go();
   };
+  return { onPointerDownCapture, tap };
 }
 
-// คู่กับ useTapToNavigate: tooltip บนจอสัมผัสบอกว่าแตะซ้ำจะเปิดรายการ — tooltip ของ x-charts render ใน DOM ของกราฟ
-// (container = layer ของกราฟเอง) sx ของกราฟจึงไปถึง paper ของมัน
+// คู่กับ useTapToNavigate: tooltip บนจอสัมผัส (hover: none) บอกว่าแตะซ้ำจะเปิดรายการ — tooltip ของ x-charts render ใน DOM
+// ของกราฟ (container = layer ของกราฟเอง) sx ของกราฟจึงไปถึง paper ของมัน · เครื่องที่มีทั้งเมาส์และจอสัมผัส (hover: hover)
+// ไม่เห็นบรรทัดนี้ แต่แตะด้วยนิ้วก็ยังต้องแตะซ้ำ
 const tapHintSx = {
   '@media (hover: none)': {
-    '& .MuiChartsTooltip-paper::after': { content: '"แตะอีกครั้งเพื่อเปิดรายการ"', display: 'block', px: 1.5, pb: 1, fontSize: '0.75rem', color: 'text.secondary' },
+    '& .MuiChartsTooltip-paper::after': { content: '"แตะอีกครั้งเพื่อเปิดรายการ"', display: 'block', px: 1.5, pb: 1, fontSize: '0.875rem', color: 'text.secondary' },
   },
 } as const;
 
 // สี chart ของธีมบางสีแทบเท่าพื้นการ์ด (สว่าง chart-3 1.10, มืด chart-5 1.07 — DESIGN.md Contrast) จึงไม่เปลี่ยนสี แต่ใส่ขอบ
-// muted-foreground ให้ชิ้น/จุด (บน card สว่าง 4.88 / มืด 6.75 ผ่าน 3:1) และช่องสีใน legend/tooltip (svg 13×13 ตัดขอบครึ่งนอกทิ้ง
-// เส้น 3 จึงเหลือเห็น 1.5 เท่าชิ้น) — selector ชิ้นของพาย ต้องเว้น focusIndicator (ใช้ class arc ร่วม) ไม่งั้นวง focus หนา 3 ถูกทับ
+// muted-foreground ให้ชิ้น/จุด (บน card สว่าง 4.88 / มืด 6.75 ผ่าน 3:1) และช่องสีใน legend/tooltip (rect 13×13 / circle 15×15
+// เต็มกรอบ svg ขอบครึ่งนอกถูกตัดทิ้ง เส้น 3 จึงเหลือเห็น 1.5 เท่าชิ้น) — พายเป็น circle อยู่แล้ว กราฟเส้นตั้ง labelMarkType 'circle'
+// เพราะค่าเริ่มต้น 'line+mark' เป็น path เส้นสีของอนุกรม ใส่ขอบแล้วสีเส้นจะเปลี่ยน
+// selector ชิ้นของพาย ต้องเว้น focusIndicator (ใช้ class arc ร่วม) ไม่งั้นวง focus หนา 3 ถูกทับ
 function chartOutlineSx(itemSelector: string, stroke: string) {
   return {
     [itemSelector]: { stroke, strokeWidth: 1.5 },
-    '& rect.MuiChartsLabelMark-fill': { stroke, strokeWidth: 3 },
+    '& :is(rect, circle).MuiChartsLabelMark-fill': { stroke, strokeWidth: 3 },
   };
 }
 
@@ -173,6 +185,10 @@ export default function Dashboard() {
   const categoryPalette = chartTokens.categoryPalette;
   // จอแคบ (การ์ดกราฟกว้าง ~256px ที่ 320px) legend ด้านขวาบีบวงกลมจนเล็ก — ย้ายไปไว้ล่าง
   const narrow = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'), { noSsr: true });
+  // จอสัมผัส: tooltip ของกราฟแท่ง/เส้นขึ้นเฉพาะตอนแตะโดนแท่ง/จุดจริง (ค่าเริ่มต้น 'axis' ขึ้นทั้งแถบเดือน แม้แตะที่ว่างซึ่งแตะซ้ำแล้วไม่ไปไหน)
+  // พายเป็น 'item' อยู่แล้ว
+  const touch = useMediaQuery('(hover: none)', { noSsr: true });
+  const tooltipTrigger = touch ? 'item' : 'axis';
 
   // วันที่ข้อมูลล่าสุด = latest_txn_date ที่ใหม่สุดข้ามทุกบัญชี — บอกว่าเดือนที่เลือก "ยังไม่มี statement" หรือ "ยอด 0 จริง"
   const latestDate = coverage?.reduce<string | null>((max, a) => (a.latest_txn_date && (max == null || a.latest_txn_date > max) ? a.latest_txn_date : max), null) ?? null;
@@ -181,11 +197,15 @@ export default function Dashboard() {
   // (ยอดคงเหลือรวมยังแสดงได้ — เป็นยอดล่าสุดที่รู้ บอกวันที่กำกับไว้)
   const pendingReason = coverage == null ? null
     : latestMonth == null ? 'ยังไม่มี statement ในระบบ'
-    : latestMonth < month ? 'รอ statement ของเดือนนี้'
+    : latestMonth < month ? 'รอ statement'
     : null;
   // รอ coverage ด้วย ไม่งั้นการ์ดแวบเป็น ฿0.00 ก่อนเปลี่ยนเป็นเส้นประ
   const moneyLoading = !summary || coverageLoad.status === 'loading';
-  const tapToNavigate = useTapToNavigate();
+  const { onPointerDownCapture, tap: tapToNavigate } = useTapToNavigate();
+  // statement ของเดือนที่แล้วยังอยู่ในช่วงผ่อนผัน (The Awaiting Statement Rule) และไม่มีบัญชีที่ต้องจัดการ — ประกาศด้านบนบอกครั้งเดียว
+  // ว่าไม่ต้องทำอะไร การ์ดเหลือแค่ "รอ statement" สั้น ๆ · มีบัญชีข้อมูลช้า/ต้องเชื่อม Gmail ใหม่ "ไม่ต้องทำอะไร" ไม่จริง จึงไม่บอก
+  const awaitingOnly = coverage != null && coverage.some((a) => a.statement_awaiting)
+    && !coverage.some((a) => a.statement_behind || a.reauth_required_at);
 
   // ทุกการ์ด/กราฟคำนวณจาก EXCLUDED_FROM_FLOW_SQL (ตัดโอนภายในออกแล้ว) ยกเว้นการ์ดโอนภายในเอง — ต้องส่ง
   // is_internal_transfer=false เป็นค่าตั้งต้นเสมอ ไม่งั้น list ปลายทางรวมโอนภายในที่การ์ดตัดออกไปแล้ว ตัวเลข
@@ -224,6 +244,7 @@ export default function Dashboard() {
       ? `statement ${formatMonth(month)} ยังไม่มา`
       : `statement ช่วง ${formatMonth(fromMonth, '2-digit')} – ${formatMonth(month, '2-digit')} ยังไม่มา`;
   };
+  const monthChartsPending = pendingMessage(month) != null && breakdown?.rows.length === 0 && balances?.rows.length === 0;
   const baht = (satang: number) => `฿${formatBaht(satang)}`;
   // เดือนในกราฟ 6 เดือนที่อยู่หลังเดือนข้อมูลล่าสุด = statement ยังไม่มา ไม่ใช่ ฿0 — แท่งเป็น null (ไม่วาด) tooltip/ตารางบอก
   // "ยังไม่มี statement" และบรรทัดช่วงเวลาบอกว่าเดือนไหน (เป็นช่วงท้ายติดกันเสมอ) · coverage ยังไม่มา = ยังไม่ตัดสิน
@@ -270,8 +291,17 @@ export default function Dashboard() {
           </Alert>
         ) : latestMonth < month ? (
           <Alert severity="info" variant="outlined" role="status">
-            {month === currentMonth() ? 'statement ของเดือนนี้ยังไม่มา' : `statement ของ ${formatMonth(month)} ยังไม่มา`} — ข้อมูลล่าสุดถึง{' '}
-            <Box component="span" sx={dataTextSx}>{formatDate(latestDate)}</Box>
+            {awaitingOnly ? (
+              <>
+                ข้อมูลล่าสุดถึง <Box component="span" sx={dataTextSx}>{formatDate(latestDate)}</Box>
+                {` · statement ${formatMonth(shiftMonth(currentMonth(), -1), 'none')} ปกติมาภายในวันที่ 10 ไม่ต้องทำอะไร`}
+              </>
+            ) : (
+              <>
+                {month === currentMonth() ? 'statement ของเดือนนี้ยังไม่มา' : `statement ของ ${formatMonth(month)} ยังไม่มา`} — ข้อมูลล่าสุดถึง{' '}
+                <Box component="span" sx={dataTextSx}>{formatDate(latestDate)}</Box>
+              </>
+            )}
             <Box sx={{ mt: 1 }}>
               <Button variant="contained" size="small" onClick={() => setMonth(latestMonth)}>ไปเดือนล่าสุดที่มีข้อมูล</Button>
             </Box>
@@ -376,16 +406,18 @@ export default function Dashboard() {
             <>
               <Box sx={summaryRowSx(5)}>
                 {/* นับรายการของเดือนที่เลือก: เดือนที่ statement ยังไม่มาใช้เส้นประ + เหตุผลเดียวกับแถวเงินจริง (0 ที่นี่ไม่ได้แปลว่า
-                    จัดครบแล้ว) และรอ coverage เหมือนกัน ไม่งั้น 0 แวบก่อนเป็นเส้นประ · 0 = ไม่มีรายการให้ไปดู จึงไม่เป็นลิงก์ */}
+                    จัดครบแล้ว) และรอ coverage เหมือนกัน ไม่งั้น 0 แวบก่อนเป็นเส้นประ · 0 = ไม่มีรายการให้ไปดู จึงไม่เป็นลิงก์
+                    หน่วย "รายการ" เป็นบรรทัด (captionInline) เหมือนการ์ด statement — ปุ่ม ⓘ ที่มีแค่คำว่า "รายการ" ไม่ได้อธิบายอะไร */}
                 <SummaryCard
                   dense
                   loading={moneyLoading}
                   disabled={pendingReason != null}
                   disabledReason={pendingReason ?? undefined}
-                  title="ยังไม่ได้จัดหมวด"
+                  title="ยังไม่จัดหมวด"
                   icon={<CategoryRounded fontSize="small" />}
                   value={summary && <IssueCount n={summary.uncategorised_count} />}
                   caption="รายการ"
+                  captionInline
                   to={summary && summary.uncategorised_count > 0 ? txnLink({ uncategorised: '1' }) : undefined}
                 />
                 <SummaryCard
@@ -397,6 +429,7 @@ export default function Dashboard() {
                   icon={<FactCheckRounded fontSize="small" />}
                   value={summary && <IssueCount n={summary.unreviewed_count} />}
                   caption="รายการ"
+                  captionInline
                   to={summary && summary.unreviewed_count > 0 ? txnLink({ review_status: 'unreviewed' }) : undefined}
                 />
                 {/* ทั้งสองใบไปที่รายการไฟล์ด้านล่าง (บอกสาเหตุและทางแก้ทีละไฟล์ เหมือนปุ่มในแถบ "ต้องจัดการ")
@@ -542,7 +575,21 @@ export default function Dashboard() {
           <Typography variant="h2" id="charts-heading" sx={sectionHeadingSx}>แนวโน้ม</Typography>
           {/* min(100%, 320px): ที่ 320px จอเหลือ 288px — minmax(320px) เฉย ๆ ดันการ์ดล้นจอ */}
           {/* alignItems start: การ์ดที่ว่าง (กล่องเตี้ย) ไม่ถูกยืดสูงตามกราฟใบข้าง ๆ */}
-          <Box sx={{ display: 'grid', gap: 2, alignItems: 'start', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))' }}>
+          {/* กราฟของเดือนที่เลือกว่างทั้งสองใบเพราะ statement ยังไม่มา: ≥ md เป็น 2 คอลัมน์ กราฟ 6 เดือนกินเต็มแถว กล่องว่างสองใบอยู่คู่กันใต้มัน
+              (auto-fit เป็น 3 คอลัมน์ตั้งแต่ ~1040px — span 2 ใน 3 คอลัมน์ทิ้งกล่องว่างใบที่สองไว้แถวล่างใบเดียว)
+              pointerdown ของทุกกราฟผ่านกล่องนี้ — บอก useTapToNavigate ว่า click ที่ตามมาเป็นนิ้วหรือไม่ */}
+          <Box
+            onPointerDownCapture={onPointerDownCapture}
+            sx={{
+              display: 'grid',
+              gap: 2,
+              alignItems: 'start',
+              gridTemplateColumns: monthChartsPending
+                ? { xs: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', md: 'repeat(2, minmax(0, 1fr))' }
+                : 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))',
+              ...(monthChartsPending && { '& > :first-of-type': { gridColumn: { md: 'span 2' } } }),
+            }}
+          >
             <ChartCard
               title="รายรับเทียบรายจ่ายรายเดือน"
               period={`6 เดือนล่าสุด: ${formatMonth(from.slice(0, 7), '2-digit')} – ${formatMonth(month, '2-digit')}${noStatementNote}`}
@@ -591,7 +638,7 @@ export default function Dashboard() {
                     const row = cashFlow.rows[item.dataIndex];
                     if (row) tapToNavigate(`bar:${item.seriesId}:${item.dataIndex}`, () => navigate(`/transactions?${new URLSearchParams({ month: row.month, is_internal_transfer: 'false', direction: item.seriesId === 'income' ? 'credit' : 'debit' }).toString()}`));
                   }}
-                  slotProps={{ legend: { direction: 'horizontal', position: { vertical: 'top', horizontal: 'end' } } }}
+                  slotProps={{ tooltip: { trigger: tooltipTrigger }, legend: { direction: 'horizontal', position: { vertical: 'top', horizontal: 'end' } } }}
                 />
               )}
             </ChartCard>
@@ -677,6 +724,10 @@ export default function Dashboard() {
                         connectNulls: true,
                         // x-charts 9 ไม่วาดจุดถ้าไม่สั่ง — ไม่มีจุด onMarkClick ก็ไม่มีวันถูกเรียก (คลิก/Enter บนเส้นไม่เจาะดูรายการ)
                         showMark: true,
+                        // จุดทุกอนุกรมเป็นวงกลม (ค่าเริ่มต้นวนรูป วงกลม/สี่เหลี่ยม/ข้าวหลามตัด…) ให้ตรงกับช่องสีใน legend/tooltip ที่เป็นวงกลม
+                        // — ค่าเริ่มต้น 'line+mark' เป็น path เส้นสีของอนุกรม ใส่ขอบ chart outline แล้วสีเส้นเปลี่ยน
+                        shape: 'circle' as const,
+                        labelMarkType: 'circle' as const,
                       };
                     })}
                     // จุดเป็นวงสีของบัญชี + ขอบ chart outline — เส้นสีที่จมหายบนการ์ด (มืด chart-5) ยังเห็นได้จากจุดของมัน
@@ -686,7 +737,7 @@ export default function Dashboard() {
                       ...Object.fromEntries(accountIds.map((id, i) => [`& [data-series="${id}"] .MuiLineChart-mark`, { fill: seriesColor(i) }])),
                     }}
                     onMarkClick={(_event, item) => tapToNavigate(`line:${item.seriesId}:${item.dataIndex ?? ''}`, () => navigate(txnLink({ bank_account_id: String(item.seriesId) })))}
-                    slotProps={{ legend: { direction: 'horizontal', position: { vertical: 'top', horizontal: 'end' } } }}
+                    slotProps={{ tooltip: { trigger: tooltipTrigger }, legend: { direction: 'horizontal', position: { vertical: 'top', horizontal: 'end' } } }}
                   />
                 );
               })()}
