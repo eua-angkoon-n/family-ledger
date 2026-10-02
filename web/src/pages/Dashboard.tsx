@@ -734,7 +734,7 @@ export default function Dashboard() {
                     sx={{
                       ...tapHintSx,
                       ...chartOutlineSx('& .MuiLineChart-mark', chartTokens.mutedForeground),
-                      ...Object.fromEntries(accountIds.map((id, i) => [`& [data-series="${id}"] .MuiLineChart-mark`, { fill: seriesColor(i) }])),
+                      ...Object.fromEntries<{ fill: string }>(accountIds.map((id, i) => [`& [data-series="${id}"] .MuiLineChart-mark`, { fill: seriesColor(i) }])),
                     }}
                     onMarkClick={(_event, item) => tapToNavigate(`line:${item.seriesId}:${item.dataIndex ?? ''}`, () => navigate(txnLink({ bank_account_id: String(item.seriesId) })))}
                     slotProps={{ tooltip: { trigger: tooltipTrigger }, legend: { direction: 'horizontal', position: { vertical: 'top', horizontal: 'end' } } }}

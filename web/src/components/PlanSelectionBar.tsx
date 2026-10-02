@@ -17,7 +17,7 @@ type Props = {
   payCount: number;
   skipCount: number;
   deleteCount: number;
-  /** เดือนปิดแล้ว หรือกำลังทำงานอยู่ */
+  /** เดือนปิดแล้ว หรือกำลังทำงานอยู่ — ปุ่มเป็น aria-disabled (ไม่ใช่ disabled) ปุ่มที่ถือ focus อยู่จึงไม่ทำ focus หลุดไป <body> */
   disabled: boolean;
   /** กำลังทำงานแบบกลุ่มของแถบนี้เอง */
   busy: boolean;
@@ -117,42 +117,26 @@ export default function PlanSelectionBar(props: Props) {
     </Box>
   );
 
-  // มือถือ: ไม่มีไอคอน ป้ายสั้นลง ปุ่มยืดเต็มแถว ให้ 3 ปุ่มพอดีแถวเดียวที่จอ 320px (ยาวเกินค่อยตัดลงแถวใหม่)
+  // มือถือ: ไม่มีไอคอน ปุ่มยืดเต็มแถว ให้ 3 ปุ่มพอดีแถวเดียวที่จอ 320px (ยาวเกินค่อยตัดลงแถวใหม่)
+  // ป้ายเดียวกันทุกขนาดจอ — "บันทึกจ่าย" คำกริยาเดียวกับปุ่มบนแถว ("จ่ายแล้ว" เป็นชื่อสถานะ ไม่ใช่ action)
   const compact = !desktop;
   const actionSx = compact ? { flex: '1 1 auto', px: 1, whiteSpace: 'nowrap' } : { whiteSpace: 'nowrap' };
+  // กดไม่ได้ = aria-disabled + กดแล้วไม่ทำอะไร (ทั้งตอนทำงานและตอนจำนวนเป็น 0) — dialog แบบกลุ่มปิดก่อนเริ่มยิง
+  // MUI คืน focus ให้ปุ่มต้นทางที่ยังอยู่ในลำดับ tab ได้ ไม่ตกไป <body>
+  const guard = (off: boolean, fn: () => void) => ({ 'aria-disabled': off, onClick: off ? undefined : fn });
   const actions = (
     <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1 }}>
-      <Button
-        variant="contained"
-        startIcon={compact ? undefined : <PaidRounded />}
-        disabled={disabled || payCount === 0}
-        onClick={onPay}
-        sx={actionSx}
-      >
-        {compact ? 'จ่าย' : 'จ่ายแล้ว'} ({payCount})
+      <Button variant="contained" startIcon={compact ? undefined : <PaidRounded />} {...guard(disabled || payCount === 0, onPay)} sx={actionSx}>
+        บันทึกจ่าย ({payCount})
       </Button>
-      <Button
-        variant="outlined"
-        color="inherit"
-        startIcon={compact ? undefined : <SkipNextRounded />}
-        disabled={disabled || skipCount === 0}
-        onClick={onSkip}
-        sx={actionSx}
-      >
+      <Button variant="outlined" color="inherit" startIcon={compact ? undefined : <SkipNextRounded />} {...guard(disabled || skipCount === 0, onSkip)} sx={actionSx}>
         ข้าม ({skipCount})
       </Button>
-      <Button
-        variant="outlined"
-        color="error"
-        startIcon={compact ? undefined : <DeleteOutlineRounded />}
-        disabled={disabled || deleteCount === 0}
-        onClick={onDelete}
-        sx={actionSx}
-      >
+      <Button variant="outlined" color="error" startIcon={compact ? undefined : <DeleteOutlineRounded />} {...guard(disabled || deleteCount === 0, onDelete)} sx={actionSx}>
         ลบ ({deleteCount})
       </Button>
       {!compact && (
-        <Button color="inherit" disabled={busy} onClick={onClear} sx={actionSx}>
+        <Button color="inherit" {...guard(busy, onClear)} sx={actionSx}>
           ล้างที่เลือก
         </Button>
       )}
@@ -190,13 +174,10 @@ export default function PlanSelectionBar(props: Props) {
               </Typography>
               {hidden}
             </Box>
-            {/* span: Tooltip ของ MUI ฟัง event จากปุ่มที่ disabled ไม่ได้ (ท่าเดียวกับปุ่มออกจากระบบใน App.tsx) */}
             <Tooltip title="ล้างที่เลือก">
-              <span>
-                <IconButton aria-label="ล้างที่เลือก" disabled={busy} onClick={onClear}>
-                  <CloseRounded />
-                </IconButton>
-              </span>
+              <IconButton aria-label="ล้างที่เลือก" {...guard(busy, onClear)}>
+                <CloseRounded />
+              </IconButton>
             </Tooltip>
             <IconButton
               aria-label="ยอดรวมของรายการที่เลือก"

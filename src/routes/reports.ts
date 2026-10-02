@@ -14,7 +14,7 @@ import {
 export const reportsRouter = Router();
 
 // ทุกหน้ารายงานต้องระบุชัด (§8.6) — ข้อมูลเงินจริงมาจาก bank statement ที่นำเข้าแล้วเท่านั้น ไม่รวมเงินสด/e-Wallet
-const DATA_COVERAGE_NOTE = 'ข้อมูลเงินจริงคำนวณจาก Bank Statement ที่นำเข้าสู่ระบบเท่านั้น ไม่รวมเงินสดและ e-Wallet';
+const DATA_COVERAGE_NOTE = 'ข้อมูลเงินจริงคำนวณจาก bank statement ที่นำเข้าสู่ระบบเท่านั้น ไม่รวมเงินสดและ e-Wallet';
 
 // GET /api/reports/summary?month=YYYY-MM
 // หนึ่ง query หลักแบบ CTE (flow/transfers/quality/balance) รวมกับ statement_health และ failed-statement list

@@ -45,6 +45,10 @@ export const ITEM_PAID_SQL = `
  * จาก `paid_satang − planned_amount_satang` ไม่เก็บซ้ำ (§7.2)
  *
  * `partial` ยังอยู่สำหรับยอดคงที่ — จ่ายบิล 5,000 ไป 1,000 คือจ่ายไม่ครบจริง ๆ ไม่ใช่การประมาณคลาด
+ *
+ * `payroll_deduction` / `reserve` ไม่มีวัน `overdue` — รายการหักถูกหักเองตอนบันทึกรายได้ และเงินกันไว้
+ * ไม่ใช่บิล เลยวันแล้วยังเป็น `unpaid` (ตารางกับตัวนับ overdue_count ที่นับเฉพาะ expense จึงตรงกัน)
+ * income ที่ยังไม่ผูก income_record แล้วเลยวัน = `overdue` คือ "รายได้ที่ควรเข้าแล้วยังไม่บันทึก" ไว้ตามเดิม
  */
 export const PAYMENT_STATE_SQL = `
   case
@@ -53,7 +57,8 @@ export const PAYMENT_STATE_SQL = `
     when i.kind = 'income' and i.income_record_id is not null and
       (select r.expected_net_satang from income_record r where r.id=i.income_record_id)=0 then 'not_required'
     when i.kind = 'income' and i.income_record_id is not null then 'received'
-    when pay.paid_satang = 0 and i.due_date is not null and i.due_date < current_date then 'overdue'
+    when pay.paid_satang = 0 and i.kind not in ('payroll_deduction', 'reserve') and
+      i.due_date is not null and i.due_date < current_date then 'overdue'
     when pay.paid_satang = 0 then 'unpaid'
     when i.amount_mode = 'estimated' then 'paid'
     when pay.paid_satang < i.planned_amount_satang then 'partial'

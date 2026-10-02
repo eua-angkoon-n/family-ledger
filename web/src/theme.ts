@@ -312,7 +312,18 @@ const theme = createTheme({
       },
     },
     MuiIconButton: {
-      styleOverrides: { root: { minWidth: 40, minHeight: 40 } },
+      // aria-disabled แบบเดียวกับ MuiButton (ปุ่มปิด Modal ระหว่างบันทึก, ปุ่มลบของแถวที่ลบไม่ได้) — หน้าตา disabled แต่ focus ได้
+      styleOverrides: {
+        root: ({ theme }) => ({
+          minWidth: 40,
+          minHeight: 40,
+          '&[aria-disabled="true"], &[aria-disabled="true"]:hover': {
+            color: theme.vars.palette.action.disabled,
+            backgroundColor: 'transparent',
+            cursor: 'default',
+          },
+        }),
+      },
     },
     MuiPaper: {
       styleOverrides: {
@@ -459,7 +470,7 @@ const theme = createTheme({
       // outlined สีปกติ (ตัวกรอง/toggle ที่ไม่ได้เลือก, หมวดในตาราง): ขอบเดิมของ MUI 1.56 (สว่าง) / 2.57 (มืด) และไอคอนลบ
       // text.primary/26% 1.44 / 2.12 บน background — ใช้ขอบ input (สว่าง 3.03/3.14/3.64, มืด 3.61/3.17 บน background/card/popover) และไอคอน
       // text.secondary (4.71 / 7.67 บน background) · hover พื้น accent ใช้ accent-foreground เหมือน tab (มืดเดิม 2.54 → 5.07)
-      // scope ที่ colorDefault — chip outlined สีสถานะ (success "ยืนยันแล้ว") คงขอบสีของมันเอง
+      // scope ที่ colorDefault — chip outlined สีสถานะ (success "จ่ายแล้ว", warning "เกินกำหนด") คงขอบสีของมันเอง
       styleOverrides: {
         root: ({ theme }) => ({
           fontWeight: 600,
