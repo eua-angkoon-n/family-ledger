@@ -31,8 +31,8 @@ export function sumPlanTotals(items: PlanItem[]): SelectionTotals {
 }
 
 // canX คืน null = ทำได้, ไม่งั้นคืนเหตุผลสั้น ๆ ไว้แสดงใน "ตัดออก" ของ dialog แบบกลุ่ม
-// ใช้กับปุ่มแบบกลุ่มเท่านั้น — ปุ่มรายแถวมีเงื่อนไขของตัวเอง (เช่น "บันทึกจ่าย" บนแถวที่จ่ายครบยังต้อง
-// เปิด modal ได้เพื่อยกเลิกการบันทึกจ่าย) ส่วนเดือนที่ปิดแล้วผู้เรียกเช็กเอง
+// ใช้กับปุ่มแบบกลุ่มเท่านั้น — ปุ่มรายแถวมีเงื่อนไขของตัวเอง (เช่นแถวที่จ่ายครบยังมีปุ่ม "ดูการจ่าย"
+// เปิด modal ได้เพื่อยกเลิกการบันทึกจ่ายหรือบันทึกเพิ่มเอง) ส่วนเดือนที่ปิดแล้วผู้เรียกเช็กเอง
 export function canPay(item: PlanItem): string | null {
   if (item.kind === 'income') return 'บันทึกที่รายได้และรายการหัก';
   if (item.kind === 'payroll_deduction') return 'รายการหักจากรายได้ไม่ต้องจ่าย';
@@ -133,6 +133,7 @@ export function compareRules(key: RuleSortKey, dir: SortDir) {
 }
 
 // วันนี้ตามเวลาเครื่อง — ห้าม toISOString() เพราะเป็น UTC ก่อน 07:00 เวลาไทยจะได้วันของเมื่อวาน
+// หน้าเว็บใช้ todayInBangkok (format.ts) แทนแล้ว ตัวนี้เหลือไว้เพราะ test/plan-selection.test.ts ยัง import
 export function todayLocal(now = new Date()): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 }

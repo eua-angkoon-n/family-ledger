@@ -11,6 +11,7 @@ import {
   FormLabel,
   LinearProgress,
   Link as MuiLink,
+  Menu,
   MenuItem,
   Paper,
   Skeleton,
@@ -35,6 +36,7 @@ import EditRounded from '@mui/icons-material/EditRounded';
 import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded';
+import HistoryRounded from '@mui/icons-material/HistoryRounded';
 import LinkRounded from '@mui/icons-material/LinkRounded';
 import ReplayRounded from '@mui/icons-material/ReplayRounded';
 import LockOutlined from '@mui/icons-material/LockOutlined';
@@ -49,8 +51,10 @@ import {
   req,
   type Account,
   type Category,
+  type IncomeRecord,
   type MonthlyPlan as Plan,
   type PlanItem,
+  type PlanItemPayment,
   type PlanKind,
   type RecurringRule,
 } from '../api.js';
@@ -62,7 +66,7 @@ import IncomeSection, { type IncomeSectionHandle } from '../components/IncomeSec
 import PlanSelectionBar from '../components/PlanSelectionBar.js';
 import SummaryCard, { summaryRowSx } from '../components/SummaryCard.js';
 import { createFormFieldChangeHandler } from '../form.js';
-import { formatBaht, formatDate, formatDayMonth, parseBahtToSatang } from '../format.js';
+import { formatBaht, formatDate, formatDayMonth, parseBahtToSatang, todayInBangkok } from '../format.js';
 import {
   canDelete,
   canPay,
@@ -76,7 +80,6 @@ import {
   NO_CATEGORY,
   PLAN_NOT_MATCHED_NOTE,
   STATUS_ORDER,
-  todayLocal,
   type ItemFilter,
   type ItemSortKey,
   type RuleFilter,
@@ -206,6 +209,10 @@ function SecondaryLine({ parts }: { parts: ReactNode[] }) {
 // เงินกันไว้ไม่ใช่บิล — ปุ่มและฟอร์มใช้คำของการกันเงิน (คู่กับ "ยังไม่ได้กัน"/"กันแล้ว" ใน PaymentStatusChip)
 // ส่วนรายจ่ายใช้ "บันทึกจ่าย" คำกริยาเดียวทั้งปุ่มบนแถว แถบที่เลือก และหัวฟอร์ม ("จ่ายแล้ว" เป็นชื่อสถานะเท่านั้น)
 const payVerb = (item: PlanItem) => (item.kind === 'reserve' ? 'บันทึกว่ากันแล้ว' : 'บันทึกจ่าย');
+// แถวที่จ่ายครบแล้ว (payment_state 'paid' = ยอดคงที่ครบ หรือยอดประมาณการที่บันทึกแล้ว) เปิดประวัติก่อน ไม่ใช่ฟอร์มที่เติมยอดให้กดซ้ำ
+// (server กันจ่ายเกินเฉพาะงวดผ่อน) — บันทึกเพิ่มต้องกดเองและพิมพ์ยอดเอง แบบเดียวกับ "ดูการจ่าย" ของหน้าแผนผ่อน
+const historyVerb = (item: PlanItem) => (item.kind === 'reserve' ? 'ดูการกันเงิน' : 'ดูการจ่าย');
+const cancelPaymentVerb = (item: PlanItem) => (item.kind === 'reserve' ? 'ยกเลิกการบันทึกกันเงิน' : 'ยกเลิกการบันทึกจ่าย');
 
 // หมวดที่มีจริงในแถวชุดนี้ (ไม่ใช่หมวดทั้งหมดของผู้ใช้) — ตัวกรองที่เลือกไว้แล้วแต่แถวสุดท้ายของหมวดนั้น
 // เพิ่งถูกลบ/เลิกใช้ ต้องยังมีตัวเลือกอยู่ ไม่งั้น select ของ MUI ได้ค่าที่ไม่มีใน option
@@ -282,7 +289,7 @@ export default function MonthlyPlan() {
   const requestIdRef = useRef(0);
   const [rulesOpen, setRulesOpen] = useState(readRulesOpen);
 
-  // ค่าตอนเปิดฟอร์มของทุก modal — ต่างจากนี้ = มีการแก้ค้าง Modal ถามก่อนปิด (The Unsaved Edit Rule)
+  // ค่าตอนเปิดฟอร์มของทุก modal — ต่างจากนี้ = มีการแก้ค้าง Modal ถามก่อนปิด (The Unsaved Modal Rule)
   const [itemForm, setItemForm] = useState(EMPTY_ITEM);
   const [itemInitial, setItemInitial] = useState(EMPTY_ITEM);
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
@@ -299,7 +306,22 @@ export default function MonthlyPlan() {
   const [paymentForm, setPaymentForm] = useState(EMPTY_PAYMENT);
   const [paymentInitial, setPaymentInitial] = useState(EMPTY_PAYMENT);
   const setPaymentField = createFormFieldChangeHandler(setPaymentForm);
+  // แถวที่จ่ายครบแล้วเปิดเป็นประวัติ — true = กด "บันทึกเพิ่ม" แล้ว ฟอร์ม (ยอดว่าง) จึงขึ้น
+  const [addingPayment, setAddingPayment] = useState(false);
+  // ปุ่มของแถวที่เปิดฟอร์มจ่ายล่าสุด — ยกเลิกการบันทึกจ่ายปิดฟอร์มก่อนเปิด dialog ยืนยัน (เหมือนหน้าแผนผ่อน) จึงคืน focus มาที่นี่
+  const payButtonRef = useRef<HTMLElement | null>(null);
+  const [cancellingPayment, setCancellingPayment] = useState<{ item: PlanItem; payment: PlanItemPayment } | null>(null);
   const [deletingItem, setDeletingItem] = useState<PlanItem | null>(null);
+  // เมนูเลือกรายได้ของ "ผูกกับรายได้" เมื่อเดือนนี้มีรายได้หลายรายการ — open แยกจากข้อมูล รายการในเมนูจึงไม่หายระหว่าง transition ปิด
+  const [linkMenu, setLinkMenu] = useState<{ anchor: HTMLElement; item: PlanItem; incomes: IncomeRecord[]; open: boolean } | null>(null);
+  // ผลสำเร็จที่เกิดตอน modal/dialog เปิดอยู่ — `#root` ยังเป็น aria-hidden จนปิดสนิท snackbar ที่ขึ้นตอนนั้น screen reader
+  // ไม่อ่าน จึงเก็บไว้แล้วแสดงจาก onExited (เหมือน ConfirmDialog ของ ui.tsx) ทุก run() ที่เก็บไว้ต้องปิด dialog ของตัวเองเมื่อสำเร็จ
+  const pendingNoticeRef = useRef<Notice | null>(null);
+  const flushNotice = () => {
+    const pending = pendingNoticeRef.current;
+    pendingNoticeRef.current = null;
+    if (pending) setNotice(pending);
+  };
 
   // ตัวกรองชุดเดียวใช้ร่วมกันระหว่างชิปสถานะกับ dropdown เหนือตาราง — จำนวนแถวจึงเท่ากับเลขบนชิปเสมอ
   const [itemFilter, setItemFilter] = useState<ItemFilter>(EMPTY_ITEM_FILTER);
@@ -389,6 +411,7 @@ export default function MonthlyPlan() {
     setSelected(new Set());
     setBulkFailures(null);
     setItemFilter((f) => ({ ...f, category: '' }));
+    setLinkMenu(null);
     incomeChangedRef.current = false;
   }, [month]);
 
@@ -475,6 +498,12 @@ export default function MonthlyPlan() {
   const payPlan = partition(selectedItems, canPay);
   const skipPlan = partition(selectedItems, canSkip);
   const deletePlan = partition(selectedItems, canDelete);
+  // เลือกแต่เงินกันไว้ = คำของการกันเงินทั้งหัวฟอร์ม ป้ายช่อง และผลลัพธ์ ("บันทึกว่ากันเงินแล้ว 2 รายการ") ปนรายจ่ายอยู่ด้วย
+  // ใช้คำของรายจ่าย — ช่องยอดรายแถวยังบอกตามประเภทของแถวเสมอ
+  const bulkAllReserve = payPlan.ok.length > 0 && payPlan.ok.every((i) => i.kind === 'reserve');
+  const bulkWords = bulkAllReserve
+    ? { verb: 'บันทึกว่ากันแล้ว', notice: 'บันทึกว่ากันเงิน', date: 'วันที่กัน', account: 'บัญชีที่กันเงินไว้' }
+    : { verb: 'บันทึกจ่าย', notice: 'บันทึกจ่าย', date: 'วันที่จ่าย', account: 'บัญชีที่จ่าย' };
   const selectedVisibleCount = visibleItems.filter((i) => selected.has(i.id)).length;
   const allVisibleSelected = visibleItems.length > 0 && selectedVisibleCount === visibleItems.length;
 
@@ -502,12 +531,15 @@ export default function MonthlyPlan() {
     // ปุ่มรายแถว disabled ระหว่างงานแบบกลุ่มแล้ว — ตัวนี้กันคลิกที่หลุดมาก่อน re-render
     if (bulkRunningRef.current) return;
     // ConfirmDialog ปิดเดือน / เลิกใช้ / ลบ แสดง formError ใน description (dialogError) ค้างไว้ให้กดซ้ำได้
-    const inModal = itemModalOpen || ruleModalOpen || payingItem != null || closing || archivingRule != null || deletingItem != null;
+    const inModal =
+      itemModalOpen || ruleModalOpen || payingItem != null || closing || archivingRule != null || deletingItem != null || cancellingPayment != null;
     setFormError('');
     setSubmitting(true);
     try {
       await action();
-      setNotice({ message: successMessage, severity: 'success' });
+      // ใน modal = onDone ปิด modal นั้น แล้ว onExited ของมันเรียก flushNotice
+      if (inModal) pendingNoticeRef.current = { message: successMessage, severity: 'success' };
+      else setNotice({ message: successMessage, severity: 'success' });
       onDone?.();
       await reload(true);
     } catch (e) {
@@ -568,13 +600,14 @@ export default function MonthlyPlan() {
 
   // ยอดตั้งต้นเหมือน openPayment: ยอดคงที่เติมยอดที่ยังค้าง, ยอดประมาณการปล่อยว่างให้พิมพ์จากบิลจริง
   // (เหตุผลอยู่ที่ comment ของ openPayment) ส่วนวันที่ใช้วันนี้ เพราะหลายแถวมีวันครบกำหนดคนละวัน
+  // แถวที่จ่ายครบแล้วไม่อยู่ใน payPlan.ok (canPay) ยอดที่ยังค้างจึงมากกว่า 0 เสมอ
   const openBulkPay = () => {
     if (bulkRunningRef.current) return;
-    const form = { paid_date: todayLocal(), bank_account_id: accounts[0] ? String(accounts[0].id) : '' };
+    const form = { paid_date: todayInBangkok(), bank_account_id: accounts[0] ? String(accounts[0].id) : '' };
     const amounts = Object.fromEntries(
       payPlan.ok.map((i) => [
         i.id,
-        i.amount_mode === 'estimated' ? '' : (Math.max(0, i.planned_amount_satang - i.paid_satang) / 100).toFixed(2),
+        i.amount_mode === 'estimated' ? '' : formatBaht(Math.max(0, i.planned_amount_satang - i.paid_satang)),
       ]),
     );
     setBulkPayForm(form);
@@ -588,7 +621,7 @@ export default function MonthlyPlan() {
     if (bulkRunningRef.current || payPlan.ok.length === 0) return;
     const { paid_date, bank_account_id } = bulkPayForm;
     if (paid_date === '' || bank_account_id === '') {
-      setFormError('เลือกวันที่จ่ายและบัญชีที่จ่าย');
+      setFormError(`เลือก${bulkWords.date}และ${bulkWords.account}`);
       return;
     }
     const amounts = new Map(payPlan.ok.map((i) => [i.id, parseBahtToSatang(bulkAmounts[i.id] ?? '')]));
@@ -607,7 +640,7 @@ export default function MonthlyPlan() {
           paid_date,
           bank_account_id: Number(bank_account_id),
         }),
-      'บันทึกจ่าย',
+      bulkWords.notice,
     );
   };
 
@@ -623,7 +656,7 @@ export default function MonthlyPlan() {
     startItemForm(item.id, {
       kind: item.kind,
       name: item.name,
-      amount_baht: (item.planned_amount_satang / 100).toFixed(2),
+      amount_baht: formatBaht(item.planned_amount_satang),
       due_date: item.due_date ?? '',
       category_id: item.category_id == null ? '' : String(item.category_id),
       note: item.note ?? '',
@@ -668,7 +701,7 @@ export default function MonthlyPlan() {
       name: rule.name,
       kind: rule.kind,
       amount_mode: rule.amount_mode,
-      amount_baht: (rule.amount_satang / 100).toFixed(2),
+      amount_baht: formatBaht(rule.amount_satang),
       frequency_unit: rule.frequency_unit,
       frequency_interval: String(rule.frequency_interval),
       anchor_day: rule.anchor_day == null ? '' : String(rule.anchor_day),
@@ -729,18 +762,18 @@ export default function MonthlyPlan() {
   //
   // ยกเว้นยอด: รายการยอดประมาณการปล่อยช่องว่างให้พิมพ์ยอดจากบิลจริง — ยอดที่เดาไว้ถ้าเติมให้แล้วผู้ใช้กดผ่าน
   // จะนับเป็นยอดจ่ายทันที (ADR-0004 ไม่มี statement มาแก้ให้) ยอดจริงของเดือนนั้นจึงผิดไปเงียบ ๆ
-  const openPayment = (item: PlanItem) => {
+  // แถวที่จ่ายครบแล้วก็ปล่อยว่าง (ไม่มียอดค้างให้เติม) และเปิดเป็นประวัติก่อน — ฟอร์มขึ้นเมื่อกด "บันทึกเพิ่ม" เท่านั้น
+  const openPayment = (item: PlanItem, button: HTMLElement) => {
+    payButtonRef.current = button;
     const remaining = Math.max(0, item.planned_amount_satang - item.paid_satang);
     const rule = item.recurring_rule_id == null ? undefined : rules.find((r) => r.id === item.recurring_rule_id);
     const defaultAccountId = rule?.default_account_id ?? accounts[0]?.id ?? null;
     const form = {
-      amount_baht:
-        item.amount_mode === 'estimated'
-          ? ''
-          : ((remaining > 0 ? remaining : item.planned_amount_satang) / 100).toFixed(2),
+      amount_baht: item.amount_mode === 'estimated' || remaining === 0 ? '' : formatBaht(remaining),
       paid_date: item.due_date ?? `${month}-01`,
       bank_account_id: defaultAccountId == null ? '' : String(defaultAccountId),
     };
+    setAddingPayment(false);
     setPayingItem(item);
     setPaymentForm(form);
     setPaymentInitial(form);
@@ -772,6 +805,9 @@ export default function MonthlyPlan() {
   const payingItemLive = payingItem == null ? null : items.find((i) => i.id === payingItem.id) ?? payingItem;
   const reserving = payingItemLive?.kind === 'reserve';
   const payingVerb = payingItemLive ? payVerb(payingItemLive) : 'บันทึกจ่าย';
+  // แถวที่จ่ายครบแล้ว = ประวัติอย่างเดียว (ไม่มีแถบปุ่มบันทึก) จนกด "บันทึกเพิ่ม" — แบบงวดที่ดูประวัติของหน้าแผนผ่อน
+  const paymentFormOpen = payingItemLive != null && (payingItemLive.payment_state !== 'paid' || addingPayment);
+  const paymentDirty = paymentFormOpen && JSON.stringify(paymentForm) !== JSON.stringify(paymentInitial);
   const refsAlert = refsError && <LoadError message={refsError} onRetry={() => void loadRefs()} />;
   // error ของ ConfirmDialog ปิดเดือน / เลิกใช้ / ลบ อยู่ใน description (รวมใน aria-describedby) — run() ส่งมาที่ formError
   const dialogError = formError && <Alert severity="error" sx={{ mt: 2 }}>{formError}</Alert>;
@@ -779,17 +815,19 @@ export default function MonthlyPlan() {
   const toolbarBusy = submitting || bulkRunning;
   // รายได้ของเดือนนี้ที่บันทึกแล้ว (นับจากแถวของแผน ไม่ต้องรอส่วนรายได้โหลด) — รายการหักที่ยังรอแต่ไม่ได้ผูกตอนบันทึกรายได้ ผูกย้อนได้จากแถว
   const recordedIncomeCount = items.filter((i) => i.kind === 'income' && i.income_record_id != null).length;
-  const linkDeduction = (item: PlanItem) => {
-    if (incomeRef.current?.linkDeduction(item.id)) {
-      incomeChangedRef.current = true;
-      return;
-    }
-    if (recordedIncomeCount > 1) {
-      setNotice({
-        message: `เดือนนี้มีรายได้ ${recordedIncomeCount} รายการ — กดแก้ไขรายได้ที่หัก "${item.name}" แล้วเพิ่มรายการหักที่เชื่อมกับรายการนี้`,
-        severity: 'info',
-      });
-    }
+  // รายได้รายการเดียว = เปิดฟอร์มแก้ไขรายได้นั้นเลย หลายรายการ = เมนูให้เลือกว่าหักจากรายได้ไหน (ไม่เดา) ทั้งสองทางเข้า
+  // linkDeduction ตัวเดียวกัน — โหลดส่วนรายได้ไม่สำเร็จ IncomeSection เลื่อนไปให้เห็นปุ่มลองใหม่เอง
+  const linkDeduction = (item: PlanItem, anchor: HTMLElement) => {
+    const incomes = incomeRef.current?.incomes() ?? [];
+    if (incomes.length > 1) setLinkMenu({ anchor, item, incomes, open: true });
+    else if (incomeRef.current?.linkDeduction(item.id)) incomeChangedRef.current = true;
+  };
+  const linkMenuOpenFor = linkMenu?.open ? linkMenu.item.id : null;
+  // MUI คืน focus ให้ปุ่มบนแถวตอนเมนูปิด (ก่อนฟอร์มเปิดใน commit เดียวกัน) ฟอร์มจึงคืน focus ที่ปุ่มนั้นต่อ
+  const pickIncome = (incomeId: number) => {
+    if (linkMenu == null) return;
+    setLinkMenu({ ...linkMenu, open: false });
+    if (incomeRef.current?.linkDeduction(linkMenu.item.id, incomeId)) incomeChangedRef.current = true;
   };
 
   // ปุ่มของแถว — วาดสองที่: คอลัมน์จัดการ (≥ md) และใต้ชื่อแถว (< md, ไม่มีไอคอนนำหน้าเพื่อให้พอดีความกว้าง)
@@ -806,16 +844,18 @@ export default function MonthlyPlan() {
     const locked = closed || bulkRunning;
     const icon = compact ? undefined : <PaidRounded />;
     const deleteReason = canDelete(item);
+    const rowPayLabel = item.payment_state === 'paid' ? historyVerb(item) : payVerb(item);
     return (
       <>
         {/* "บันทึกจ่าย" เป็นปุ่มของรายจ่าย/เงินกันไว้เท่านั้น — เงินเข้าต้องบันทึกที่ "รายได้และรายการหัก"
             เพื่อแยกยอดเต็มออกจากยอดสุทธิ (ADR-0002 ข้อ 5) รายการหักจากเงินเดือนไม่มีปุ่มจ่าย เงินไม่ได้ออกจาก
             บัญชีเรา มันขึ้น "หักจากรายได้" เองเมื่อถูกผูกจากฟอร์มรายได้ — เดือนที่บันทึกรายได้ไปแล้วแต่รายการนี้ยังค้าง
-            มีปุ่ม "ผูกกับรายได้" แทน
+            มีปุ่ม "ผูกกับรายได้" แทน (รายได้หลายรายการ = เมนูให้เลือก จึงเป็น menu button)
 
-            เงื่อนไข `paid_satang === 0`: แถวที่ยังมีการบันทึกจ่ายค้างอยู่ต้องเหลือปุ่ม "บันทึกจ่าย" ไว้ เพราะปุ่ม
+            เงื่อนไข `paid_satang === 0`: แถวที่ยังมีการบันทึกจ่ายค้างอยู่ต้องเหลือปุ่มของ modal จ่ายไว้ เพราะปุ่ม
             ยกเลิกการบันทึกจ่ายอยู่ใน modal นั้นที่เดียว ยกเลิกแล้ว paid_satang กลับเป็น 0 ปุ่มจะสลับเป็น
-            ปุ่มบันทึกรายได้ให้เอง ซึ่งเปิดฟอร์มรายได้ที่เชื่อมแถวนี้ไว้แล้วทันที
+            ปุ่มบันทึกรายได้ให้เอง ซึ่งเปิดฟอร์มรายได้ที่เชื่อมแถวนี้ไว้แล้วทันที — แถวที่จ่ายครบแล้วปุ่มเป็น "ดูการจ่าย"
+            (historyVerb) เปิดประวัติก่อน ป้ายสลับแต่ key เดิม focus จึงอยู่ที่ปุ่มเดิมหลังบันทึก/ยกเลิก
 
             key แยกปุ่ม: ไม่มี key React จะใช้ <button> เดิมต่อแล้วแค่ disable หลังบันทึกรายได้
             focus จึงค้างบนปุ่ม disabled แทนที่จะตกไปที่ body ให้ effect ของ incomeChangedRef ส่งต่อ */}
@@ -843,7 +883,10 @@ export default function MonthlyPlan() {
               startIcon={compact ? undefined : <LinkRounded />}
               disabled={locked}
               aria-label={`ผูกกับรายได้ ${item.name}`}
-              onClick={() => linkDeduction(item)}
+              aria-haspopup={recordedIncomeCount > 1 ? 'menu' : undefined}
+              aria-expanded={recordedIncomeCount > 1 ? linkMenuOpenFor === item.id : undefined}
+              aria-controls={linkMenuOpenFor === item.id ? 'plan-link-income-menu' : undefined}
+              onClick={(event) => linkDeduction(item, event.currentTarget)}
               sx={{ whiteSpace: 'nowrap' }}
             >
               ผูกกับรายได้
@@ -853,13 +896,13 @@ export default function MonthlyPlan() {
           <Button
             key="pay"
             size="small"
-            startIcon={icon}
+            startIcon={compact ? undefined : item.payment_state === 'paid' ? <HistoryRounded /> : <PaidRounded />}
             disabled={locked || inactive}
-            aria-label={`${payVerb(item)} ${item.name}`}
-            onClick={() => openPayment(item)}
+            aria-label={`${rowPayLabel} ${item.name}`}
+            onClick={(event) => openPayment(item, event.currentTarget)}
             sx={{ whiteSpace: 'nowrap' }}
           >
-            {payVerb(item)}
+            {rowPayLabel}
           </Button>
         )}
         {/* กลุ่มไอคอนไม่ตัดบรรทัดกลางกลุ่ม (< md แถวปุ่มใต้ชื่อตัดบรรทัดได้ แต่ไอคอนสามตัวไปด้วยกัน) */}
@@ -979,7 +1022,7 @@ export default function MonthlyPlan() {
         {(loading || plan != null) && (
           <>
             <Box component="section" aria-labelledby="plan-totals-heading">
-              <Typography variant="h2" id="plan-totals-heading" sx={{ fontSize: '1.25rem', mb: 1.5 }}>
+              <Typography variant="h2" id="plan-totals-heading" sx={{ mb: 1.5 }}>
                 สรุปตามแผน
               </Typography>
               {/* มือถือ ใบที่ 5 (เงินเหลือใช้ = ผลลัพธ์) กินเต็มแถว — summaryRowSx จัดให้ */}
@@ -1011,7 +1054,7 @@ export default function MonthlyPlan() {
 
             {(!planReady || chipCount('in_plan') > 0 || overdueCount > 0) && (
               <Box component="section" aria-labelledby="plan-payment-heading">
-                <Typography variant="h2" id="plan-payment-heading" sx={{ fontSize: '1.25rem', mb: 1.5 }}>
+                <Typography variant="h2" id="plan-payment-heading" sx={{ mb: 1.5 }}>
                   สถานะการจ่ายบิล
                 </Typography>
                 <Paper variant="outlined" sx={{ p: 2 }}>
@@ -1076,7 +1119,7 @@ export default function MonthlyPlan() {
             )}
 
             <Box component="section" aria-labelledby="plan-items-heading">
-              <Typography variant="h2" id="plan-items-heading" sx={{ fontSize: '1.25rem', mb: 1.5 }}>
+              <Typography variant="h2" id="plan-items-heading" sx={{ mb: 1.5 }}>
                 รายการของเดือนนี้
               </Typography>
               {/* อยู่นอกเงื่อนไขของตาราง ให้เห็นแม้ตัวกรองซ่อนทุกแถว */}
@@ -1235,7 +1278,7 @@ export default function MonthlyPlan() {
                                     ]}
                                   />
                                   <Stack direction="row" sx={{ ...BELOW_MD, flexWrap: 'wrap', gap: 0.5, mt: 0.75, alignItems: 'center' }}>
-                                    <PaymentStatusChip state={item.payment_state} kind={item.kind} />
+                                    <PaymentStatusChip state={item.payment_state} kind={item.kind} incomeRecorded={recordedIncomeCount > 0} />
                                     {rowActions(item, true)}
                                   </Stack>
                                 </TableCell>
@@ -1250,7 +1293,7 @@ export default function MonthlyPlan() {
                                 </TableCell>
                                 <TableCell sx={MD_UP}>
                                   <Stack spacing={0.5} sx={{ alignItems: 'flex-start' }}>
-                                    <PaymentStatusChip state={item.payment_state} kind={item.kind} />
+                                    <PaymentStatusChip state={item.payment_state} kind={item.kind} incomeRecorded={recordedIncomeCount > 0} />
                                     {estimateNote && (
                                       <Typography variant="caption" color="text.secondary">
                                         {estimateNote}
@@ -1281,10 +1324,12 @@ export default function MonthlyPlan() {
               month={month}
               closed={!planReady || closed}
               items={items}
+              // เรียกตอนฟอร์มรายได้กำลังปิด — ผลขึ้นหลังปิดสนิท (onExited) ส่วน reload เริ่มทันที
               onChanged={() => {
-                setNotice({ message: 'บันทึกรายได้แล้ว', severity: 'success' });
+                pendingNoticeRef.current = { message: 'บันทึกรายได้แล้ว', severity: 'success' };
                 return reload(true);
               }}
+              onExited={flushNotice}
             />
           </>
         )}
@@ -1293,7 +1338,7 @@ export default function MonthlyPlan() {
             (aria-expanded) ส่วนปุ่มเพิ่มและความล้มเหลวอยู่นอกส่วนที่พับ ให้เห็นเสมอ */}
         <Box component="section" aria-labelledby="plan-rules-heading">
           <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, mb: 1.5 }}>
-            <Typography variant="h2" id="plan-rules-heading" sx={{ fontSize: '1.25rem' }}>
+            <Typography variant="h2" id="plan-rules-heading">
               <Button
                 color="inherit"
                 // โหลดไม่ได้ = ส่วนที่พับซ่อนอยู่แม้ตั้งให้กางไว้ (LoadError แสดงแทน) — บอกตามที่เห็นจริง
@@ -1458,6 +1503,7 @@ export default function MonthlyPlan() {
         busy={submitting}
         dirty={JSON.stringify(itemForm) !== JSON.stringify(itemInitial)}
         footer={{ formId: 'plan-item-form', submitLabel: 'บันทึก' }}
+        onExited={flushNotice}
       >
         <Box
           component="form"
@@ -1526,6 +1572,7 @@ export default function MonthlyPlan() {
         busy={submitting}
         dirty={JSON.stringify(ruleForm) !== JSON.stringify(ruleInitial)}
         footer={{ formId: 'plan-rule-form', submitLabel: 'บันทึก' }}
+        onExited={flushNotice}
       >
         <Box
           component="form"
@@ -1639,110 +1686,162 @@ export default function MonthlyPlan() {
         </Box>
       </Modal>
 
+      {/* แถวที่จ่ายครบแล้ว (paymentFormOpen = false) เปิดเป็นประวัติ ไม่มี footer — "บันทึกเพิ่ม" เปิดฟอร์มยอดว่าง ปุ่มหายไป
+          พร้อมกัน focus จึงไปที่ช่องยอด (autoFocus) ฟอร์มอยู่บนเสมอเมื่อเปิดอยู่ ประวัติต่อท้าย */}
       <Modal
         open={payingItem != null}
-        title={`${payingVerb} — ${payingItemLive?.name ?? ''}`}
+        title={`${paymentFormOpen ? payingVerb : reserving ? 'การกันเงิน' : 'การจ่าย'} — ${payingItemLive?.name ?? ''}`}
         onClose={() => setPayingItem(null)}
         busy={submitting}
-        dirty={JSON.stringify(paymentForm) !== JSON.stringify(paymentInitial)}
-        footer={{ formId: 'plan-payment-form', submitLabel: payingVerb }}
+        dirty={paymentDirty}
+        footer={paymentFormOpen ? { formId: 'plan-payment-form', submitLabel: payingVerb } : undefined}
+        onExited={flushNotice}
       >
-        <Box
-          component="form"
-          id="plan-payment-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            submitPayment();
-          }}
-        >
-          <Stack spacing={2.5}>
-            {refsAlert}
-            {/* ADR-0004: การบันทึกจ่ายนับเป็นยอดจ่ายทันที ไม่มีขั้นรอจับคู่กับ statement */}
-            <Alert severity="info" role="status" sx={descriptionSx}>
-              {PLAN_NOT_MATCHED_NOTE} · การบันทึกนี้ไม่สร้างรายการธุรกรรม ยอดบางส่วนบันทึกหลายครั้งได้
-            </Alert>
-            <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 16rem), 1fr))' }}>
-              <TextField
-                label={reserving ? 'จำนวนเงินที่กันไว้ (บาท)' : 'จำนวนเงินที่จ่าย (บาท)'}
-                value={paymentForm.amount_baht}
-                onChange={setPaymentField('amount_baht')}
-                required
-                {...amountFieldHelp(paymentForm.amount_baht)}
-                slotProps={{ htmlInput: { inputMode: 'decimal', sx: dataTextSx } }}
-              />
-              <TextField
-                type="date"
-                label={reserving ? 'วันที่กัน' : 'วันที่จ่าย'}
-                value={paymentForm.paid_date}
-                onChange={setPaymentField('paid_date')}
-                required
-                slotProps={{ inputLabel: { shrink: true }, htmlInput: { sx: dataTextSx } }}
-              />
-              <TextField select label={reserving ? 'บัญชีที่กันเงินไว้' : 'บัญชีที่จ่าย'} value={paymentForm.bank_account_id} onChange={setPaymentField('bank_account_id')} required>
-                <MenuItem value="">
-                  <em>— เลือกบัญชี —</em>
-                </MenuItem>
-                {accounts.map((a) => (
-                  <MenuItem key={a.id} value={a.id}>
-                    {a.nickname}
-                  </MenuItem>
-                ))}
-              </TextField>
+        <Stack spacing={2.5}>
+          {paymentFormOpen && (
+            <Box
+              component="form"
+              id="plan-payment-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                submitPayment();
+              }}
+            >
+              <Stack spacing={2.5}>
+                {refsAlert}
+                {/* ADR-0004: การบันทึกจ่ายนับเป็นยอดจ่ายทันที ไม่มีขั้นรอจับคู่กับ statement */}
+                <Alert severity="info" role="status" sx={descriptionSx}>
+                  {PLAN_NOT_MATCHED_NOTE} · การบันทึกนี้ไม่สร้างรายการธุรกรรม ยอดบางส่วนบันทึกหลายครั้งได้
+                </Alert>
+                <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 16rem), 1fr))' }}>
+                  <TextField
+                    label={reserving ? 'จำนวนเงินที่กันไว้ (บาท)' : 'จำนวนเงินที่จ่าย (บาท)'}
+                    value={paymentForm.amount_baht}
+                    onChange={setPaymentField('amount_baht')}
+                    required
+                    autoFocus={addingPayment}
+                    {...amountFieldHelp(paymentForm.amount_baht)}
+                    slotProps={{ htmlInput: { inputMode: 'decimal', sx: dataTextSx } }}
+                  />
+                  <TextField
+                    type="date"
+                    label={reserving ? 'วันที่กัน' : 'วันที่จ่าย'}
+                    value={paymentForm.paid_date}
+                    onChange={setPaymentField('paid_date')}
+                    required
+                    slotProps={{ inputLabel: { shrink: true }, htmlInput: { sx: dataTextSx } }}
+                  />
+                  <TextField select label={reserving ? 'บัญชีที่กันเงินไว้' : 'บัญชีที่จ่าย'} value={paymentForm.bank_account_id} onChange={setPaymentField('bank_account_id')} required>
+                    <MenuItem value="">
+                      <em>— เลือกบัญชี —</em>
+                    </MenuItem>
+                    {accounts.map((a) => (
+                      <MenuItem key={a.id} value={a.id}>
+                        {a.nickname}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                </Box>
+              </Stack>
             </Box>
+          )}
 
-            {payingItemLive != null && payingItemLive.payments.length > 0 && (
-              <Box component="section" aria-labelledby="payment-history-heading">
-                <Typography component="h3" id="payment-history-heading" variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
-                  ประวัติการบันทึก
-                </Typography>
-                <Stack spacing={1}>
-                  {payingItemLive.payments.map((p) => (
-                    <Paper key={p.id} variant="outlined" sx={{ p: 1.5 }}>
-                      <Stack
-                        direction="row"
-                        spacing={1}
-                        sx={{ alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}
-                      >
-                        <Box>
-                          <Money satang={p.amount_satang} />
-                          <Typography variant="body2" color="text.secondary">
-                            <Box component="span" sx={dataTextSx}>
-                              {formatDate(p.paid_date)}
-                            </Box>{' '}
-                            · {p.account_nickname} ·{' '}
-                            {p.status === 'cancelled' ? 'ยกเลิกแล้ว' : 'บันทึกไว้แล้ว'}
-                          </Typography>
-                        </Box>
-                        {/* ชื่อเต็ม ไม่ใช่ "ยกเลิก" ซ้ำกับปุ่มปิดฟอร์มด้านล่าง — ชื่อเดียวกับหน้าแผนผ่อน */}
-                        {p.status !== 'cancelled' && (
-                          <Button
-                            size="small"
-                            color="error"
-                            startIcon={<DeleteOutlineRounded />}
-                            aria-disabled={submitting}
-                            aria-label={`ยกเลิกการบันทึกจ่าย ${formatDate(p.paid_date)} ฿${formatBaht(p.amount_satang)}`}
-                            onClick={() => {
-                              if (submitting) return;
-                              void run(
-                                () => patch(`/api/monthly-item-payments/${p.id}`, { status: 'cancelled' }),
-                                'ยกเลิกการบันทึกจ่ายแล้ว',
-                              );
-                            }}
-                          >
-                            ยกเลิกการบันทึกจ่าย
-                          </Button>
-                        )}
-                      </Stack>
-                    </Paper>
-                  ))}
-                </Stack>
-              </Box>
-            )}
+          {payingItemLive != null && payingItemLive.payments.length > 0 && (
+            <Box component="section" aria-labelledby="payment-history-heading">
+              <Typography component="h3" variant="h2" id="payment-history-heading" sx={{ fontSize: '1rem', lineHeight: 1.5, mb: 1 }}>
+                ประวัติการบันทึก
+              </Typography>
+              <Stack spacing={1}>
+                {payingItemLive.payments.map((p) => (
+                  <Paper key={p.id} variant="outlined" sx={{ p: 1.5 }}>
+                    <Stack
+                      direction="row"
+                      spacing={1}
+                      sx={{ alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}
+                    >
+                      <Box>
+                        <Money satang={p.amount_satang} />
+                        <Typography variant="body2" color="text.secondary">
+                          <Box component="span" sx={dataTextSx}>
+                            {formatDate(p.paid_date)}
+                          </Box>
+                          <Box component="span" aria-hidden>{' · '}</Box>
+                          {p.account_nickname}
+                          <Box component="span" aria-hidden>{' · '}</Box>
+                          {p.status === 'cancelled' ? 'ยกเลิกแล้ว' : 'บันทึกไว้แล้ว'}
+                        </Typography>
+                      </Box>
+                      {/* ชื่อเต็ม ไม่ใช่ "ยกเลิก" ซ้ำกับปุ่มปิดฟอร์มด้านล่าง — ชื่อเดียวกับหน้าแผนผ่อน (เงินกันไว้ใช้คำของการกันเงิน)
+                          ถามก่อนเหมือนหน้าแผนผ่อน: ปิดฟอร์มนี้ก่อนเปิด dialog ยืนยัน */}
+                      {p.status !== 'cancelled' && (
+                        <Button
+                          size="small"
+                          color="error"
+                          startIcon={<DeleteOutlineRounded />}
+                          aria-disabled={submitting}
+                          aria-label={`${cancelPaymentVerb(payingItemLive)} ${formatDate(p.paid_date)} ฿${formatBaht(p.amount_satang)}`}
+                          onClick={() => {
+                            if (submitting) return;
+                            setFormError('');
+                            setCancellingPayment({ item: payingItemLive, payment: p });
+                            setPayingItem(null);
+                          }}
+                        >
+                          {cancelPaymentVerb(payingItemLive)}
+                        </Button>
+                      )}
+                    </Stack>
+                  </Paper>
+                ))}
+              </Stack>
+            </Box>
+          )}
 
-            {formError && <Alert severity="error">{formError}</Alert>}
-          </Stack>
-        </Box>
+          {payingItemLive != null && !paymentFormOpen && (
+            <Button variant="outlined" startIcon={<AddRounded />} onClick={() => setAddingPayment(true)} sx={{ alignSelf: 'flex-start' }}>
+              บันทึกเพิ่ม
+            </Button>
+          )}
+
+          {formError && <Alert severity="error">{formError}</Alert>}
+        </Stack>
       </Modal>
+
+      {/* ยกเลิกการบันทึกจ่ายถามก่อนเสมอ (เหมือนหน้าแผนผ่อน) — ฟอร์มจ่ายปิดไปก่อนแล้ว ปุ่มในฟอร์มที่ MUI จะคืน focus ให้หายไปด้วย
+          จึงส่ง focus กลับปุ่มของแถว (ป้ายอาจสลับ "ดูการจ่าย" → "บันทึกจ่าย" แต่ key เดิม) หลัง dialog ปิดสนิท */}
+      <ConfirmDialog
+        open={cancellingPayment != null}
+        title={cancellingPayment ? cancelPaymentVerb(cancellingPayment.item) : ''}
+        description={
+          cancellingPayment && (
+            <>
+              ยกเลิกยอด <Money satang={cancellingPayment.payment.amount_satang} /> วันที่{' '}
+              <Box component="span" sx={dataTextSx}>{formatDate(cancellingPayment.payment.paid_date)}</Box> ของ "{cancellingPayment.item.name}" หรือไม่?
+              ยอดนี้จะถูกนำออกจาก{cancellingPayment.item.kind === 'reserve' ? 'ยอดที่กันแล้ว' : 'ยอดจ่ายแล้ว'} ประวัติยังเห็นเป็น "ยกเลิกแล้ว"
+              {dialogError}
+            </>
+          )
+        }
+        confirmLabel={cancellingPayment ? cancelPaymentVerb(cancellingPayment.item) : ''}
+        confirmColor="error"
+        busy={submitting}
+        onClose={() => setCancellingPayment(null)}
+        onConfirm={() => {
+          if (!cancellingPayment) return;
+          const { item, payment } = cancellingPayment;
+          void run(
+            () => patch(`/api/monthly-item-payments/${payment.id}`, { status: 'cancelled' }),
+            `${cancelPaymentVerb(item)}แล้ว`,
+            () => setCancellingPayment(null),
+          );
+        }}
+        onExited={() => {
+          const row = payButtonRef.current;
+          if ((document.activeElement == null || document.activeElement === document.body) && row?.isConnected) row.focus({ preventScroll: true });
+          else rescueFocus();
+          flushNotice();
+        }}
+      />
 
       <ConfirmDialog
         open={closing}
@@ -1758,6 +1857,7 @@ export default function MonthlyPlan() {
         busy={submitting}
         onClose={() => setClosing(false)}
         onConfirm={() => void run(() => post(`/api/monthly-plans/${month}/close`, {}), 'ปิดเดือนแล้ว', () => setClosing(false))}
+        onExited={flushNotice}
       />
 
       <ConfirmDialog
@@ -1782,7 +1882,10 @@ export default function MonthlyPlan() {
           );
         }}
         // แถวของกฎหายไปพร้อมปุ่มต้นทาง — MUI คืน focus ไม่ได้
-        onExited={rescueFocus}
+        onExited={() => {
+          rescueFocus();
+          flushNotice();
+        }}
       />
 
       {/* ลบทีละแถวต้องถามก่อนเสมอ (กู้คืนไม่ได้) — แถวหายไปพร้อมปุ่มต้นทาง จึงส่ง focus ต่อหลัง dialog ปิดสนิท */}
@@ -1804,16 +1907,19 @@ export default function MonthlyPlan() {
           const target = deletingItem;
           void run(() => del(`/api/monthly-plan-items/${target.id}`), 'ลบรายการแล้ว', () => setDeletingItem(null));
         }}
-        onExited={rescueFocus}
+        onExited={() => {
+          rescueFocus();
+          flushNotice();
+        }}
       />
 
       <Modal
         open={bulkAction === 'pay'}
-        title={`บันทึกจ่าย ${payPlan.ok.length} รายการ`}
+        title={`${bulkWords.verb} ${payPlan.ok.length} รายการ`}
         onClose={() => setBulkAction(null)}
         busy={bulkRunning}
         dirty={JSON.stringify([bulkPayForm, bulkAmounts]) !== bulkInitial}
-        footer={{ formId: 'plan-bulk-pay-form', submitLabel: `บันทึกจ่าย ${payPlan.ok.length} รายการ` }}
+        footer={{ formId: 'plan-bulk-pay-form', submitLabel: `${bulkWords.verb} ${payPlan.ok.length} รายการ` }}
       >
         <Box
           component="form"
@@ -1831,13 +1937,13 @@ export default function MonthlyPlan() {
             <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 16rem), 1fr))' }}>
               <TextField
                 type="date"
-                label="วันที่จ่าย"
+                label={bulkWords.date}
                 value={bulkPayForm.paid_date}
                 onChange={setBulkPayField('paid_date')}
                 required
                 slotProps={{ inputLabel: { shrink: true }, htmlInput: { sx: dataTextSx } }}
               />
-              <TextField select label="บัญชีที่จ่าย" value={bulkPayForm.bank_account_id} onChange={setBulkPayField('bank_account_id')} required>
+              <TextField select label={bulkWords.account} value={bulkPayForm.bank_account_id} onChange={setBulkPayField('bank_account_id')} required>
                 <MenuItem value="">
                   <em>— เลือกบัญชี —</em>
                 </MenuItem>
@@ -1852,6 +1958,7 @@ export default function MonthlyPlan() {
             <Stack spacing={2} component="ul" sx={{ m: 0, p: 0, listStyle: 'none' }}>
               {payPlan.ok.map((i) => {
                 const value = bulkAmounts[i.id] ?? '';
+                const amountLabel = i.kind === 'reserve' ? 'ยอดที่กัน (บาท)' : 'ยอดที่จ่าย (บาท)';
                 return (
                   <Box
                     component="li"
@@ -1866,12 +1973,12 @@ export default function MonthlyPlan() {
                     </Box>
                     <TextField
                       size="small"
-                      label="ยอดที่จ่าย (บาท)"
+                      label={amountLabel}
                       value={value}
                       onChange={(e) => setBulkAmounts((prev) => ({ ...prev, [i.id]: e.target.value }))}
                       required
                       {...amountFieldHelp(value)}
-                      slotProps={{ htmlInput: { inputMode: 'decimal', 'aria-label': `ยอดที่จ่าย (บาท) — ${i.name}`, sx: dataTextSx } }}
+                      slotProps={{ htmlInput: { inputMode: 'decimal', 'aria-label': `${amountLabel} — ${i.name}`, sx: dataTextSx } }}
                     />
                   </Box>
                 );
@@ -1958,6 +2065,27 @@ export default function MonthlyPlan() {
           onClear={() => setSelected(new Set())}
         />
       )}
+
+      {/* "ผูกกับรายได้" เมื่อมีรายได้หลายรายการ: เลือกรายได้ที่หักรายการนี้ (ชื่อ · ยอดสุทธิ) แล้วเปิดฟอร์มแก้ไขรายได้นั้น
+          ยอดสีกลาง — พื้น hover ของเมนูเป็น accent ซึ่งสีรายรับไม่ผ่าน */}
+      <Menu
+        id="plan-link-income-menu"
+        anchorEl={linkMenu?.anchor}
+        open={linkMenu?.open ?? false}
+        onClose={() => setLinkMenu((m) => (m ? { ...m, open: false } : m))}
+        slotProps={{ list: { 'aria-label': `เลือกรายได้ที่หัก ${linkMenu?.item.name ?? ''}` } }}
+      >
+        {(linkMenu?.incomes ?? []).map((income) => (
+          <MenuItem key={income.id} onClick={() => pickIncome(income.id)} sx={{ minHeight: 40, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
+            {/* span เดียวห่อทั้งบรรทัด — MenuItem เป็น flex ช่องว่างรอบ " · " จะหายถ้าแยกเป็น flex item */}
+            <Box component="span">
+              {income.name}
+              <Box component="span" aria-hidden>{' · '}</Box>
+              สุทธิ <Money satang={income.expected_net_satang} />
+            </Box>
+          </MenuItem>
+        ))}
+      </Menu>
 
       <FeedbackSnackbar notice={notice} onClose={() => setNotice(null)} placement={barVisible ? 'top' : 'bottom'} />
     </Box>

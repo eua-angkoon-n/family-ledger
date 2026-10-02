@@ -21,6 +21,11 @@ export function daysSince(isoDate: string, now = new Date()): number {
   return Math.round((today - Date.parse(`${isoDate}T00:00:00Z`)) / 86400000);
 }
 
+// วันนี้ตามเวลาไทย 'YYYY-MM-DD' (en-CA ให้รูปนี้) — ค่าตั้งต้นของช่องวันที่ในฟอร์มบันทึกจ่าย/รายได้ ไม่ใช่เวลาเครื่องหรือ UTC
+export function todayInBangkok(now = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+}
+
 // 'YYYY-MM-DD' → "31 ส.ค." สำหรับแกนกราฟที่แคบ (tooltip ยังใช้ formatDate เต็ม)
 export function formatDayMonth(isoDate: string): string {
   return new Date(`${isoDate}T00:00:00Z`).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', timeZone: 'UTC' });

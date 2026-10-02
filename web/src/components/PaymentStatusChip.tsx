@@ -4,6 +4,7 @@ import BlockRounded from '@mui/icons-material/BlockRounded';
 import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded';
 import DonutLargeRounded from '@mui/icons-material/DonutLargeRounded';
 import HourglassEmptyRounded from '@mui/icons-material/HourglassEmptyRounded';
+import LinkOffRounded from '@mui/icons-material/LinkOffRounded';
 import RadioButtonUncheckedRounded from '@mui/icons-material/RadioButtonUncheckedRounded';
 import SkipNextRounded from '@mui/icons-material/SkipNextRounded';
 import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded';
@@ -34,6 +35,8 @@ const SPECS: Record<PaymentState, Spec> = {
 // หรือ "ยังไม่จ่าย" API ส่ง unpaid ให้สองประเภทนี้ (overdue ของข้อมูลเก่าก็ถือเป็นค่าเดียวกัน) สีกลางเสมอ
 // เงินกันไว้ใช้คำของการกันเงินแทนคำว่า "จ่าย" ทุกสถานะ (คู่กับปุ่ม "บันทึกว่ากันแล้ว" ในหน้าวางแผน)
 const DEDUCTION_PENDING: Spec = { label: 'รอบันทึกรายได้', color: 'default', icon: <HourglassEmptyRounded /> };
+// เดือนที่บันทึกรายได้แล้วแต่รายการหักนี้ยังไม่ผูก ไม่ได้ "รอ" รายได้อีก — คู่กับปุ่ม "ผูกกับรายได้" บนแถว
+const DEDUCTION_UNLINKED: Spec = { label: 'ยังไม่ผูกกับรายได้', color: 'default', icon: <LinkOffRounded /> };
 const RESERVE_PENDING: Spec = { label: 'ยังไม่ได้กัน', color: 'default', icon: <RadioButtonUncheckedRounded /> };
 const BY_KIND: Partial<Record<PlanKind, Partial<Record<PaymentState, Spec>>>> = {
   payroll_deduction: { unpaid: DEDUCTION_PENDING, overdue: DEDUCTION_PENDING },
@@ -50,7 +53,9 @@ export const PAYMENT_STATE_LABEL = Object.fromEntries(
   Object.entries(SPECS).map(([state, spec]) => [state, spec.label]),
 ) as Record<PaymentState, string>;
 
-export default function PaymentStatusChip({ state, kind }: { state: PaymentState; kind?: PlanKind }) {
-  const spec = (kind != null ? BY_KIND[kind]?.[state] : undefined) ?? SPECS[state] ?? SPECS.unpaid;
+/** `incomeRecorded` = เดือนนี้บันทึกรายได้แล้ว — รายการหักที่ยังค้างขึ้น "ยังไม่ผูกกับรายได้" แทน "รอบันทึกรายได้" */
+export default function PaymentStatusChip({ state, kind, incomeRecorded = false }: { state: PaymentState; kind?: PlanKind; incomeRecorded?: boolean }) {
+  const byKind = kind != null ? BY_KIND[kind]?.[state] : undefined;
+  const spec = (incomeRecorded && byKind === DEDUCTION_PENDING ? DEDUCTION_UNLINKED : byKind) ?? SPECS[state] ?? SPECS.unpaid;
   return <Chip size="small" icon={spec.icon} label={spec.label} color={spec.color} variant="outlined" />;
 }

@@ -24,11 +24,25 @@ function amount(value: string): number {
 
 export type IncomeSectionHandle = {
   openNewFor: (itemId: number) => void;
-  /** true = เปิดฟอร์มแก้ไขรายได้แล้ว (เดือนนี้มีรายได้รายการเดียว) — false = เลื่อนไปที่ส่วนรายได้แทน */
-  linkDeduction: (itemId: number) => boolean;
+  /**
+   * true = เปิดฟอร์มแก้ไขรายได้แล้ว: `incomeId` ที่เลือกจากเมนู หรือรายได้รายการเดียวของเดือน
+   * false = เลื่อนไปที่ส่วนรายได้แทน (โหลดไม่สำเร็จ / หารายได้หรือรายการหักไม่เจอ)
+   */
+  linkDeduction: (itemId: number, incomeId?: number) => boolean;
+  /** รายได้ที่บันทึกแล้วของเดือนนี้ (ว่างเมื่อโหลดไม่สำเร็จ) — ตัวเลือกของเมนู "ผูกกับรายได้" เมื่อมีหลายรายการ */
+  incomes: () => IncomeRecord[];
 };
 
-export default forwardRef<IncomeSectionHandle, { month: string; closed: boolean; items: PlanItem[]; onChanged: () => Promise<void> }>(function IncomeSection({ month, closed, items, onChanged }, ref) {
+type Props = {
+  month: string;
+  closed: boolean;
+  items: PlanItem[];
+  onChanged: () => Promise<void>;
+  /** ฟอร์มรายได้ปิดสนิทแล้ว — ผู้เรียกประกาศผลการบันทึกที่จุดนี้ (`#root` เป็น aria-hidden ระหว่าง modal เปิด) */
+  onExited?: () => void;
+};
+
+export default forwardRef<IncomeSectionHandle, Props>(function IncomeSection({ month, closed, items, onChanged, onExited }, ref) {
   const [rows, setRows] = useState<IncomeRecord[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,7 +50,7 @@ export default forwardRef<IncomeSectionHandle, { month: string; closed: boolean;
   const [revision, setRevision] = useState(0);
   const [editing, setEditing] = useState<IncomeRecord | 'new' | null>(null);
   const [form, setForm] = useState<Form>(emptyForm);
-  // ค่าตอนเปิดฟอร์ม — ต่างจากนี้ = มีการแก้ค้าง Modal ถามก่อนปิด (The Unsaved Edit Rule)
+  // ค่าตอนเปิดฟอร์ม — ต่างจากนี้ = มีการแก้ค้าง Modal ถามก่อนปิด (The Unsaved Modal Rule)
   const [initialForm, setInitialForm] = useState<Form>(emptyForm);
   const [formError, setFormError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -69,9 +83,8 @@ export default forwardRef<IncomeSectionHandle, { month: string; closed: boolean;
   // dropdown "เชื่อมรายได้ในแผน" เอง โหลดส่วนนี้ไม่สำเร็จ → เลื่อนไปให้เห็นปุ่มลองใหม่ ส่วนรายการที่ไม่อยู่ใน
   // dropdown (ผูกไปแล้ว/มีการจ่าย) ไม่เปิดฟอร์มว่าง เพราะจะได้รายได้ซ้ำที่ไม่ผูกกับแผน
   //
-  // "ผูกกับรายได้" บนแถวรายการหักที่ค้าง "รอบันทึกรายได้" ในเดือนที่บันทึกรายได้ไปแล้ว — รายได้รายการเดียว = เปิดฟอร์มแก้ไข
-  // รายได้นั้นพร้อมแถวหักที่เชื่อมรายการนี้ไว้แล้ว (ผลเท่ากับกด "เพิ่มรายการหัก" แล้วเลือกเอง) หลายรายการ = ไม่เดาว่าหักจากรายได้ไหน
-  // เลื่อนไปให้ผู้ใช้กดแก้ไขรายได้ที่ถูกเอง (ผู้เรียกบอกวิธีใน snackbar)
+  // "ผูกกับรายได้" บนแถวรายการหักที่ค้าง "ยังไม่ผูกกับรายได้" — เปิดฟอร์มแก้ไขรายได้นั้นพร้อมแถวหักที่เชื่อมรายการนี้ไว้แล้ว
+  // (ผลเท่ากับกด "เพิ่มรายการหัก" แล้วเลือกเอง) หลายรายการไม่เดาว่าหักจากรายได้ไหน — ผู้เรียกให้เลือกจากเมนู (incomes) แล้วส่ง incomeId มา
   useImperativeHandle(ref, () => ({
     openNewFor: (itemId) => {
       if (error) { scrollToSection(); return; }
@@ -79,9 +92,10 @@ export default forwardRef<IncomeSectionHandle, { month: string; closed: boolean;
       if (!item) return;
       startForm('new', { ...emptyForm(), monthly_plan_item_id: String(item.id), name: item.name, gross: formatBaht(item.planned_amount_satang) });
     },
-    linkDeduction: (itemId) => {
+    incomes: () => (error ? [] : rows),
+    linkDeduction: (itemId, incomeId) => {
       const item = available('payroll_deduction').find((i) => i.id === itemId);
-      const income = rows.length === 1 ? rows[0] : undefined;
+      const income = incomeId != null ? rows.find((r) => r.id === incomeId) : rows.length === 1 ? rows[0] : undefined;
       if (error || !item || !income) { scrollToSection(); return false; }
       const base = formFor(income);
       startForm(income, { ...base, deductions: [...base.deductions, { deduction_type: 'other', name: item.name, amount: formatBaht(item.planned_amount_satang), monthly_plan_item_id: String(item.id) }] });
@@ -143,6 +157,7 @@ export default forwardRef<IncomeSectionHandle, { month: string; closed: boolean;
       busy={busy}
       dirty={JSON.stringify(form) !== JSON.stringify(initialForm)}
       footer={{ formId: 'income-form', submitLabel: 'บันทึกรายได้' }}
+      onExited={onExited}
     >
       <Stack component="form" id="income-form" spacing={2} onSubmit={(e) => { e.preventDefault(); if (!busy) void save(); }}>
         {editing === 'new' && <TextField select label="เชื่อมรายได้ในแผน" value={form.monthly_plan_item_id} onChange={(e) => { const item = items.find((i) => String(i.id) === e.target.value); setForm({ ...form, monthly_plan_item_id: e.target.value, ...(item ? { name: item.name, gross: formatBaht(item.planned_amount_satang) } : {}) }); }} helperText="แสดงเฉพาะรายการที่ยังไม่เชื่อมและไม่มีการบันทึกจ่ายที่ใช้งาน">
@@ -151,7 +166,7 @@ export default forwardRef<IncomeSectionHandle, { month: string; closed: boolean;
         <TextField label="ชื่อรายได้" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
         <TextField label="รายได้เต็ม (บาท)" required value={form.gross} onChange={(e) => setForm({ ...form, gross: e.target.value })} {...amountHelp(form.gross)} slotProps={{ htmlInput: { inputMode: 'decimal', sx: dataTextSx } }} />
         {/* หัวข้อย่อยใต้ชื่อ dialog (h2) — ขั้น Headline Small ไม่ใช่ h3 ค่าเริ่มต้นของ MUI (3rem) */}
-        <Typography component="h3" sx={{ fontSize: '1rem', fontWeight: 600, lineHeight: 1.5 }}>รายการหักจากรายได้</Typography>
+        <Typography component="h3" variant="h2" sx={{ fontSize: '1rem', lineHeight: 1.5 }}>รายการหักจากรายได้</Typography>
         {form.deductions.map((d, index) => <Box key={index} sx={{ borderBottom: 1, borderColor: 'divider', pb: 2 }}>
           <Stack spacing={1.5}>
             <TextField select label={`ประเภทการหัก ${index + 1}`} value={d.deduction_type} onChange={(e) => updateDeduction(index, { deduction_type: e.target.value as DeductionForm['deduction_type'] })}>{Object.entries(DEDUCTIONS).map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}</TextField>

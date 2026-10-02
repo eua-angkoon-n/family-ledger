@@ -9,7 +9,7 @@ type Props = {
   onClose: () => void;
   children: ReactNode;
   busy?: boolean;
-  /** ฟอร์มต่างจากค่าตอนเปิด — Esc, คลิกฉากหลัง, ปุ่มปิด และ "ยกเลิก" ถามก่อนทิ้ง (The Unsaved Edit Rule) */
+  /** ฟอร์มต่างจากค่าตอนเปิด — Esc, คลิกฉากหลัง, ปุ่มปิด และ "ยกเลิก" ถามก่อนทิ้ง (The Unsaved Modal Rule) */
   dirty?: boolean;
   /**
    * Modal วาดแถบปุ่มล่างเอง "ยกเลิก" + ปุ่มบันทึก — ทุกฟอร์มหน้าตาเดียวกัน และปุ่มยกเลิกผ่านการถามเดียวกับ Esc
@@ -17,9 +17,11 @@ type Props = {
    * ใน onSubmit เอง (busy = aria-disabled ไม่ใช่ disabled — Enter ในช่องกรอกยัง submit ได้)
    */
   footer?: { formId: string; submitLabel: string };
+  /** ปิดสนิทแล้ว (จบ transition) — ระหว่างที่ modal เปิด `#root` เป็น aria-hidden ผลที่ต้องประกาศ (snackbar) ขึ้นหลังจุดนี้ (เหมือน ConfirmDialog) */
+  onExited?: () => void;
 };
 
-export default function Modal({ open, title, onClose, children, busy = false, dirty = false, footer }: Props) {
+export default function Modal({ open, title, onClose, children, busy = false, dirty = false, footer, onExited }: Props) {
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   // ชื่อ dialog = h2 อย่างเดียว ไม่รวมปุ่ม "ปิด" — DialogTitle รับ id ของ aria-labelledby จาก Dialog เป็นค่าเริ่มต้น จึงตั้ง id ของมันแยก
   const titleId = useId();
@@ -30,7 +32,7 @@ export default function Modal({ open, title, onClose, children, busy = false, di
   };
   return (
     <>
-      <Dialog open={open} onClose={requestClose} maxWidth="md" fullWidth aria-labelledby={titleId}>
+      <Dialog open={open} onClose={requestClose} maxWidth="md" fullWidth aria-labelledby={titleId} slotProps={{ transition: { onExited } }}>
         <DialogTitle component="div" id={`${titleId}-bar`}>
           <Stack direction="row" spacing={2} sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
             <Typography component="h2" variant="h2" id={titleId}>{title}</Typography>

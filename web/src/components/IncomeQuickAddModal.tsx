@@ -3,7 +3,7 @@ import { Alert, MenuItem, Stack, TextField, Typography } from '@mui/material';
 import { patch, post, req, type Account, type IncomeRecord, type TxnDetail } from '../api.js';
 import Modal from '../Modal.js';
 import { amountFieldHelp as amountHelp } from '../ui.js';
-import { AMOUNT_FORMAT_HINT, formatBaht, parseBahtToSatang } from '../format.js';
+import { AMOUNT_FORMAT_HINT, formatBaht, parseBahtToSatang, todayInBangkok } from '../format.js';
 import Money from './Money.js';
 
 // สร้าง/แก้ไข "รายได้เต็ม" (income_record) ได้จากทุกที่ที่ผู้ใช้อยู่ ไม่ต้องข้ามไปหน้าวางแผน:
@@ -34,10 +34,6 @@ function amountOrNull(text: string): number | null {
   return parseBahtToSatang(text);
 }
 
-function todayInBangkok(): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-}
-
 function sumOfType(record: IncomeRecord | null, type: string): string {
   if (!record) return '';
   const total = record.deductions.filter((d) => d.deduction_type === type).reduce((s, d) => s + d.amount_satang, 0);
@@ -56,7 +52,7 @@ export default function IncomeQuickAddModal({ open, onClose, onSaved, txn, incom
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  // ค่าตอนเปิด (หรือตอนโหลดค่าเดิมเสร็จ) — ต่างจากนี้ = มีการแก้ค้าง Modal ถามก่อนปิด (The Unsaved Edit Rule)
+  // ค่าตอนเปิด (หรือตอนโหลดค่าเดิมเสร็จ) — ต่างจากนี้ = มีการแก้ค้าง Modal ถามก่อนปิด (The Unsaved Modal Rule)
   const values = JSON.stringify([name, gross, incomeDate, accountId, socialSecurity, withholding]);
   const [initialValues, setInitialValues] = useState(values);
 

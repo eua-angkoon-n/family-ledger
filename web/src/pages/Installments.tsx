@@ -14,7 +14,7 @@ import Modal from '../Modal.js';
 import Money from '../components/Money.js';
 import PaymentStatusChip from '../components/PaymentStatusChip.js';
 import SummaryCard, { summaryRowSx } from '../components/SummaryCard.js';
-import { AMOUNT_FORMAT_HINT, formatBaht, formatDate, parseBahtToSatang } from '../format.js';
+import { AMOUNT_FORMAT_HINT, formatBaht, formatDate, parseBahtToSatang, todayInBangkok } from '../format.js';
 import { amountFieldHelp, BELOW_MD, ConfirmDialog, EmptyState, FeedbackSnackbar, LoadError, MD_UP, PageHeader, RowIconButton, TableSkeleton, type Notice } from '../ui.js';
 
 const STATUS = { active: 'กำลังผ่อน', completed: 'ชำระครบแล้ว', cancelled: 'ยกเลิกแล้ว' };
@@ -28,13 +28,14 @@ type Form = Record<MoneyField, string> & { name: string; installment_count: stri
 type Confirmation = { title: string; description: string; confirmLabel: string; confirmColor?: ButtonProps['color']; success: string; action: () => Promise<unknown> };
 // < md ตัดคอลัมน์รองออกทั้งหัวและแถว (MD_UP / BELOW_MD ของ ui.tsx) แล้วสรุปไว้เป็นบรรทัดรองในคอลัมน์แรก (ท่าเดียวกับ TransactionTable)
 const CELL_SX = { '& .MuiTableCell-root': { px: { xs: 0.75, md: 2 } } } as const;
-function today() { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); }
-const emptyForm = (): Form => ({ name: '', total_amount_satang: '', down_payment_satang: '0', interest_satang: '0', fee_satang: '0', installment_count: '12', frequency_unit: 'month', frequency_interval: '1', first_due_date: today(), down_payment_date: '', default_account_id: '', category_id: '' });
+const emptyForm = (): Form => ({ name: '', total_amount_satang: '', down_payment_satang: '0', interest_satang: '0', fee_satang: '0', installment_count: '12', frequency_unit: 'month', frequency_interval: '1', first_due_date: todayInBangkok(), down_payment_date: '', default_account_id: '', category_id: '' });
 function readAmount(value: string) {
   const n = parseBahtToSatang(value);
   if (n == null || !Number.isSafeInteger(n)) throw new Error(AMOUNT_FORMAT_HINT);
   return n;
 }
+// ตัวคั่นที่ตาเห็นเท่านั้น — screen reader ไม่ต้องอ่าน "จุด" ระหว่างค่า (เหมือนบรรทัดรองของหน้าวางแผน)
+const SEP = <Box component="span" aria-hidden>{' · '}</Box>;
 const dueName = (due: InstallmentDue) => (due.installment_no === 0 ? 'เงินดาวน์' : `งวด ${due.installment_no}`);
 
 function Totals({ totals }: { totals: InstallmentTotals }) {
@@ -67,13 +68,24 @@ export default function Installments() {
   const [formError, setFormError] = useState('');
   const [busy, setBusy] = useState(false);
   const [paying, setPaying] = useState<InstallmentDue | null>(null);
-  const [payment, setPayment] = useState({ amount: '', paid_date: today(), bank_account_id: '' });
+  const [payment, setPayment] = useState({ amount: '', paid_date: todayInBangkok(), bank_account_id: '' });
   const [paymentInitial, setPaymentInitial] = useState(payment);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   // ปุ่มของแถวที่เปิดฟอร์มจ่ายล่าสุด — "ยกเลิกการบันทึกจ่าย" ปิดฟอร์มก่อนเปิด dialog ยืนยัน MUI จึงคืน focus ให้ปุ่มในฟอร์ม
   // ที่หายไปแล้ว (focus ตกไป <body>) หลัง dialog ปิดสนิทส่งกลับมาที่ปุ่มของแถวแทน
   const payButtonRef = useRef<HTMLElement | null>(null);
+  // ปุ่มย้อนกลับ = ที่รับ focus แทนเมื่อปุ่มต้นทางหายไปทั้งปุ่ม ("ยกเลิกแผน" หายเมื่อแผนไม่ได้กำลังผ่อนแล้ว) — h1 focus ไม่ได้
+  const backRef = useRef<HTMLAnchorElement>(null);
+  // โหลดซ้ำหลังทำสำเร็จอาจลบปุ่มที่ถือ focus อยู่ (หลัง dialog ปิดสนิทไปแล้วก็ได้) — ส่งต่อหลังข้อมูลใหม่ commit
+  const rescueAfterLoadRef = useRef(false);
+  // ผลสำเร็จที่เกิดตอน modal/dialog เปิดอยู่ — `#root` เป็น aria-hidden จนปิดสนิท จึงแสดงจาก onExited (เหมือนหน้าวางแผน)
+  const pendingNoticeRef = useRef<Notice | null>(null);
+  const flushNotice = () => {
+    const pending = pendingNoticeRef.current;
+    pendingNoticeRef.current = null;
+    if (pending) setNotice(pending);
+  };
   // id ที่โหลดอยู่ — refresh ของ id เดิมเป็น background: คงข้อมูลเดิม ไม่ขึ้น skeleton ตำแหน่งเลื่อนและ focus จึงไม่หาย
   // ยังไม่มีข้อมูล (detail/list เป็น null ใน render นี้ เช่นลองใหม่หลังโหลดครั้งแรกไม่สำเร็จ) = โหลดเต็มพร้อม skeleton
   const loadedIdRef = useRef<string | null>(null);
@@ -96,18 +108,24 @@ export default function Installments() {
   }, [id, revision]);
 
   const refresh = () => setRevision((n) => n + 1);
-  // สำเร็จ = ปิดฟอร์ม/dialog ที่เปิดอยู่ แจ้งผลใน snackbar แล้วโหลดซ้ำแบบ background — ไม่สำเร็จ = ค้างไว้พร้อม error ในนั้น
+  // สำเร็จ = ปิดฟอร์ม/dialog ที่เปิดอยู่ แจ้งผลใน snackbar หลังปิดสนิท แล้วโหลดซ้ำแบบ background — ไม่สำเร็จ = ค้างไว้พร้อม error ในนั้น
   const run = async (action: () => Promise<unknown>, success: string) => {
     setBusy(true); setFormError('');
-    try { await action(); setPaying(null); setConfirmation(null); setNotice({ message: success, severity: 'success' }); refresh(); }
+    try { await action(); setPaying(null); setConfirmation(null); pendingNoticeRef.current = { message: success, severity: 'success' }; rescueAfterLoadRef.current = true; refresh(); }
     catch (e) { setFormError(e instanceof Error ? e.message : 'ดำเนินการไม่สำเร็จ'); }
     finally { setBusy(false); }
   };
   const openConfirm = (c: Confirmation) => { setFormError(''); setConfirmation(c); };
   const rescueFocus = () => {
-    const target = payButtonRef.current;
-    if ((document.activeElement == null || document.activeElement === document.body) && target?.isConnected) target.focus();
+    if (document.activeElement != null && document.activeElement !== document.body) return;
+    const row = payButtonRef.current;
+    (row?.isConnected ? row : backRef.current)?.focus();
   };
+  useEffect(() => {
+    if (!rescueAfterLoadRef.current) return;
+    rescueAfterLoadRef.current = false;
+    rescueFocus();
+  }, [detail]);
   const openEditor = () => {
     const next = detail ? {
       name: detail.name, total_amount_satang: formatBaht(detail.total_amount_satang), down_payment_satang: formatBaht(detail.down_payment_satang), interest_satang: formatBaht(detail.interest_satang), fee_satang: formatBaht(detail.fee_satang),
@@ -118,7 +136,7 @@ export default function Installments() {
   };
   const openPayment = (due: InstallmentDue, button: HTMLElement) => {
     payButtonRef.current = button;
-    const next = { amount: formatBaht(due.outstanding_satang), paid_date: today(), bank_account_id: detail?.default_account_id == null ? '' : String(detail.default_account_id) };
+    const next = { amount: formatBaht(due.outstanding_satang), paid_date: todayInBangkok(), bank_account_id: detail?.default_account_id == null ? '' : String(detail.default_account_id) };
     setFormError(''); setPaying(due); setPayment(next); setPaymentInitial(next);
   };
   const structureLocked = detail != null && !detail.structural_editable;
@@ -127,8 +145,8 @@ export default function Installments() {
     try {
       const metadata = { name: form.name, default_account_id: form.default_account_id ? Number(form.default_account_id) : null, category_id: form.category_id ? Number(form.category_id) : null };
       const body = structureLocked ? metadata : { ...metadata, total_amount_satang: readAmount(form.total_amount_satang), down_payment_satang: readAmount(form.down_payment_satang), interest_satang: readAmount(form.interest_satang), fee_satang: readAmount(form.fee_satang), installment_count: Number(form.installment_count), frequency_unit: form.frequency_unit, frequency_interval: Number(form.frequency_interval), first_due_date: form.first_due_date, down_payment_date: form.down_payment_date || null };
-      if (detail) { await patch(`/api/installment-plans/${detail.id}`, body); setEditor(false); setNotice({ message: 'บันทึกแผนผ่อนแล้ว', severity: 'success' }); refresh(); }
-      else { const created = await post<{ id: number }>('/api/installment-plans', body); setEditor(false); setNotice({ message: 'เพิ่มแผนผ่อนแล้ว', severity: 'success' }); navigate(`/installments/${created.id}`); }
+      if (detail) { await patch(`/api/installment-plans/${detail.id}`, body); setEditor(false); pendingNoticeRef.current = { message: 'บันทึกแผนผ่อนแล้ว', severity: 'success' }; refresh(); }
+      else { const created = await post<{ id: number }>('/api/installment-plans', body); setEditor(false); pendingNoticeRef.current = { message: 'เพิ่มแผนผ่อนแล้ว', severity: 'success' }; navigate(`/installments/${created.id}`); }
     } catch (e) { setFormError(e instanceof Error ? e.message : 'บันทึกแผนผ่อนไม่สำเร็จ'); }
     finally { setBusy(false); }
   };
@@ -150,12 +168,12 @@ export default function Installments() {
 
   return <Stack spacing={2}>
     {/* ป้ายปุ่มย้อนกลับ = ชื่อหน้าปลายทาง */}
-    <Button component={Link} to={id ? '/installments' : '/planning'} startIcon={<ArrowBackRounded />} sx={{ alignSelf: 'flex-start' }}>{id ? 'แผนผ่อนและยอดคงเหลือ' : 'วางแผนรายเดือน'}</Button>
+    <Button ref={backRef} component={Link} to={id ? '/installments' : '/planning'} startIcon={<ArrowBackRounded />} sx={{ alignSelf: 'flex-start' }}>{id ? 'แผนผ่อนและยอดคงเหลือ' : 'วางแผนรายเดือน'}</Button>
     <PageHeader level={1} id="installments-heading" title={detail?.name ?? (id ? 'รายละเอียดแผนผ่อน' : 'แผนผ่อนและยอดคงเหลือ')} description="บันทึกการจ่ายแต่ละงวดเอง ยอดจ่ายแล้วและคงเหลือเปลี่ยนทันทีที่บันทึก" action={listEmpty ? undefined : <Button variant="contained" startIcon={id ? <EditRounded /> : <AddRounded />} disabled={loading || Boolean(error) || detail?.status === 'cancelled'} onClick={openEditor}>{id ? 'แก้ไขแผนผ่อน' : 'เพิ่มแผนผ่อน'}</Button>} />
     {error && <LoadError message={error} onRetry={refresh} />}
     {loading ? <TableSkeleton rows={5} /> : detail ? <>
-      <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}><PlanStatusChip status={detail.status} />{detail.status === 'active' && <Button color="error" onClick={() => openConfirm({ title: 'ยกเลิกแผนผ่อน', description: 'เก็บประวัติและยอดเดิมไว้ แต่แยกออกจากยอดรวมแผนที่กำลังผ่อน การยกเลิกไม่ได้หมายถึงชำระหนี้แล้ว', confirmLabel: 'ยกเลิกแผน', confirmColor: 'error', success: 'ยกเลิกแผนผ่อนแล้ว', action: () => patch(`/api/installment-plans/${detail.id}`, { status: 'cancelled' }) })}>ยกเลิกแผน</Button>}</Stack>
-      <Typography variant="body2">ราคาซื้อ <Money satang={detail.total_amount_satang} /> · ดาวน์ <Money satang={detail.down_payment_satang} /> · เงินต้นผ่อน <Money satang={detail.financed_amount_satang} /> · ดอกเบี้ย <Money satang={detail.interest_satang} /> · ค่าธรรมเนียม <Money satang={detail.fee_satang} /></Typography>
+      <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}><PlanStatusChip status={detail.status} />{detail.status === 'active' && <Button color="error" onClick={() => { payButtonRef.current = null; openConfirm({ title: 'ยกเลิกแผนผ่อน', description: 'เก็บประวัติและยอดเดิมไว้ แต่แยกออกจากยอดรวมแผนที่กำลังผ่อน การยกเลิกไม่ได้หมายถึงชำระหนี้แล้ว', confirmLabel: 'ยกเลิกแผน', confirmColor: 'error', success: 'ยกเลิกแผนผ่อนแล้ว', action: () => patch(`/api/installment-plans/${detail.id}`, { status: 'cancelled' }) }); }}>ยกเลิกแผน</Button>}</Stack>
+      <Typography variant="body2">ราคาซื้อ <Money satang={detail.total_amount_satang} />{SEP}ดาวน์ <Money satang={detail.down_payment_satang} />{SEP}เงินต้นผ่อน <Money satang={detail.financed_amount_satang} />{SEP}ดอกเบี้ย <Money satang={detail.interest_satang} />{SEP}ค่าธรรมเนียม <Money satang={detail.fee_satang} /></Typography>
       <Totals totals={detail} />
       <TableContainer component={Paper} variant="outlined" tabIndex={0} role="region" aria-label="ตารางงวดผ่อน"><Table size="small" aria-label="งวดผ่อน" sx={CELL_SX}>
         <TableHead><TableRow><TableCell>งวด</TableCell><TableCell sx={MD_UP}>ครบกำหนด</TableCell><TableCell align="right" sx={MD_UP}>ต้องชำระ</TableCell><TableCell align="right" sx={MD_UP}>จ่ายแล้ว</TableCell><TableCell align="right">คงเหลือ</TableCell><TableCell sx={MD_UP}>สถานะ</TableCell><TableCell align="right">จัดการ</TableCell></TableRow></TableHead>
@@ -208,7 +226,7 @@ export default function Installments() {
               <Button component={Link} to={`/installments/${plan.id}`} sx={{ px: 0.75, ml: -0.75, textAlign: 'left', justifyContent: 'flex-start', overflowWrap: 'anywhere' }}>{plan.name}</Button>
               <Box sx={{ ...BELOW_MD, mt: 0.5 }}>
                 <PlanStatusChip status={plan.status} />
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>ทั้งหมด <Money satang={plan.total_payable_satang} /> · จ่ายแล้ว <Money satang={plan.paid_satang} /></Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>ทั้งหมด <Money satang={plan.total_payable_satang} />{SEP}จ่ายแล้ว <Money satang={plan.paid_satang} /></Typography>
               </Box>
             </TableCell>
             <TableCell sx={MD_UP}><PlanStatusChip status={plan.status} /></TableCell>
@@ -218,14 +236,14 @@ export default function Installments() {
           </TableRow>)}</TableBody>
         </Table></TableContainer>
       </>)}
-    <Modal open={editor} title={detail ? 'แก้ไขแผนผ่อน' : 'เพิ่มแผนผ่อน'} onClose={() => setEditor(false)} busy={busy} dirty={JSON.stringify(form) !== JSON.stringify(formInitial)} footer={{ formId: 'installment-plan-form', submitLabel: 'บันทึกแผนผ่อน' }}>
+    <Modal open={editor} title={detail ? 'แก้ไขแผนผ่อน' : 'เพิ่มแผนผ่อน'} onClose={() => setEditor(false)} busy={busy} dirty={JSON.stringify(form) !== JSON.stringify(formInitial)} footer={{ formId: 'installment-plan-form', submitLabel: 'บันทึกแผนผ่อน' }} onExited={flushNotice}>
       <Stack component="form" id="installment-plan-form" spacing={2} onSubmit={(e) => { e.preventDefault(); if (!busy) void save(); }}>
         <TextField label="ชื่อแผนผ่อน" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
         {structureLocked && <Alert severity="info" role="status">แผนนี้มีประวัติการจ่ายหรือเดือนปิดแล้ว จึงแก้ได้เฉพาะชื่อ หมวด และบัญชี</Alert>}
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
           {(Object.entries(MONEY_FIELDS) as [MoneyField, string][]).map(([key, label]) => <TextField key={key} label={label} required disabled={structureLocked} value={form[key]} {...(structureLocked ? {} : amountFieldHelp(form[key]))} onChange={(e) => setForm({ ...form, [key]: e.target.value })} slotProps={{ htmlInput: { inputMode: 'decimal' } }} />)}
         </Box>
-        {payable != null && financed != null && <Typography aria-live="polite">เงินต้นผ่อน <Money satang={financed} /> · ต้องชำระรวมดาวน์ <Money satang={payable} /></Typography>}
+        {payable != null && financed != null && <Typography aria-live="polite">เงินต้นผ่อน <Money satang={financed} />{SEP}ต้องชำระรวมดาวน์ <Money satang={payable} /></Typography>}
         <TextField label="วันครบกำหนดเงินดาวน์" type="date" disabled={structureLocked} value={form.down_payment_date} required={(parseBahtToSatang(form.down_payment_satang) ?? 0) > 0} onChange={(e) => setForm({ ...form, down_payment_date: e.target.value })} slotProps={{ inputLabel: { shrink: true } }} />
         <TextField label="จำนวนงวด (ไม่รวมดาวน์)" type="number" required disabled={structureLocked} value={form.installment_count} onChange={(e) => setForm({ ...form, installment_count: e.target.value })} slotProps={{ htmlInput: { min: 1, step: 1 } }} />
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}><TextField fullWidth label="ทุกกี่รอบ" type="number" required disabled={structureLocked} value={form.frequency_interval} onChange={(e) => setForm({ ...form, frequency_interval: e.target.value })} slotProps={{ htmlInput: { min: 1, step: 1 } }} /><TextField fullWidth select label="หน่วยรอบ" disabled={structureLocked} value={form.frequency_unit} onChange={(e) => setForm({ ...form, frequency_unit: e.target.value as Form['frequency_unit'] })}><MenuItem value="day">วัน</MenuItem><MenuItem value="month">เดือน</MenuItem><MenuItem value="year">ปี</MenuItem></TextField></Stack>
@@ -243,10 +261,11 @@ export default function Installments() {
       busy={busy}
       dirty={payFormOpen && JSON.stringify(payment) !== JSON.stringify(paymentInitial)}
       footer={payFormOpen ? { formId: 'installment-payment-form', submitLabel: 'บันทึกจ่าย' } : undefined}
+      onExited={flushNotice}
     >
       <Stack spacing={2}>
-        {liveDue && <Typography>ครบกำหนด {formatDate(liveDue.due_date)} · คงเหลือ <Money satang={liveDue.outstanding_satang} /></Typography>}
-        {liveDue?.payments.map((p) => <Box key={p.id} sx={{ borderBottom: 1, borderColor: 'divider', pb: 1.5 }}><Typography>{formatDate(p.paid_date)} · <Money satang={p.amount_satang} /> · {p.account_nickname} · {PAYMENT_STATUS[p.status]}</Typography>
+        {liveDue && <Typography>ครบกำหนด {formatDate(liveDue.due_date)}{SEP}คงเหลือ <Money satang={liveDue.outstanding_satang} /></Typography>}
+        {liveDue?.payments.map((p) => <Box key={p.id} sx={{ borderBottom: 1, borderColor: 'divider', pb: 1.5 }}><Typography>{formatDate(p.paid_date)}{SEP}<Money satang={p.amount_satang} />{SEP}{p.account_nickname}{SEP}{PAYMENT_STATUS[p.status]}</Typography>
           {/* ชื่อเดียวกับหน้าวางแผน — busy = aria-disabled (ปุ่มที่ถือ focus ไม่หลุดไป <body>) เดือนปิด = disabled */}
           {p.status !== 'cancelled' && <Button color="error" aria-label={`ยกเลิกการบันทึกจ่าย ${formatDate(p.paid_date)} ฿${formatBaht(p.amount_satang)}`} disabled={liveDue.plan_closed} aria-disabled={busy} onClick={() => { if (busy) return; setPaying(null); openConfirm({ title: 'ยกเลิกการบันทึกจ่าย', description: 'ยอดนี้จะถูกนำออกจากยอดจ่ายแล้ว และคืนเป็นยอดคงเหลือ', confirmLabel: 'ยกเลิกการบันทึกจ่าย', confirmColor: 'error', success: 'ยกเลิกการบันทึกจ่ายแล้ว', action: () => patch(`/api/monthly-item-payments/${p.id}`, { status: 'cancelled' }) }); }}>ยกเลิกการบันทึกจ่าย</Button>}
         </Box>)}
@@ -260,7 +279,7 @@ export default function Installments() {
         {liveDue?.plan_closed && <Alert severity="info" role="status">เดือนของงวดนี้ปิดแล้ว ต้องเปิดเดือนก่อนจึงเพิ่มหรือยกเลิกการบันทึกจ่ายได้</Alert>}
       </Stack>
     </Modal>
-    <ConfirmDialog open={confirmation != null} title={confirmation?.title ?? ''} description={<>{confirmation?.description}{formError && <Alert severity="error" sx={{ mt: 2 }}>{formError}</Alert>}</>} confirmLabel={confirmation?.confirmLabel ?? ''} confirmColor={confirmation?.confirmColor} busy={busy} onClose={() => setConfirmation(null)} onConfirm={() => { if (confirmation) void run(confirmation.action, confirmation.success); }} onExited={rescueFocus} />
+    <ConfirmDialog open={confirmation != null} title={confirmation?.title ?? ''} description={<>{confirmation?.description}{formError && <Alert severity="error" sx={{ mt: 2 }}>{formError}</Alert>}</>} confirmLabel={confirmation?.confirmLabel ?? ''} confirmColor={confirmation?.confirmColor} busy={busy} onClose={() => setConfirmation(null)} onConfirm={() => { if (confirmation) void run(confirmation.action, confirmation.success); }} onExited={() => { rescueFocus(); flushNotice(); }} />
     <FeedbackSnackbar notice={notice} onClose={() => setNotice(null)} />
   </Stack>;
 }

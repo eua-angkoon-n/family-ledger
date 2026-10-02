@@ -48,7 +48,8 @@ export const BELOW_MD = { display: { md: 'none' } } as const;
  * (ใส่ชื่อแถวด้วย เช่น "แก้ไข ค่าเช่าบ้าน") ส่วน `tooltip` คือคำสั้นที่ตาเห็น (ไม่ส่ง = ใช้ label)
  * `disabledReason` = ทำไม่ได้เพราะตัวรายการเอง: ปุ่มยังอยู่ในลำดับ tab (aria-disabled) tooltip บอกเหตุผล ทั้งเมาส์และ focus
  * Tooltip ห่อปุ่มตรง ๆ เหตุผลจึงเป็น accessible description ของปุ่มเอง (describeChild: title ตอนปิด, aria-describedby ตอนเปิด)
- * span ห่อเฉพาะตอน `disabled` จริง — Tooltip ของ MUI ฟัง event จากปุ่มที่ disabled ไม่ได้
+ * span ห่อเฉพาะตอน `disabled` จริง — Tooltip ของ MUI ฟัง event จากปุ่มที่ disabled ไม่ได้ ตอนนั้นใช้ describeChild ด้วย
+ * ไม่งั้น Tooltip ใส่ aria-label ให้ span (generic ตั้งชื่อไม่ได้) — ชื่อคือ aria-label ของปุ่มเองเสมอ
  */
 export function RowIconButton({
   label,
@@ -65,7 +66,7 @@ export function RowIconButton({
     </IconButton>
   );
   return (
-    <Tooltip title={blocked ? disabledReason : (tooltip ?? label)} describeChild={blocked}>
+    <Tooltip title={blocked ? disabledReason : (tooltip ?? label)} describeChild={blocked || Boolean(props.disabled)}>
       {props.disabled ? <span>{button}</span> : button}
     </Tooltip>
   );
