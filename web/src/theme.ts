@@ -2,7 +2,8 @@ import { alpha, createTheme, type Shadows } from '@mui/material/styles';
 
 // ธีมทั้งชุด (สี ฟอนต์ รัศมีมุม เงา) มาจาก tweakcn "Bubblegum" (https://tweakcn.com/r/themes/bubblegum.json)
 // ค่า oklch ในไฟล์ต้นทางแปลงเป็น hex (sRGB, gamut-mapped) เพราะ MUI palette อ่าน oklch() ไม่ได้
-// ยกเว้น income/expense/warning ซึ่งไม่มีในธีม — เลือกเองให้ผ่าน AA บนพื้นของ Bubblegum
+// ยกเว้น (1) income/expense/warning ซึ่งไม่มีในธีม — เลือกเองให้ผ่าน AA และ (2) สีตัวอักษร/ขอบช่องกรอก/focus ring
+// ที่ปรับให้ผ่าน AA ตามที่ผู้ใช้อนุมัติ 2026-10-02 (รายการด้านล่าง) — พื้น การ์ด เงา เส้นขอบตกแต่ง และสีกราฟยังตรงธีม
 
 // token ที่ MUI palette ไม่มีช่องให้ — ใช้ผ่าน theme.vars.palette.brand.* (ได้ CSS var ตามธีมที่ใช้อยู่)
 // ห้ามส่งค่าใน brand ผ่าน theme.alpha(): มันแปลงเป็น var(--…Channel) ซึ่ง MUI สร้างให้แค่ช่องมาตรฐาน
@@ -41,23 +42,26 @@ declare module '@mui/material/styles' {
 }
 
 /*
- * Contrast ที่ยังไม่ผ่าน WCAG AA — ผู้ใช้ตัดสินใจใช้ค่าของธีมตรงตัว และจะตรวจกับหน้าจอจริงก่อน
- * (รายการเดียวกับ DESIGN.md หัวข้อ "Contrast ที่ยังไม่ผ่าน AA (รอผู้ใช้ตรวจของจริง)") — ค่าทางเลือกผ่าน AA แล้ว
+ * ปรับให้ผ่าน WCAG AA ตามที่ผู้ใช้อนุมัติ 2026-10-02 (ค่าเดิมของ Bubblegum → ค่าใหม่, ratio บน background / card / popover)
+ * รายการเดียวกับ DESIGN.md หัวข้อ "Contrast"
  *
  * light
- *   ตัวอักษรขาวบน primary #d04f99 ............ 3.99      → primary #b43481 (5.60)
- *   primary เป็นตัวอักษรบน background / card . 3.32/3.45 → #b43481 (4.66/4.84)
- *   muted-foreground #7a7a7a บน bg / card .... 3.57/3.71 → #676767 (4.71/4.88)
- *   destructive #f96f70 เป็นตัวอักษร ......... 2.32      → #bd373f (4.62)
- *   ตัวอักษรขาวบน destructive ................ 2.79      → destructive #cb454a (4.68)
- *   ring #e670ab (ต้อง ≥ 3:1) ................ 2.40      → #d15d98 (3.05)
- *   input #e4e4e4 ขอบช่องกรอก (ต้อง ≥ 3:1) ... 1.06/1.10 → #868686 (3.03/3.14)
- *   chart-1..5 บน card ...................... 1.10–2.49 (chart-3 #fbe2a7 = 1.10 แทบมองไม่เห็น)
+ *   primary (ตัวอักษร/ลิงก์ + พื้นปุ่มหลัก) #d04f99 → #b43481 ... 4.67/4.85/5.61, ขาวบนปุ่ม 3.99 → 5.61
+ *   muted-foreground #7a7a7a → #676767 ................... 4.70/4.88/5.65
+ *   destructive #f96f70 → #bd373f ........................ 4.62/4.80/5.56, ขาวบนปุ่มลบ 2.79 → 5.56
+ *   ring #e670ab → #d15d98 (ต้อง ≥ 3:1) .................. 3.05/3.16/3.66
+ *   input (ขอบช่องกรอก) #e4e4e4 → #868686 (ต้อง ≥ 3:1) ... 3.03/3.15/3.65
  * dark
- *   accent-foreground #f3e3ea บน accent #c67b96 (hover) 2.54 → ตัวอักษร #12242e (5.07)
- *   destructive #e35ea4 เป็นตัวอักษรบน card .. 4.28      → #e66aaa (4.68)
- *   input #20333d ขอบช่องกรอก (ต้อง ≥ 3:1) ... 1.22/1.07 → #5d7c90 (3.61/3.17)
- *   chart-5 #24272b บน card ................. 1.07 (มองไม่เห็น), chart-4 #175c6c 1.86
+ *   accent-foreground (ตัวอักษรตอน hover บน accent #c67b96) #f3e3ea → #12242e ... 2.54 → 5.06
+ *   destructive #e35ea4 → #e66aaa ........................ 5.30/4.67/4.67, destructive-foreground #12242e บนปุ่ม 4.85 → 5.30
+ *   input (ขอบช่องกรอก) #20333d → #5d7c90 (ต้อง ≥ 3:1) ... 3.61/3.17/3.17 — พื้นช่องกรอก (inputBg) ยังเป็น #20333d/30 ตามธีม
+ *
+ * ที่ยังไม่ผ่าน (ผู้ใช้ให้คงสีกราฟตามธีม): ธีมสว่าง chart-1..4 บน card 1.10–2.49 (chart-3 #fbe2a7 = 1.10 แทบมองไม่เห็น;
+ * chart-5 #d7488e ผ่าน 3.48), ธีมมืด chart-5 #24272b 1.07 (มองไม่เห็น), chart-4 #175c6c 1.86 — ทุกอนุกรมจึงต้องมี label
+ *
+ * warning ไม่มีในธีม — เลือกให้ผ่าน AA เป็นตัวอักษรทั้งสองโหมด (alert เตือนและตัวนับปัญหาที่ > 0)
+ *   สว่าง #9a4d00: 5.08/5.27/6.10 บน background/card/popover, ขาวบนพื้นนี้ 6.11
+ *   มืด #ffa726 (= ค่าเริ่มต้นของ MUI ตั้งไว้ชัด ๆ): 8.18/7.20/7.20, ดำ 87% บนพื้นนี้ 9.16
  */
 export const tokens = {
   light: {
@@ -65,25 +69,27 @@ export const tokens = {
     foreground: '#5b5b5b',
     card: '#fdedc9',
     popover: '#ffffff',
-    primary: '#d04f99',
+    primary: '#b43481',
     primaryForeground: '#ffffff',
     secondary: '#8acfd1',
     secondaryForeground: '#333333',
     muted: '#b2e1eb',
-    mutedForeground: '#7a7a7a',
+    mutedForeground: '#676767',
     accent: '#fbe2a7',
     accentForeground: '#333333',
-    destructive: '#f96f70',
+    destructive: '#bd373f',
     destructiveForeground: '#ffffff',
     border: '#d04f99',
-    input: '#e4e4e4',
+    input: '#868686',
     inputBg: 'transparent',
-    ring: '#e670ab',
+    ring: '#d15d98',
     sidebar: '#f8d8ea',
     sidebarAccent: '#f9a8d4',
     sidebarAccentForeground: '#333333',
     income: '#047743',
     expense: '#c13234',
+    warning: '#9a4d00',
+    warningForeground: '#ffffff',
     shadowSm: '3px 3px 0px 0px hsl(325.7800 58.1800% 56.8600% / 1.00), 3px 1px 2px -1px hsl(325.7800 58.1800% 56.8600% / 1.00)',
     shadowMd: '3px 3px 0px 0px hsl(325.7800 58.1800% 56.8600% / 1.00), 3px 2px 4px -1px hsl(325.7800 58.1800% 56.8600% / 1.00)',
     shadowLg: '3px 3px 0px 0px hsl(325.7800 58.1800% 56.8600% / 1.00), 3px 4px 6px -1px hsl(325.7800 58.1800% 56.8600% / 1.00)',
@@ -102,11 +108,12 @@ export const tokens = {
     muted: '#24272b',
     mutedForeground: '#e4a2b1',
     accent: '#c67b96',
-    accentForeground: '#f3e3ea',
-    destructive: '#e35ea4',
+    accentForeground: '#12242e',
+    destructive: '#e66aaa',
     destructiveForeground: '#12242e',
     border: '#324859',
-    input: '#20333d',
+    input: '#5d7c90',
+    // พื้นช่องกรอกยังเป็น input เดิมของธีม (#20333d) ที่ 30% — ปรับเฉพาะเส้นขอบ
     inputBg: alpha('#20333d', 0.3),
     ring: '#50afb6',
     sidebar: '#101f28',
@@ -114,6 +121,8 @@ export const tokens = {
     sidebarAccentForeground: '#1f2937',
     income: '#52cd86',
     expense: '#f5674e',
+    warning: '#ffa726',
+    warningForeground: 'rgba(0, 0, 0, 0.87)',
     shadowSm: '3px 3px 0px 0px hsl(206.1538 28.0576% 27.2549% / 1.00), 3px 1px 2px -1px hsl(206.1538 28.0576% 27.2549% / 1.00)',
     shadowMd: '3px 3px 0px 0px hsl(206.1538 28.0576% 27.2549% / 1.00), 3px 2px 4px -1px hsl(206.1538 28.0576% 27.2549% / 1.00)',
     shadowLg: '3px 3px 0px 0px hsl(206.1538 28.0576% 27.2549% / 1.00), 3px 4px 6px -1px hsl(206.1538 28.0576% 27.2549% / 1.00)',
@@ -132,6 +141,7 @@ function paletteFor(t: Tokens) {
     secondary: { main: t.secondary, contrastText: t.secondaryForeground },
     error: { main: t.destructive, contrastText: t.destructiveForeground },
     success: { main: t.income },
+    warning: { main: t.warning, contrastText: t.warningForeground },
     // StudentLoan.tsx ใช้ info เป็นสถานะกลาง ๆ — map ไปที่ muted-foreground แล้วให้ไอคอน + ข้อความสื่อความหมาย
     info: { main: t.mutedForeground },
     action: {
@@ -202,10 +212,30 @@ const shadows = Array.from({ length: 25 }, (_, i) => (i === 0 ? 'none' : SHADOW(
 const theme = createTheme({
   cssVariables: { colorSchemeSelector: 'data-mui-color-scheme' },
   colorSchemes: {
-    // warning ไม่มีในธีม: ธีมสว่างใช้ค่าที่เข้มพอเป็นตัวอักษร (5.09:1 บน background), ธีมมืดใช้ค่าเริ่มต้นของ MUI (#ffa726)
-    light: { palette: { ...paletteFor(tokens.light), warning: { main: '#9a4d00', contrastText: '#ffffff' } } },
-    dark: { palette: paletteFor(tokens.dark) },
+    light: { palette: paletteFor(tokens.light) },
+    dark: {
+      palette: {
+        ...paletteFor(tokens.dark),
+        // snackbar แบบ filled ของธีมมืด MUI ใช้พื้น *.dark (= main เข้มลง 30%) ตัวอักษรขาว: success 3.94, info 4.08,
+        // warning 3.83 ไม่ผ่าน 4.5 — ใช้พื้น main + ตัวอักษรดำ 87% แทน (8.88 / 8.60 / 9.16) error เดิมผ่านอยู่แล้ว (5.58)
+        // ตั้งที่ Alert ไม่ใช่ *.dark = main เพราะปุ่ม contained สี warning (ConfirmDialog) ใช้ *.dark เป็นพื้นตอน hover
+        Alert: {
+          successFilledBg: tokens.dark.income,
+          successFilledColor: 'rgba(0, 0, 0, 0.87)',
+          infoFilledBg: tokens.dark.mutedForeground,
+          infoFilledColor: 'rgba(0, 0, 0, 0.87)',
+          warningFilledBg: tokens.dark.warning,
+          warningFilledColor: 'rgba(0, 0, 0, 0.87)',
+        },
+      },
+    },
   },
+  // focus ring ชุดเดียวของทุก control ที่เป็น ButtonBase (ปุ่ม, icon button, tab, chip, รายการเมนู/drawer, การ์ดสรุป)
+  // MUI ใส่ให้ที่ .Mui-focusVisible เอง — 2px สี ring ห่าง 2px; tab/รายการเมนู/drawer MUI หด ring เข้าด้านใน (กัน
+  // scroller/list ตัด) ring จึงอยู่บนพื้นของรายการเอง ซึ่งสี ring ไม่ผ่าน (ดู MuiTab/MuiListItemButton/MuiMenuItem ด้านล่าง)
+  focusVisible: { outlineColor: 'var(--mui-palette-brand-ring)' },
+  // transition ของ MUI (Fade/Grow/Slide/Collapse, ripple, indicator ของ tabs) เป็น 0 เมื่อผู้ใช้ตั้ง reduced motion
+  motion: { reducedMotion: 'system' },
   shape: { borderRadius: radii.lg },
   shadows: shadows as Shadows,
   transitions: {
@@ -222,6 +252,10 @@ const theme = createTheme({
   },
   typography: {
     fontFamily: fontFamilies.sans,
+    // โหลดจาก Google Fonts แค่ 400 กับ 600 (web/index.html) — 500/700 ที่ MUI ใช้เอง (Tooltip, AlertTitle, DialogTitle,
+    // <strong>) จึงชี้มาที่ 600 ไม่งั้นเบราว์เซอร์ตกไปใช้ 400 หรือสังเคราะห์ตัวหนาเอง
+    fontWeightMedium: 600,
+    fontWeightBold: 600,
     h1: { ...brandCopySx, fontWeight: 600, fontSize: '1.75rem', lineHeight: 1.3, letterSpacing: 0, textWrap: 'balance' },
     h2: { ...brandCopySx, fontWeight: 600, fontSize: '1.25rem', lineHeight: 1.4, letterSpacing: 0, textWrap: 'balance' },
     subtitle1: { letterSpacing: 0 },
@@ -241,7 +275,9 @@ const theme = createTheme({
           WebkitFontSmoothing: 'antialiased',
         },
         '#root': { minHeight: '100vh' },
+        // สำรองให้ element ที่ไม่ใช่ ButtonBase (ลิงก์ในข้อความ ฯลฯ) — control ของ MUI ใช้ theme.focusVisible ด้านบน
         ':focus-visible': { outline: `2px solid ${theme.vars.palette.brand.ring}`, outlineOffset: 2 },
+        'strong, b': { fontWeight: 600 },
         '::selection': {
           backgroundColor: theme.vars.palette.brand.sidebarAccent,
           color: theme.vars.palette.brand.sidebarAccentForeground,
@@ -257,23 +293,16 @@ const theme = createTheme({
     MuiButton: {
       defaultProps: { disableElevation: true },
       styleOverrides: {
-        root: ({ theme }) => ({
+        root: {
           minHeight: 40,
           paddingInline: 16,
           borderRadius: radii.md,
           transition: 'background-color 180ms cubic-bezier(0.16, 1, 0.3, 1), border-color 180ms cubic-bezier(0.16, 1, 0.3, 1)',
-          '&:focus-visible': { outline: `2px solid ${theme.vars.palette.brand.ring}`, outlineOffset: 2 },
-        }),
+        },
       },
     },
     MuiIconButton: {
-      styleOverrides: {
-        root: ({ theme }) => ({
-          minWidth: 40,
-          minHeight: 40,
-          '&:focus-visible': { outline: `2px solid ${theme.vars.palette.brand.ring}`, outlineOffset: 2 },
-        }),
-      },
+      styleOverrides: { root: { minWidth: 40, minHeight: 40 } },
     },
     MuiPaper: {
       styleOverrides: {
@@ -313,7 +342,10 @@ const theme = createTheme({
             backgroundColor: theme.vars.palette.brand.sidebarAccent,
             color: theme.vars.palette.brand.sidebarAccentForeground,
           },
-          '&:focus-visible': { outline: `2px solid ${theme.vars.palette.brand.ring}`, outlineOffset: -2 },
+          // ring ด้านใน (MUI หดเข้า 6px) อยู่บนพื้นของ tab เอง: ring ของธีมบน sidebar-accent ที่เลือกเหลือ 2.02 (สว่าง) /
+          // 1.42 (มืด) — ใช้สีตัวอักษรของ tab ในสถานะนั้นแทน ซึ่งผ่าน 4.5 กับพื้นของมันทุกสถานะอยู่แล้ว (ปกติ 4.71/7.67,
+          // hover 9.95/5.07, เลือก 6.97/8.09 สว่าง/มืด) ใช้กับรายการใน drawer/เมนูด้วยเหตุผลเดียวกัน (sidebar 5.17/13.60)
+          '&.Mui-focusVisible': { outlineColor: 'currentColor' },
         }),
       },
     },
@@ -322,6 +354,7 @@ const theme = createTheme({
     MuiListItemButton: {
       styleOverrides: {
         root: ({ theme }) => ({
+          '&.Mui-focusVisible': { outlineColor: 'currentColor' },
           '&:hover': { color: theme.vars.palette.brand.accentForeground },
           '&.Mui-selected, &.Mui-selected:hover, &.Mui-selected.Mui-focusVisible': {
             backgroundColor: theme.vars.palette.brand.sidebarAccent,
@@ -333,6 +366,7 @@ const theme = createTheme({
     MuiMenuItem: {
       styleOverrides: {
         root: ({ theme }) => ({
+          '&.Mui-focusVisible': { outlineColor: 'currentColor' },
           '&:hover': { color: theme.vars.palette.brand.accentForeground },
           '&.Mui-selected, &.Mui-selected:hover, &.Mui-selected.Mui-focusVisible': {
             backgroundColor: theme.vars.palette.brand.sidebarAccent,
@@ -427,6 +461,8 @@ const theme = createTheme({
           border: `1px solid ${theme.vars.palette.divider}`,
           borderRadius: radii.md,
           fontSize: '0.875rem',
+          // คำอธิบาย ไม่ใช่ป้าย — MUI ใช้ fontWeightMedium (ตอนนี้ = 600)
+          fontWeight: 400,
         }),
       },
     },

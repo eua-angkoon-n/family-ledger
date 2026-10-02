@@ -737,7 +737,7 @@ export default function MonthlyPlan() {
       />
       <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
         {plan?.data_coverage_note ??
-          'ข้อมูลเงินจริงคำนวณจาก Bank Statement ที่นำเข้าสู่ระบบเท่านั้น ไม่รวมเงินสดและ e-Wallet'}
+          'ข้อมูลเงินจริงคำนวณจาก bank statement ที่นำเข้าสู่ระบบเท่านั้น ไม่รวมเงินสดและ e-Wallet'}
       </Typography>
 
       <Stack direction="row" spacing={1.5} sx={{ mt: 3, alignItems: 'center', flexWrap: 'wrap' }}>

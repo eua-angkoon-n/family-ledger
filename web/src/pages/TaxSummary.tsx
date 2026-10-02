@@ -21,7 +21,7 @@ import { EmptyState, FeedbackSnackbar, LoadError, PageHeader, TableSkeleton, typ
 
 // §16 ข้อ 13 ของแผนต้นฉบับ — ทุกรายงานต้องระบุว่าไม่รวมเงินสดและ e-Wallet (หน้านี้เป็นรายงานการเงินที่ใหญ่ที่สุด
 // ในระบบ ตัวเลขมาจาก txn ที่ import จาก statement เท่านั้น เหมือน Dashboard/Transactions/MonthlyPlan/Installments)
-const COVERAGE_NOTE = 'ข้อมูลเงินจริงคำนวณจาก Bank Statement ที่นำเข้าสู่ระบบเท่านั้น ไม่รวมเงินสดและ e-Wallet';
+const COVERAGE_NOTE = 'ข้อมูลเงินจริงคำนวณจาก bank statement ที่นำเข้าสู่ระบบเท่านั้น ไม่รวมเงินสดและ e-Wallet';
 
 function currentTaxYearCE(): number {
   return new Date().getFullYear();

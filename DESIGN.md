@@ -4,24 +4,25 @@ name: Hyacinthia Ledger
 description: บัญชีรายรับ-จ่าย ที่เป็นมิตรสำหรับทุกคน
 colors:
   # ที่มา: tweakcn "Bubblegum" (https://tweakcn.com/r/themes/bubblegum.json) แปลง oklch → hex (sRGB, gamut-mapped)
+  # ค่าที่มี "# AA" ต่อท้าย = ปรับจากค่าของธีมให้ผ่าน WCAG AA ตามที่ผู้ใช้อนุมัติ 2026-10-02 (ดูหัวข้อ Contrast)
   # source of truth ของโค้ดอยู่ที่ web/src/theme.ts `tokens.light` / `tokens.dark`
   light-background: "#f6e6ee"
   light-foreground: "#5b5b5b"
   light-card: "#fdedc9"
   light-popover: "#ffffff"
-  light-primary: "#d04f99"
+  light-primary: "#b43481" # AA, ธีม #d04f99
   light-primary-foreground: "#ffffff"
   light-secondary: "#8acfd1"
   light-secondary-foreground: "#333333"
   light-muted: "#b2e1eb"
-  light-muted-foreground: "#7a7a7a"
+  light-muted-foreground: "#676767" # AA, ธีม #7a7a7a
   light-accent: "#fbe2a7"
   light-accent-foreground: "#333333"
-  light-destructive: "#f96f70"
+  light-destructive: "#bd373f" # AA, ธีม #f96f70
   light-destructive-foreground: "#ffffff"
   light-border: "#d04f99"
-  light-input: "#e4e4e4"
-  light-ring: "#e670ab"
+  light-input: "#868686" # AA, ธีม #e4e4e4
+  light-ring: "#d15d98" # AA, ธีม #e670ab
   light-sidebar: "#f8d8ea"
   light-sidebar-accent: "#f9a8d4"
   light-sidebar-accent-foreground: "#333333"
@@ -41,11 +42,11 @@ colors:
   dark-muted: "#24272b"
   dark-muted-foreground: "#e4a2b1"
   dark-accent: "#c67b96"
-  dark-accent-foreground: "#f3e3ea"
-  dark-destructive: "#e35ea4"
+  dark-accent-foreground: "#12242e" # AA, ธีม #f3e3ea
+  dark-destructive: "#e66aaa" # AA, ธีม #e35ea4
   dark-destructive-foreground: "#12242e"
   dark-border: "#324859"
-  dark-input: "#20333d"
+  dark-input: "#5d7c90" # AA เฉพาะเส้นขอบ (พื้นช่องกรอกยังเป็น #20333d/30), ธีม #20333d
   dark-ring: "#50afb6"
   dark-sidebar: "#101f28"
   dark-sidebar-accent: "#f9a8d4"
@@ -53,6 +54,7 @@ colors:
   dark-shadow: "#324859"
   dark-income: "#52cd86"
   dark-expense: "#f5674e"
+  dark-warning: "#ffa726"
   # chart-1..5 ของแต่ละโหมดอยู่ที่ tokens.<light|dark>.categoryPalette ใน theme.ts (ใช้กับกราฟเท่านั้น)
 typography:
   headline-large:
@@ -65,6 +67,16 @@ typography:
     fontSize: "1.25rem"
     fontWeight: 600
     lineHeight: 1.4
+  headline-small:
+    fontFamily: "Poppins, Noto Sans Thai, system-ui, sans-serif"
+    fontSize: "1rem"
+    fontWeight: 600
+    lineHeight: 1.5
+  data-display:
+    fontFamily: "Poppins, Noto Sans Thai, system-ui, sans-serif"
+    fontSize: "1.25rem" # 1.125–1.75rem ตามความกว้างการ์ด ดู Hierarchy
+    fontWeight: 400
+    lineHeight: 1.3
   description:
     fontFamily: "Poppins, Noto Sans Thai, system-ui, sans-serif"
     fontSize: "1rem"
@@ -86,6 +98,7 @@ typography:
     fontFamily: "Fira Code, ui-monospace, monospace"
     fontSize: "0.85em"
     fontWeight: 400
+  # token เท่านั้น — ไม่ได้โหลดจาก Google Fonts และยังไม่มีที่ใช้
   serif:
     fontFamily: "Lora, Noto Serif Thai, serif"
     fontSize: "1rem"
@@ -181,20 +194,21 @@ Hyacinthia Ledger คือสมุดบัญชีครอบครัว�
 
 ## Colors
 
-ใช้ชื่อ token ตาม shadcn (`background`, `primary`, `accent`, `sidebar-accent` …) ในเอกสารนี้เรียกด้วยชื่อ role ซึ่งหมายถึงค่าของโหมดที่แสดงอยู่ (`light-*` หรือ `dark-*` ใน frontmatter) ทุกค่ามาจาก Bubblegum ตรงตัว ยกเว้น `income`, `expense` และ `warning` ซึ่งธีมไม่มี
+ใช้ชื่อ token ตาม shadcn (`background`, `primary`, `accent`, `sidebar-accent` …) ในเอกสารนี้เรียกด้วยชื่อ role ซึ่งหมายถึงค่าของโหมดที่แสดงอยู่ (`light-*` หรือ `dark-*` ใน frontmatter) ทุกค่ามาจาก Bubblegum ตรงตัว ยกเว้น `income`, `expense` และ `warning` ซึ่งธีมไม่มี และสีตัวอักษร/ขอบช่องกรอก/focus ring 8 ค่าที่ปรับให้ผ่าน AA (ดูหัวข้อ Contrast)
 
 ### Primary
 
-- **Bubblegum Pink** / **Butter Yellow** (`primary`): พื้นปุ่ม contained และ chip filled สี primary, ลิงก์, ปุ่ม outlined/text, indicator ของ tab, switch/checkbox ตัวอักษรบนพื้นนี้ใช้ `primary-foreground`
-- **Rose Ring** / **Teal Ring** (`ring`): focus ring 2px ทุก control และเส้นขอบของช่องกรอกตอน focus
+- **Bubblegum Pink (AA)** / **Butter Yellow** (`primary`, สว่าง #b43481 เข้มกว่าธีมให้ผ่าน AA): พื้นปุ่ม contained และ chip filled สี primary, ลิงก์, ปุ่ม outlined/text, indicator ของ tab, switch/checkbox ตัวอักษรบนพื้นนี้ใช้ `primary-foreground`
+- **Rose Ring (AA)** / **Teal Ring** (`ring`): focus ring 2px ห่าง 2px ทุก control และเส้นขอบของช่องกรอกตอน focus — ตั้งที่เดียวคือ `focusVisible` ระดับ theme ใน `theme.ts` (MUI ใส่ให้ทุก ButtonBase เอง) ห้ามเขียน ring ซ้ำต่อ component ยกเว้น tab และรายการใน drawer/เมนูที่ ring อยู่ด้านในบนพื้นของรายการเอง: ใช้สีตัวอักษรของรายการ (`currentColor`) เพราะ `ring` บน `sidebar-accent` ที่เลือกเหลือ 2.02 (สว่าง) / 1.42 (มืด) และบน `sidebar` 2.79 ส่วนสีตัวอักษรผ่าน 4.5 กับพื้นของมันทุกสถานะ (tab ปกติ 4.71/7.67, hover 9.95/5.07, เลือก 6.97/8.09, drawer 5.17/13.60) — tab ที่ไม่ได้เลือกใช้ `ring` ได้แค่ 3.05 บน app bar ธีมสว่าง จึงใช้สีตัวอักษรเหมือนกัน
 
 ### Secondary
 
 - **Mint Lagoon** / **Dusty Rose** (`secondary`): สีรองของธีม (`palette.secondary`) ยังไม่ได้ใช้เป็นสีหลักของหน้าใด
 - **Forest Balance** / **Mint Balance** (`income`): รายรับ สถานะสำเร็จ (`palette.success`) และระบบที่ทำงานปกติ
 - **Brick Expense** / **Ember Expense** (`expense`, `palette.brand.expense`): จำนวนเงินรายจ่ายเท่านั้น แยกจาก `destructive`
-- **Coral Alert** / **Hot Pink Alert** (`destructive`, `palette.error`): ข้อผิดพลาด การปฏิเสธ ปุ่มลบ/destructive action และ alert
-- **Amber Caution** (`warning`, ธีมสว่างเท่านั้น): confirm ที่ต้องระวังและ alert เตือน; ธีมมืดใช้ค่าเริ่มต้นของ MUI (#ffa726)
+- **Coral Alert (AA)** / **Hot Pink Alert (AA)** (`destructive`, `palette.error`): ข้อผิดพลาด การปฏิเสธ ปุ่มลบ/destructive action และ alert
+- **Amber Caution** / **Amber Glow** (`warning`, สว่าง #9a4d00 / มืด #ffa726 อยู่ที่ `tokens.<mode>.warning` ใน `theme.ts`): confirm ที่ต้องระวัง, alert เตือน และตัวนับปัญหาที่มากกว่า 0 (The Issue Count Rule) เป็นตัวอักษรได้ทั้งสองโหมด (สว่าง 5.08/5.27 บน background/card, มืด 8.18/7.20)
+- **Snackbar แบบ filled:** ธีมสว่างใช้พื้น `main` ตัวอักษรขาว (success 5.64, info 5.66, warning 6.11, error 5.55) ธีมมืดพื้นเข้มของ MUI ไม่ผ่าน จึงตั้งพื้น success/info/warning = `main` ตัวอักษรดำ 87% (8.88/8.60/9.16) ส่วน error คงพื้นเข้มตัวอักษรขาว (5.58)
 
 ### Neutral
 
@@ -202,56 +216,67 @@ Hyacinthia Ledger คือสมุดบัญชีครอบครัว�
 - **Butter Card** / **Harbor Card** (`card`, `palette.background.paper`): การ์ด ตาราง และ auth panel
 - **Paper White** / **Harbor Card** (`popover`): menu, popover, tooltip และ dialog
 - **Graphite** / **Petal Mist** (`foreground`): ข้อความหลัก
-- **Soft Graphite** / **Dusty Rose** (`muted-foreground`): metadata, helper text, ข้อความรอง และ `info`
+- **Soft Graphite (AA)** / **Dusty Rose** (`muted-foreground`): metadata, helper text, ข้อความรอง และ `info`
 - **Sky Wash** / **Charcoal Wash** (`muted`): skeleton
-- **Lemon Cream** / **Mauve** (`accent`): พื้นตอน hover ของ tab, รายการใน drawer/เมนู, แถวตาราง และ toggle button (`action.hover`)
+- **Lemon Cream** / **Mauve** (`accent`, ตัวอักษรบนพื้นนี้ `accent-foreground` สว่าง #333333 / มืด #12242e (AA)): พื้นตอน hover ของ tab, รายการใน drawer/เมนู, แถวตาราง และ toggle button (`action.hover`)
 - **Candy Pink** (`sidebar-accent`, ทั้งสองโหมด): พื้นของสิ่งที่ถูกเลือก (tab, รายการใน drawer/เมนู, แถวตาราง, toggle button, text selection) ตัวอักษรใช้ `sidebar-accent-foreground`
 - **Petal Sidebar** / **Night Sidebar** (`sidebar`): พื้นของ drawer เมนูบนมือถือ
 - **Bubblegum Pink** / **Harbor Line** (`border`, `palette.divider`): ขอบการ์ด เส้นตาราง เส้นแบ่ง และขอบ dialog/popover
-- **Fog** / **Harbor Input** (`input`): ขอบช่องกรอก
+- **Fog (AA)** / **Harbor Input (AA)** (`input`): ขอบช่องกรอก (มืด: พื้นช่องกรอกยังเป็น #20333d ที่ 30% ตามธีม)
 
 ### Category Palette
 
 กราฟที่มีหลายอนุกรม (สัดส่วนค่าใช้จ่ายต่อหมวด ยอดคงเหลือต่อบัญชี) ใช้ `chart-1..5` ของธีมตรงตัว (`tokens.<mode>.categoryPalette`) อนุกรมที่เกิน 5 วนสีซ้ำ ทุกอนุกรมต้องมี label กราฟรายรับเทียบรายจ่ายใช้ `income` / `expense`
 
-### Contrast ที่ยังไม่ผ่าน AA (รอผู้ใช้ตรวจของจริง)
+### Contrast
 
-ผู้ใช้ตัดสินใจใช้ค่าของ Bubblegum ตรงตัวแม้บางคู่ไม่ผ่าน WCAG AA และจะตรวจกับหน้าจอจริงก่อนตัดสินว่าจะเปลี่ยนหรือไม่ ค่าทางเลือกด้านล่างผ่าน AA แล้ว (รายการเดียวกับ comment ใน `web/src/theme.ts`)
+#### ปรับแล้วตามที่ผู้ใช้อนุมัติ 2026-10-02
 
-| โหมด | คู่สี | ratio | เกณฑ์ | ทางเลือก |
+ปรับเฉพาะสีที่เป็นตัวอักษร เส้นขอบช่องกรอก และ focus ring ส่วนพื้น การ์ด เงา เส้นขอบตกแต่ง (`border`) และสีกราฟยังตรงกับ Bubblegum ratio คิดบน `background` / `card` / `popover` (รายการเดียวกับ comment ใน `web/src/theme.ts`)
+
+| โหมด | token (บทบาท) | เดิม → ใหม่ | ratio เดิม → ใหม่ | เกณฑ์ |
 |---|---|---|---|---|
-| สว่าง | ตัวอักษรขาวบน `primary` #d04f99 (ปุ่มหลัก) | 3.99 | 4.5 | primary #b43481 (5.60) |
-| สว่าง | `primary` เป็นตัวอักษรบน `background` / `card` (ลิงก์ ปุ่ม text/outlined) | 3.32 / 3.45 | 4.5 | #b43481 (4.66 / 4.84) |
-| สว่าง | `muted-foreground` #7a7a7a บน `background` / `card` | 3.57 / 3.71 | 4.5 | #676767 (4.71 / 4.88) |
-| สว่าง | `destructive` #f96f70 เป็นตัวอักษร | 2.32 | 4.5 | #bd373f (4.62) |
-| สว่าง | ตัวอักษรขาวบน `destructive` (ปุ่มลบ) | 2.79 | 4.5 | destructive #cb454a (4.68) |
-| สว่าง | `ring` #e670ab (focus ring) | 2.40 | 3.0 | #d15d98 (3.05) |
-| สว่าง | `input` #e4e4e4 ขอบช่องกรอก บน `background` / `card` | 1.06 / 1.10 | 3.0 | #868686 (3.03 / 3.14) |
-| สว่าง | `chart-1..5` บน `card` | 1.10–2.49 | 3.0 | chart-3 #fbe2a7 (1.10) แทบมองไม่เห็น |
-| มืด | `accent-foreground` #f3e3ea บน `accent` #c67b96 (ตอน hover) | 2.54 | 4.5 | ตัวอักษร #12242e (5.07) |
-| มืด | `destructive` #e35ea4 เป็นตัวอักษรบน `card` | 4.28 | 4.5 | #e66aaa (4.68) |
-| มืด | `input` #20333d ขอบช่องกรอก บน `background` / `card` | 1.22 / 1.07 | 3.0 | #5d7c90 (3.61 / 3.17) |
+| สว่าง | `primary` เป็นตัวอักษร (ลิงก์ ปุ่ม text/outlined) | #d04f99 → #b43481 | 3.32/3.45/3.99 → 4.67/4.85/5.61 | 4.5 |
+| สว่าง | ตัวอักษรขาวบน `primary` (ปุ่มหลัก) | #d04f99 → #b43481 | 3.99 → 5.61 | 4.5 |
+| สว่าง | `muted-foreground` | #7a7a7a → #676767 | 3.57/3.70/4.29 → 4.70/4.88/5.65 | 4.5 |
+| สว่าง | `destructive` เป็นตัวอักษร | #f96f70 → #bd373f | 2.32/2.41/2.79 → 4.62/4.80/5.56 | 4.5 |
+| สว่าง | ตัวอักษรขาวบน `destructive` (ปุ่มลบ) | #f96f70 → #bd373f | 2.79 → 5.56 | 4.5 |
+| สว่าง | `ring` (focus ring) | #e670ab → #d15d98 | 2.40/2.49/2.88 → 3.05/3.16/3.66 | 3.0 |
+| สว่าง | `input` ขอบช่องกรอก | #e4e4e4 → #868686 | 1.06/1.10/1.27 → 3.03/3.15/3.65 | 3.0 |
+| มืด | `accent-foreground` บน `accent` #c67b96 (ตอน hover) | #f3e3ea → #12242e | 2.54 → 5.06 | 4.5 |
+| มืด | `destructive` เป็นตัวอักษร | #e35ea4 → #e66aaa | 4.85/4.27/4.27 → 5.30/4.67/4.67 | 4.5 |
+| มืด | `destructive-foreground` #12242e บน `destructive` (ปุ่มลบ) | #e35ea4 → #e66aaa | 4.85 → 5.30 | 4.5 |
+| มืด | `input` ขอบช่องกรอก (พื้นยังเป็น #20333d/30) | #20333d → #5d7c90 | 1.21/1.07 → 3.61/3.17 | 3.0 |
+
+#### ยังไม่ผ่าน (ผู้ใช้ให้คงสีกราฟตามธีม)
+
+| โหมด | คู่สี | ratio | เกณฑ์ | หมายเหตุ |
+|---|---|---|---|---|
+| สว่าง | `chart-1..4` บน `card` | 1.10–2.49 | 3.0 | chart-3 #fbe2a7 (1.10) แทบมองไม่เห็น; chart-5 #d7488e ผ่าน (3.48) |
 | มืด | `chart-5` #24272b / `chart-4` #175c6c บน `card` | 1.07 / 1.86 | 3.0 | chart-5 มองไม่เห็น |
+| มืด | `card` #1c2e38 บน `background` / `border` #324859 บน `background` (และบน `card` 1.47) | 1.14 / 1.67 | 3.0 | ขอบการ์ดและเงา hard offset (สีเดียวกับ `border`) จางในธีมมืด การ์ดแยกจากพื้นด้วยตำแหน่งและเงาเยื้องมากกว่าเส้นขอบ — พื้น การ์ด และเส้นขอบตกแต่งเป็นค่าของธีม ปรับเองไม่ได้ |
+
+ทุกอนุกรมในกราฟจึงต้องมี label และกราฟทุกใบมีตารางข้อมูลซ่อนไว้ให้ screen reader อ่าน (ChartCard `table`) และกราฟหลายอนุกรมใส่ขอบ `muted-foreground` 1.5px ให้ชิ้นพาย จุดของกราฟเส้น และช่องสีวงกลมใน legend/tooltip ของทั้งสองกราฟ (`:is(rect, circle).MuiChartsLabelMark-fill` เส้น 3px ครึ่งนอกถูกขอบ svg ตัดเหลือเห็น 1.5px; บน `card` สว่าง 4.88 / มืด 6.75) ชิ้นหรือจุดที่สีจมหายจึงยังเห็นขอบเขตของมัน โดยไม่เปลี่ยนสีกราฟของธีม — พายใช้ช่องสีวงกลมเป็นค่าเริ่มต้น กราฟเส้นตั้ง `labelMarkType: 'circle'` เพราะค่าเริ่มต้น `'line+mark'` เป็น path เส้นสีของอนุกรม ใส่ขอบแล้วสีเส้นเปลี่ยน
 
 ### Named Rules
 
-**The Bubblegum Source Rule.** token ทุกตัวมาจาก tweakcn Bubblegum ตรงตัว ห้ามปรับค่าเองแม้ contrast ไม่ผ่าน ให้บันทึกในตารางด้านบนแล้วรอผู้ใช้ตัดสินใจ ยกเว้น `income`, `expense`, `warning` ที่ธีมไม่มีและต้องผ่าน AA เสมอ
+**The Bubblegum Source Rule.** token ทุกตัวมาจาก tweakcn Bubblegum ตรงตัว ยกเว้น (1) `income`, `expense`, `warning` ที่ธีมไม่มีและต้องผ่าน AA เสมอ และ (2) สีตัวอักษร/ขอบช่องกรอก/focus ring ที่ผู้ใช้อนุมัติให้ใช้ค่า AA เมื่อ 2026-10-02 (ตารางด้านบน) พื้น การ์ด เงา เส้นขอบตกแต่ง และสีกราฟห้ามปรับเอง คู่สีใหม่ที่ไม่ผ่าน AA ให้บันทึกในตาราง "ยังไม่ผ่าน" แล้วรอผู้ใช้ตัดสินใจ
 
 **The Hyacine Identity Rule.** ใช้ layout ของ KBank เป็นข้อมูลอ้างอิงได้ แต่ห้ามนำสีเขียวประจำแบรนด์หรืออัตลักษณ์ของ KBank มาใช้เป็นสีหลัก สีเขียวสงวนไว้สำหรับ `income` และสถานะสำเร็จเท่านั้น
 
-**The Money Color Rule.** จำนวนเงินรายจ่ายใช้ `expense` (แดงอิฐ / ส้มถ่าน) ไม่ใช้ `destructive` ซึ่งเป็นชมพูของธีมและหมายถึง error/การลบ ส่วนรายรับใช้ `income` (`success.main`)
+**The Money Color Rule.** จำนวนเงินรายจ่ายใช้ `expense` (แดงอิฐ / ส้มถ่าน) ไม่ใช้ `destructive` ซึ่งเป็นชมพูของธีมและหมายถึง error/การลบ ส่วนรายรับใช้ `income` (`success.main`) ยอด 0 เป็นสีกลางเสมอแม้ส่ง tone มา (`Money` จัดการให้) เพราะศูนย์ไม่ใช่ทั้งรายรับและรายจ่าย
 
 **The Semantic Color Rule.** สีสถานะต้องมาพร้อมข้อความหรือไอคอนเสมอ ห้ามสื่อความหมายด้วยสีเพียงอย่างเดียว
 
-**The Restrained Accent Rule.** `primary` มีไว้สำหรับ primary action, ลิงก์ และ indicator ของ tab ที่เลือก ไม่ใช่สีตกแต่งทั่วไป `accent` เป็นพื้น hover เท่านั้น และ `sidebar-accent` เป็นพื้นของสิ่งที่ถูกเลือกเท่านั้น ห้ามสลับบทบาทกัน
+**The Restrained Accent Rule.** `primary` มีไว้สำหรับ primary action, ลิงก์ และ indicator ของ tab ที่เลือก ไม่ใช่สีตกแต่งทั่วไป `accent` เป็นพื้น hover เท่านั้น (ยกเว้นการ์ดสรุปที่ hover ด้วยการยกการ์ดตาม The Linked Card Rule) และ `sidebar-accent` เป็นพื้นของสิ่งที่ถูกเลือกเท่านั้น ห้ามสลับบทบาทกัน
 
 **The Theme Mode Rule.** มีสามโหมด: สว่าง, มืด และตามเครื่อง (ค่าเริ่มต้น ตาม `prefers-color-scheme`) ค่าที่เลือกจำไว้ต่อเครื่อง/เบราว์เซอร์ ไม่ผูกกับบัญชีผู้ใช้ ปุ่มสลับเป็น icon button ปุ่มเดียว กดครั้งเดียวเปลี่ยนทันที วนตามลำดับ ตามเครื่อง → สว่าง → มืด → ตามเครื่อง ไอคอนแสดงโหมดปัจจุบัน ไม่มีเมนูและไม่มี Tooltip ชื่อสำหรับ screen reader (`aria-label`) บอกทั้งโหมดปัจจุบันและผลของการกด (เช่น "ธีมสี: ตามเครื่อง — กดเพื่อเปลี่ยนเป็นสว่าง") และคู่มือเกาะ `data-tour="theme-toggle"` เพราะ aria-label เปลี่ยนตามโหมด ตำแหน่ง: บน app bar ทุกขนาดจอและนอก `<nav aria-label="เมนูหลัก">` (≥ 900px อยู่ก่อนไอคอนคู่มือ, < 900px อยู่ขวาของแบรนด์ กดได้โดยไม่ต้องเปิด drawer) ไม่อยู่ใน drawer และหน้าล็อกอิน/รออนุมัติอยู่มุมขวาบนของจอ โค้ดอ่านสีผ่าน `theme.vars.palette.*` หรือ palette path ใน `sx` เสมอ ห้ามฮาร์ดโค้ด hex ของโหมดใดโหมดหนึ่ง
 
 ## Typography
 
-**Sans (ทุกอย่าง):** Poppins 400/500/600/700 จาก Google Fonts ตามด้วย Noto Sans Thai, system-ui — Poppins ไม่มีอักษรไทย ข้อความไทยจึงแสดงด้วย fallback
-**Mono:** Fira Code 400/500 สำหรับ `code` และ JSON ในบันทึกการเปลี่ยนแปลง
-**Serif:** Lora 400/600 โหลดไว้เป็น token เท่านั้น (shadcn ไม่ได้ใช้ serif เป็นค่าเริ่มต้น) ยังไม่มีที่ใช้
+**Sans (ทุกอย่าง):** Poppins 400/600 ตามด้วย Noto Sans Thai 400/600, system-ui — โหลดจาก Google Fonts ทั้งคู่ เฉพาะสองน้ำหนักที่ใช้จริง (`fontWeightMedium`/`fontWeightBold` ของ MUI และ `<strong>` ชี้มาที่ 600) Poppins ไม่มีอักษรไทย อักษรไทยจึงมาจาก Noto Sans Thai ส่วนตัวเลขและละติน (รวมตัวเลขจำนวนเงิน) ยังเป็น Poppins
+**Mono:** Fira Code 400 สำหรับ `code` และ JSON ในบันทึกการเปลี่ยนแปลง
+**Serif:** Lora เป็น token ใน `theme.ts` เท่านั้น ไม่ได้โหลดและยังไม่มีที่ใช้ (shadcn ไม่ได้ใช้ serif เป็นค่าเริ่มต้น) — ถ้าจะใช้ต้องเพิ่มใน `web/index.html` ก่อน
 
 **Character:** Poppins ทรงกลมเรขาคณิตเข้ากับความขี้เล่นของ Bubblegum letter-spacing 0 ทุกระดับ (`tracking-normal` ของธีม)
 
@@ -259,13 +284,15 @@ Hyacinthia Ledger คือสมุดบัญชีครอบครัว�
 
 - **Headline Large** (Poppins 600, 1.75rem, 1.3): ชื่อหน้าหลัก ใช้หนึ่งครั้งต่อ surface
 - **Headline Medium** (Poppins 600, 1.25rem, 1.4): หัวข้อส่วน, dialog และกลุ่มข้อมูล
+- **Headline Small** (Poppins 600, 1rem, 1.5): หัวข้อย่อยในการ์ดใต้หัวข้อส่วน (h3) เช่นชื่อกราฟใน ChartCard
+- **Data Display** (Poppins 400, line-height 1.3): ตัวเลขหลักของการ์ดสรุป ขนาดตามความกว้างการ์ด — การ์ดปกติ 1.25rem (xs) / 1.5rem (sm) / 1.75rem (lg), การ์ด dense (แถว 5 ใบขึ้นไป) 1.25rem (xs) / 1.125rem (md ที่การ์ดแคบสุด) / 1.5rem (lg: การ์ดกว้าง ~185px ที่ 1280px, "฿22,666.68" กว้าง ~130px) เป็นขั้นของ data display โดยตั้งใจ ไม่ snap เข้าขั้นอื่น · แดชบอร์ดใช้ dense ทั้งแถวเงินจริงและแถววางแผน ตัวเลขแผนจึงไม่ใหญ่กว่าเงินจริงในทุกขนาดจอ (เงินจริงคือเรื่องหลักของหน้า)
 - **Description** (Poppins 400, 1rem, 1.6): ข้อความอธิบายและ empty-state copy จำกัดความยาวประมาณ 65–75 ตัวอักษรต่อบรรทัด
 - **Body/Data** (Poppins 400, 1rem, 1.5): ข้อมูล ตาราง ค่าในช่องกรอก
 - **Label** (Poppins 600, 0.875rem, 1.75): ปุ่ม, tab, table header และข้อความควบคุม ใช้ตัวพิมพ์ตามภาษาปกติ ไม่ใช้ uppercase
 
 ### Named Rules
 
-**The One-Family Type Rule.** ทุกข้อความใช้ Poppins ชุดเดียว แยกลำดับชั้นด้วยขนาดและน้ำหนัก (400 / 600) ไม่ใช่การสลับฟอนต์ ข้อยกเว้นเดียวคือ code/JSON ที่ใช้ Fira Code ใน code ยังใช้ชื่อ helper เดิม (`brandCopySx`, `dataTextSx`, `descriptionSx`) ซึ่งตอนนี้ชี้ไปที่ Poppins ทั้งหมด
+**The One-Family Type Rule.** ทุกข้อความใช้ stack Poppins + Noto Sans Thai ชุดเดียว (Noto Sans Thai เติมเฉพาะอักษรไทย) แยกลำดับชั้นด้วยขนาดและน้ำหนัก (400 / 600) ไม่ใช่การสลับฟอนต์ ข้อยกเว้นเดียวคือ code/JSON ที่ใช้ Fira Code ใน code ยังใช้ชื่อ helper เดิม (`brandCopySx`, `dataTextSx`, `descriptionSx`) ซึ่งตอนนี้ชี้ไปที่ Poppins ทั้งหมด
 
 **The Financial Clarity Rule.** ตัวเลข จำนวนเงิน เลขบัญชี และอีเมลผ่าน `dataTextSx` (`tabular-nums`) เสมอ ข้อจำกัดที่รู้อยู่: Poppins ไม่มี OpenType feature `tnum` และตัวเลขปกติกว้างไม่เท่ากัน (เช่น "1" แคบกว่า "0" เกือบครึ่ง) ตัวเลขในคอลัมน์จึงยังไม่ตรงแนวหลัก จนกว่าผู้ใช้จะตัดสินใจเรื่องฟอนต์ตัวเลข
 
@@ -312,6 +339,30 @@ Component vocabulary คือ **คุ้นเคย มั่นใจ แล
 - **Border / Shadow:** 1px solid `border` + Card Offset ตาม The Hard Offset Rule
 - **Internal Padding:** 24px เป็นค่าหลัก, 32px สำหรับ auth panel บนจอกว้าง
 
+**The Linked Card Rule.** การ์ดสรุปที่พาไปหน้าอื่นเป็นลิงก์จริง (`SummaryCard to="/path"` → `<a href>` กดกลาง/เปิดแท็บใหม่ได้; `to="#id"` เลื่อนไปส่วนในหน้าเดียวกัน) มีลูกศร › ท้ายแถวหัวการ์ดเสมอ การ์ดที่ไม่มีลูกศรคือกดไม่ได้ hover ไม่เปลี่ยนพื้น (พื้น `accent` ของธีมมืดทำตัวเลขเหลือ ~1:1) แต่ยกการ์ด: เลื่อน −2px แล้วยืด hard offset เป็น 5px สี `divider` (= สีเงาของ Bubblegum ทั้งสองโหมด) ตัวอักษรจึงคง contrast ตอนปกติ focus ใช้ `ring` 2px offset 2px ส่วน `onClick` ใช้กับ action ที่ไม่ใช่การนำทางเท่านั้น
+
+**The Issue Count Rule.** ตัวนับปัญหา (ยังไม่จัดหมวด, statement ล้มเหลว, บัญชีข้อมูลช้า, บิลเกินกำหนด) ค่า 0 เป็นสีรองเงียบ ๆ ค่ามากกว่า 0 ใช้ `warning` พร้อมไอคอนเตือน ไม่ใช้ `destructive` กับตัวนับ (แดง/ชมพูหมายถึง error ไม่ใช่ "ต้องจัดการ") แดชบอร์ดรวมเรื่องที่มากกว่า 0 ไว้ในแถบ "ต้องจัดการ" ใต้บรรทัดสถานะข้อมูล: ปุ่ม outlined `warning` + ลูกศร › ต่อเรื่องหนึ่งปุ่ม เป็นลิงก์ไปที่แก้ได้ ซ่อนทั้งแถบเมื่อไม่มีเรื่อง การ์ด 5 ใบของคุณภาพข้อมูลยังแสดงครบเหมือนเดิม เรื่องเดียวกันใช้ชื่อเดียวและปลายทางเดียวทุกที่ (แถบ การ์ด chip และคู่มือ): บัญชีที่ statement ตามไม่ทัน = "ข้อมูลช้า" → `#data-freshness`, statement อ่านไฟล์ไม่สำเร็จ / ยอดรวมไม่ตรง → `#statement-failures` (รายการทีละไฟล์พร้อมทางแก้) การ์ดที่นับได้ 0 และไม่มีอะไรให้ดูไม่เป็นลิงก์ (ยังไม่จัดหมวด, ยังไม่ตรวจสอบ, statement ที่มีปัญหา) ยกเว้นบัญชีข้อมูลช้าที่ยังเป็นลิงก์ เพราะรายการความสดของทุกบัญชีด้านล่างมีให้ดูเสมอ
+
+**The Awaiting Statement Rule.** statement ของเดือนที่แล้วมาถึงช่วงต้นเดือน จึงมีช่วงผ่อนผันถึงวันที่ 10: บัญชีที่ขาดเฉพาะเดือนที่แล้วในวันที่ 1–10 คือ "รอ statement" (`statement_awaiting`) ไม่ใช่ "ข้อมูลช้า" — chip outlined สีกลางพร้อมไอคอนนาฬิกาทราย และบรรทัดสีรอง "รอ statement ก.ย. 2569 (ปกติมาภายในวันที่ 10)" ไม่ใช้ `warning` ไม่นับในการ์ด "บัญชีข้อมูลช้า" และไม่อยู่ในแถบ "ต้องจัดการ" (ไม่มีอะไรให้ผู้ใช้ทำ) แถวที่รอ statement และแถว "ข้อมูลล่าสุด" ในรายการความสดของข้อมูลขึ้นบรรทัดหลัก (สีตัวอักษรปกติ) "statement ล่าสุดถึง <วันสิ้นรอบ>" ส่วนวันที่รายการล่าสุดเป็นบรรทัดรองโดยไม่มี "(n วันที่แล้ว)" ซึ่งอ่านขัดกับ chip ที่บอกว่าปกติ แถวข้อมูลช้า/ต้องเชื่อม Gmail ใหม่ยังบอกอายุของรายการ "ข้อมูลช้า" (`statement_behind`, `warning`) คือขาด 2 เดือนขึ้นไป หรือขาดเดือนที่แล้วหลังวันที่ 10 ส่วน "ต้องเชื่อม Gmail ใหม่" สำคัญกว่าทั้งสองสถานะจึงแสดงแทน
+
+**The Pending Month Rule.** เดือนที่ statement ยังไม่มา (วันที่ข้อมูลล่าสุดอยู่ก่อนเดือนที่เลือก) การ์ดเงินเข้า/เงินออก/เหลือสุทธิ/โอนภายใน และการ์ดตัวนับของเดือนนั้น (ยังไม่จัดหมวด / ยังไม่ตรวจสอบ) เป็น disabled (เส้นประ "—" ที่ screen reader อ่านว่า "ยังไม่มีข้อมูล" + บรรทัดสั้น "รอ statement" เพราะเส้นประในธีมมืดจางเหลือ 1.47:1 ไม่เป็นลิงก์) แทน ฿0.00 หรือ 0 ที่อ่านเหมือนไม่มีเงินเข้าออก/จัดครบแล้ว ส่วนการ์ดตัวนับที่นับทุกเดือน (statement ที่มีปัญหา, บัญชีข้อมูลช้า) ไม่ผูกกับเดือนจึงแสดงตามปกติ กราฟรายรับเทียบรายจ่ายไม่วาดแท่งของเดือนหลังเดือนข้อมูลล่าสุด tooltip และตารางซ่อนบอก "ยังไม่มี statement" และบรรทัดช่วงเวลาต่อท้าย "· ก.ย.–ต.ค. ยังไม่มี statement" ยอดคงเหลือรวมยังแสดงพร้อมบรรทัด "ณ <วันที่ข้อมูลล่าสุด>" และปุ่ม "ไปเดือนล่าสุดที่มีข้อมูล" ในประกาศด้านบนเป็นปุ่ม contained `primary` เพราะเป็นทางออกของสถานะนี้ เมื่อมีบัญชีที่ "รอ statement" และไม่มีบัญชีข้อมูลช้า/ต้องเชื่อม Gmail ใหม่ ประกาศบอกครั้งเดียวว่า "ข้อมูลล่าสุดถึง 31 ส.ค. 2569 · statement ก.ย. ปกติมาภายในวันที่ 10 ไม่ต้องทำอะไร" (ไม่ซ้ำในการ์ด) แดชบอร์ดยังเปิดที่เดือนปัจจุบันเสมอ ไม่กระโดดเดือนเอง
+
+**The Quiet Notice Rule.** ประกาศสถานะที่คงอยู่ในหน้า (ข้อมูลถึงวันไหน, รายการ statement ที่มีปัญหา) ไม่ใช้ `role="alert"` ซึ่งเป็นค่าเริ่มต้นของ MUI Alert: ประกาศสถานะใช้ `role="status"` กล่องรายการใช้ `component="section"` + `role="region"` พร้อมหัวข้อ h3 ส่วน `LoadError` (ข้อผิดพลาดจริง) คง `alert`
+
+**The Section Failure Rule.** แต่ละส่วนที่มาจาก request ของตัวเองแสดงสถานะของตัวเอง: กำลังโหลด = คงหัวการ์ด/กราฟไว้แล้วแทนตัวเลขด้วย skeleton (เปลี่ยนเดือนแล้ว layout ไม่กระโดด ไม่ใช้ skeleton ทั้งหน้า), โหลดไม่สำเร็จ = `LoadError` พร้อมปุ่ม "ลองใหม่" แทนที่ส่วนนั้น ห้ามแสดงเป็น 0, "ยังไม่มีข้อมูล" หรือกราฟว่าง และส่วนอื่นที่โหลดได้ยังแสดงตามปกติ
+
+### Charts
+
+- กราฟทุกใบอยู่ใน `ChartCard`: หัวข้อ h3 ขั้น Headline Small ใต้หัวส่วน, บรรทัดช่วงเวลา (เช่น "6 เดือนล่าสุด" หรือเดือนที่เลือก) เพราะกราฟในส่วนเดียวกันใช้ช่วงไม่เท่ากัน
+- SVG ของ x-charts เป็น `aria-hidden` จึงห่อด้วย `role="figure"` (ชื่อ = หัวการ์ด, คำอธิบาย = ช่วงเวลา) และใส่ตารางข้อมูลชุดเดียวกันแบบซ่อน (`table` prop) ให้ screen reader อ่าน
+- เปิด `experimentalFeatures={{ keyboardActivation: true }}` ให้ Enter/Space บนจุดที่ focus ด้วยคีย์บอร์ดเจาะดูรายการได้เหมือนคลิก
+- แกนเงินใช้ `Intl.NumberFormat('th-TH', { notation: 'compact' })` แกนเดือนเป็นเดือนล้วน "ส.ค." แสดงครบทุกเดือน (`tickLabelInterval: () => true` ปีอยู่ในบรรทัดช่วงเวลาแล้ว — ป้าย ~25px ในแถบเดือนละ ~33px ที่จอ 320px) แกนวัน "31 ส.ค." (tooltip ใช้รูปเต็ม) และแกน x สูง 32px (ค่าเริ่มต้น 25px ตัดป้ายภาษาไทยทิ้ง)
+- กราฟรายรับเทียบรายจ่าย: `income` กับ `expense` ธีมสว่างความสว่างเท่ากัน (1.01:1) ต่างกันแค่ hue แท่งรายจ่ายและช่องสีใน legend จึงเป็นพื้นสีอ่อน (fill-opacity 0.35) + ขอบทึบสี `expense` แยกได้โดยไม่ต้องเห็นสี ขอบยังผ่าน 3:1 บน `card` (4.81 / 4.63)
+- แตะด้วยนิ้ว (click ที่มี `pointerdown` แบบ `pointerType: 'touch'` นำหน้า ไม่ใช่ดูจากชนิดเครื่อง): แตะแท่ง/ชิ้น/จุดครั้งแรกแสดง tooltip แตะซ้ำที่เดิมภายใน 4 วินาทีจึงไปหน้ารายการ เกินนั้นนับเป็นแตะแรกใหม่ เมาส์ ปากกา และ Enter จากคีย์บอร์ดไปทันทีแม้บนจอสัมผัส ไม่ยกเลิกตอน tooltip ปิด เพราะ x-charts ปิด tooltip ตอนยกนิ้วก่อน click จะมาถึง · จอสัมผัส (`hover: none`) tooltip มีบรรทัดสีรอง "แตะอีกครั้งเพื่อเปิดรายการ" (0.875rem) และ tooltip ของกราฟแท่ง/เส้นเป็น `trigger: 'item'` ขึ้นเฉพาะตอนแตะโดนแท่ง/จุดจริง (พายเป็น item อยู่แล้ว) — เครื่องที่มีทั้งเมาส์และจอสัมผัสไม่เห็นบรรทัดคำใบ้
+- กราฟเส้นเปิด `showMark` เสมอ: x-charts 9 ไม่วาดจุดเป็นค่าเริ่มต้น และไม่มีจุดก็ไม่มี `onMarkClick` จุดเป็นวงสีของอนุกรมพร้อมขอบ `muted-foreground` ทุกอนุกรม (`shape: 'circle'` — ค่าเริ่มต้นวนรูปสี่เหลี่ยม/ข้าวหลามตัดตามลำดับอนุกรม) ตรงกับช่องสีวงกลมใน legend/tooltip (`labelMarkType: 'circle'`)
+- ←/→ บนกราฟที่ focus อยู่เป็นของกราฟ คีย์ลัดเปลี่ยนเดือนของ MonthPicker ข้ามทุกอย่างใน `role="figure"` (x-charts ไม่ preventDefault ที่จุดแรก/สุดท้าย)
+- ว่างเพราะ statement ยังไม่มา ใช้ข้อความเดียวกับบรรทัดสถานะ ("statement ต.ค. 2569 ยังไม่มา") ในกล่องที่เตี้ยกว่ากราฟ และ grid ของกราฟจัดชิดบน (`alignItems: start`) การ์ดที่ว่างจึงไม่ถูกยืดสูงตามใบข้าง ๆ · กราฟของเดือนที่เลือกว่างทั้งสองใบเพราะ statement ยังไม่มา: ≥ md grid เป็น 2 คอลัมน์ กราฟ 6 เดือนกินเต็มแถว (`gridColumn: span 2`) กล่องว่างสองใบอยู่คู่กันด้านล่าง (auto-fit เป็น 3 คอลัมน์ตั้งแต่ ~1040px ซึ่ง span 2 จะทิ้งกล่องว่างใบที่สองไว้แถวล่างใบเดียว)
+
 ### Popovers / Menus / Tooltips / Dialogs
 
 - พื้น `popover`, ขอบ 1px `border`
@@ -323,6 +374,7 @@ Component vocabulary คือ **คุ้นเคย มั่นใจ แล
 - **Style:** พื้นโปร่งใส (สว่าง) / `input` ที่ 30% (มืด) ตาม shadcn, เส้น `input`, มุม `md` และ label ที่ไม่หายเมื่อมีค่า
 - **Focus:** เส้น `ring` หนา 2px โดยไม่เปลี่ยน layout
 - **Error / Disabled:** error ใช้ `destructive` พร้อมข้อความ (ขอบ error ไม่ถูก ring ทับ); disabled ลด emphasis และใช้ cursor/state ที่ชัดเจน
+- **เลือกเดือน (`MonthPicker`):** ช่องแสดงเดือนไทย พ.ศ. ("ตุลาคม 2569") เหมือนข้อความที่ screen reader ได้ยิน ไม่ใช่ภาษา/ปฏิทินของเบราว์เซอร์ — เบราว์เซอร์ที่มี `type="month"` ใช้ช่องจริงแบบโปร่งใส (ชื่อ "เดือน" picker ของเบราว์เซอร์ คลิก/Enter/Space เรียก `showPicker()`) ทับด้วยข้อความเดือนและไอคอนปฏิทิน ส่วน Firefox/Safari เดสก์ท็อปที่ไม่มี picker เดือนใช้ช่อง `type="month"` ของเบราว์เซอร์ตรง ๆ
 
 ### Navigation
 
@@ -348,13 +400,14 @@ Component vocabulary คือ **คุ้นเคย มั่นใจ แล
 
 ### Do:
 
-- **Do** ใช้ค่าของ Bubblegum ตรงตัว และบันทึกคู่สีที่ไม่ผ่าน AA ไว้ในตาราง Contrast แทนการปรับเอง
+- **Do** ใช้ค่าของ Bubblegum ตรงตัว (รวมค่า AA ที่อนุมัติแล้ว) และบันทึกคู่สีใหม่ที่ไม่ผ่าน AA ไว้ในตาราง Contrast แทนการปรับเอง
 - **Do** ใช้ `primary` เฉพาะ primary action, ลิงก์ และ indicator; `accent` เฉพาะ hover; `sidebar-accent` เฉพาะ selection
 - **Do** ตรวจทั้งสองโหมดเมื่อเพิ่มสีหรือพื้นผิวใหม่ และอ่านสีผ่าน theme เสมอ
 - **Do** ใช้ layout ที่อ่านง่ายและลำดับชั้นชัดเจนแบบแอปการเงินที่คุ้นเคย
 - **Do** รักษาพื้นที่กดอย่างน้อย 40px และรองรับ viewport ตั้งแต่ 320px
 - **Do** ใช้ข้อความหรือไอคอนควบคู่กับสีสถานะเสมอ
-- **Do** ใช้ state transition ประมาณ 200ms และปิด motion ที่ไม่จำเป็นเมื่อผู้ใช้ตั้งค่า reduced motion
+- **Do** ใช้ state transition ประมาณ 200ms และปิด motion ที่ไม่จำเป็นเมื่อผู้ใช้ตั้งค่า reduced motion (`theme.motion.reducedMotion: 'system'` ทำให้ transition ที่เคลื่อนที่ของ MUI เป็น 0, `styles.css` ตัด animation/การเลื่อนนุ่ม แต่คง transition สี/พื้นของ hover/focus ไว้)
+- **Do** ตั้งชื่อแท็บตามหน้า "<ชื่อหน้า> · Hyacinthia Ledger" (`PageHeader` level 1 ตั้งให้เอง หน้าก่อนเข้าระบบตั้งใน `App.tsx`)
 
 ### Don't:
 

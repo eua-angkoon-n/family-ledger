@@ -14,10 +14,12 @@
         } catch (e) {}
       })();
     </script>
-    <!-- ฟอนต์ของธีม Bubblegum: Poppins (UI ทั้งหมด), Fira Code (code), Lora (serif token) — อักษรไทยตกไป Noto Sans Thai/ระบบ -->
+    <!-- ฟอนต์ของธีม Bubblegum: Poppins (UI ทั้งหมด ตัวเลข/ละติน), Noto Sans Thai (อักษรไทย — Poppins ไม่มี), Fira Code (code)
+         Lora เป็น serif token ที่ไม่มีที่ใช้ จึงไม่โหลด · น้ำหนักที่ใช้จริงมีแค่ 400/600 (theme.ts ชี้ fontWeightMedium/Bold
+         ของ MUI มาที่ 600) และ Fira Code ใช้แค่ 400 -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Lora:wght@400;600&family=Poppins:wght@400;500;600;700&display=swap" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400&family=Noto+Sans+Thai:wght@400;600&family=Poppins:wght@400;600&display=swap" />
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" sizes="192x192" href="/logo-192.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
