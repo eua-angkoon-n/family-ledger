@@ -19,13 +19,19 @@ import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded';
 import SwapHorizRounded from '@mui/icons-material/SwapHorizRounded';
 import CheckRounded from '@mui/icons-material/CheckRounded';
 import RadioButtonUncheckedRounded from '@mui/icons-material/RadioButtonUncheckedRounded';
-import type { ReviewStatus, TxnListRow } from '../api.js';
+import { Fragment } from 'react';
+import type { Classification, ReviewStatus, TxnListRow } from '../api.js';
 import { formatBaht, formatDate, formatDayMonth } from '../format.js';
 import { visuallyHiddenSx } from '../ui.js';
 import Money from './Money.js';
 
 /** ชื่อเดียวของสถานะนี้ทุกที่ (แถบ "ต้องจัดการ", การ์ดแดชบอร์ด, chip ตัวกรอง, ตาราง, drawer, คู่มือ) */
 export const UNCATEGORISED_LABEL = 'ยังไม่จัดหมวด';
+const NO_CATEGORY_NEEDED_LABEL = 'ไม่ต้องจัดหมวด';
+
+/** โอนภายในและรายการที่ไม่นับรวมไม่อยู่ในรายงาน จึงไม่ต้องจัดหมวด — ชุดเดียวกับที่คิว/ตัวนับ "ยังไม่จัดหมวด" ตัดออก
+ *  (classification ของ API รวม is_internal_transfer เป็น internal_transfer ให้แล้ว) */
+export const needsCategory = (classification: Classification) => classification !== 'internal_transfer' && classification !== 'excluded';
 
 /** เลือกได้เฉพาะแถวที่ยังไม่ตรวจ — ไม่ส่งมา = หน้านี้ไม่มีแถวให้เลือก ไม่มีคอลัมน์ checkbox เลย */
 export type TxnSelection = {
@@ -47,7 +53,7 @@ type TransactionTableProps = {
 const MD_UP = { display: { xs: 'none', md: 'table-cell' } } as const;
 const BELOW_MD = { display: { md: 'none' } } as const;
 
-// ตรวจแล้ว/จัดหมวดแล้ว = เงียบ (สีรอง) · ยังไม่ตรวจ/ยังไม่จัดหมวด = เน้น (สีตัวอักษรหลัก ตัวหนา) เพราะเป็นสิ่งที่ต้องจัดการ
+// ตรวจแล้ว/จัดหมวดแล้ว/ไม่ต้องจัดหมวด = เงียบ (สีรอง) · ยังไม่ตรวจ/ยังไม่จัดหมวด = เน้น (สีตัวอักษรหลัก ตัวหนา) เพราะเป็นสิ่งที่ต้องจัดการ
 // ทั้งคู่มีข้อความ ไม่ใช่สีอย่างเดียว (บน card 5.86 / 11.35, hover 6.79 / 12.13 สว่าง/มืด)
 const todoSx = (todo: boolean) => ({ color: todo ? 'text.primary' : 'text.secondary', fontWeight: todo ? 600 : 400 });
 const reviewLabel = (status: ReviewStatus) => (status === 'reviewed' ? 'ตรวจแล้ว' : 'ยังไม่ตรวจ');
@@ -64,13 +70,19 @@ function splitBankPrefix(description: string): { lead: string; item: string } | 
   return m ? { lead: m[2]!, item: m[1]! } : null;
 }
 
+// ต้นรายละเอียดที่เป็นแบบฟอร์มของ KBank (splitMainFields ใน kbank.ts): "โอนไป X1111 <ผู้รับ>", "จาก X2222 <ผู้โอน>",
+// "เพื่อชำระ Ref X3333 <ร้าน>", "รหัสอ้างอิง EDC11111 <ร้าน>" (+ พร้อมเพย์/รหัสธนาคาร ก่อนเลขบัญชี) — เป็นสีรอง ชื่อผู้รับ/ร้าน
+// จึงเด่นก่อน · ไม่มีชื่อต่อท้าย (เช่น "รหัสอ้างอิง EDC22222" ล้วน) หรือรูปแบบที่ไม่รู้จัก = คงเดิม
+const DETAIL_BOILERPLATE = /^((?:(?:โอนไป|จาก|เพื่อชำระ)(?: พร้อมเพย์| [A-Z]{2,5})?(?: Ref)?|Ref) X\d+|รหัสอ้างอิง [A-Z]*\d+) (\S.*)$/;
+
 function Description({ text }: { text: string }) {
   const parts = splitBankPrefix(text);
   if (!parts) return <>{text}</>;
+  const boilerplate = DETAIL_BOILERPLATE.exec(parts.lead);
   return (
     <>
       <Box component="span" aria-hidden>
-        {parts.lead}
+        {boilerplate ? <><Box component="span" sx={{ color: 'text.secondary' }}>{boilerplate[1]}</Box> {boilerplate[2]}</> : parts.lead}
         <Box component="span" sx={{ color: 'text.secondary' }}> · {parts.item}</Box>
       </Box>
       <Box component="span" sx={visuallyHiddenSx}>{text}</Box>
@@ -88,7 +100,8 @@ function rowName(row: TxnListRow) {
 
 function CategoryCell({ row }: { row: TxnListRow }) {
   if (row.split_count === 0) {
-    return <Typography variant="body2" component="span" sx={todoSx(true)}>{UNCATEGORISED_LABEL}</Typography>;
+    const todo = needsCategory(row.classification);
+    return <Typography variant="body2" component="span" sx={todoSx(todo)}>{todo ? UNCATEGORISED_LABEL : NO_CATEGORY_NEEDED_LABEL}</Typography>;
   }
   // หมวดแรก + "+n" ในบรรทัดเดียว — screen reader อ่านชื่อครบจากข้อความซ่อนแทน "+1"
   const extra = row.categories.length - 1;
@@ -177,7 +190,7 @@ export default function TransactionTable({ rows, showRunningBalance, onRowClick,
                       <Checkbox
                         checked={selection.selected.has(row.id)}
                         onChange={() => selection.onToggle(row.id)}
-                        slotProps={{ input: { 'aria-label': `เลือก ${row.description} วันที่ ${formatDate(row.txn_date)}` } }}
+                        slotProps={{ input: { 'aria-label': `เลือก ${rowName(row)}` } }}
                       />
                     )}
                   </TableCell>
@@ -202,13 +215,21 @@ export default function TransactionTable({ rows, showRunningBalance, onRowClick,
                   >
                     <Description text={row.description} />
                   </Box>
-                  {/* < md ไม่มีคอลัมน์บัญชี/หมวด/สถานะ — สรุปเป็นบรรทัดรองบรรทัดเดียว มือถือจึงยังเห็นว่าแถวไหนต้องจัดการ */}
+                  {/* < md ไม่มีคอลัมน์บัญชี/หมวด/สถานะ — สรุปเป็นบรรทัดรองบรรทัดเดียว มือถือจึงยังเห็นว่าแถวไหนต้องจัดการ:
+                      บัญชี · "ยังไม่ตรวจ" (ตรวจแล้วไม่ขึ้น) · หมวด / "ยังไม่จัดหมวด" / "ไม่ต้องจัดหมวด" (เหมือนคอลัมน์หมวด) */}
                   <Typography variant="body2" component="div" sx={{ ...BELOW_MD, overflowWrap: 'anywhere' }}>
-                    <Box component="span" sx={{ color: 'text.secondary' }}>{row.account_nickname}</Box>
-                    {' '}<Box component="span" aria-hidden sx={{ color: 'text.secondary' }}>·</Box>{' '}
-                    <Box component="span" sx={todoSx(row.review_status !== 'reviewed')}>{reviewLabel(row.review_status)}</Box>
-                    {' '}<Box component="span" aria-hidden sx={{ color: 'text.secondary' }}>·</Box>{' '}
-                    <Box component="span" sx={todoSx(row.split_count === 0)}>{row.split_count === 0 ? UNCATEGORISED_LABEL : categoryNames(row)}</Box>
+                    {[
+                      <Box component="span" sx={{ color: 'text.secondary' }}>{row.account_nickname}</Box>,
+                      row.review_status !== 'reviewed' && <Box component="span" sx={todoSx(true)}>{reviewLabel(row.review_status)}</Box>,
+                      row.split_count > 0
+                        ? <Box component="span" sx={todoSx(false)}>{categoryNames(row)}</Box>
+                        : <Box component="span" sx={todoSx(needsCategory(row.classification))}>{needsCategory(row.classification) ? UNCATEGORISED_LABEL : NO_CATEGORY_NEEDED_LABEL}</Box>,
+                    ].filter(Boolean).map((part, i) => (
+                      <Fragment key={i}>
+                        {i > 0 && <>{' '}<Box component="span" aria-hidden sx={{ color: 'text.secondary' }}>·</Box>{' '}</>}
+                        {part}
+                      </Fragment>
+                    ))}
                   </Typography>
                   {row.is_internal_transfer && (
                     <Typography variant="body2" color="text.secondary">

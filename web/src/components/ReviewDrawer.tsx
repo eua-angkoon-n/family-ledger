@@ -32,7 +32,7 @@ import { dataTextSx, radii } from '../theme.js';
 import { ConfirmDialog, LoadError, visuallyHiddenSx, type Notice } from '../ui.js';
 import IncomeQuickAddModal from './IncomeQuickAddModal.js';
 import Money from './Money.js';
-import { ReviewStatusLabel, UNCATEGORISED_LABEL } from './TransactionTable.js';
+import { needsCategory, ReviewStatusLabel, UNCATEGORISED_LABEL } from './TransactionTable.js';
 
 const CLASSIFICATION_LABEL: Record<Classification, string> = {
   income: 'รายรับ',
@@ -129,6 +129,9 @@ export default function ReviewDrawer({
   const [navError, setNavError] = useState('');
   const [savingNav, setSavingNav] = useState(false);
   const requestIdRef = useRef(0);
+  // คำตอบของการบันทึกที่มาถึงหลังเลื่อนไปแถวอื่นแล้ว (ก่อนหน้า/ถัดไป/ปิด ระหว่างรอ) ต้องไม่เขียนทับฟอร์มของแถวใหม่
+  const txnIdRef = useRef(txnId);
+  txnIdRef.current = txnId;
   // ผลที่ต้องประกาศหลัง dialog/drawer ปิดสนิท — ระหว่างนั้นทุกอย่างข้างหลังเป็น aria-hidden
   const afterDialogNoticeRef = useRef<Notice | null>(null);
   const exitNoticeRef = useRef<Notice | null>(null);
@@ -235,6 +238,7 @@ export default function ReviewDrawer({
       `/api/transactions/${txn.id}/splits`,
       payload,
     );
+    if (txnIdRef.current !== txn.id) return;
     // PUT คืนแถว txn_split ดิบ ไม่มีชื่อหมวด — หมวดที่เลิกใช้แล้วไม่อยู่ใน categories จึงใช้ชื่อเดิมจาก detail
     const withNames = savedSplits.map((s) => ({
       ...s,
@@ -249,10 +253,11 @@ export default function ReviewDrawer({
   // บันทึก = ตั้งประเภทรายการ + หมวด (ทั้งยอดเข้าหมวดเดียว) + ทำเครื่องหมายตรวจแล้ว (PATCH annotation ตั้ง reviewed เสมอ)
   // หมวดเดียวบันทึกผ่าน PUT splits เป็น split เดียวเต็มยอด — ส่งเฉพาะเมื่อเปลี่ยน และไม่แตะเมื่อแยกไว้หลายหมวด
   // withCategory = false: เพิ่งบันทึกการแยกยอดไป ช่องหมวดเดียวในตอนนี้เป็นค่าเก่าของ closure ห้ามส่งทับ
-  const saveClassification = async (withCategory = true): Promise<SaveResult> => {
+  // priorSaved = saveEdits บันทึกการแยกยอดไปก่อนแล้ว — onSaved ครั้งเดียวตอนจบไม่ว่าขั้นนี้สำเร็จหรือไม่
+  const saveClassification = async (withCategory = true, priorSaved = false): Promise<SaveResult> => {
     if (!detail) return NOT_READY;
     setSavingClassification(true);
-    let splitsSaved = false;
+    let splitsSaved = priorSaved;
     try {
       if (withCategory && detail.splits.length <= 1 && categoryId !== singleCategoryOf(detail.splits)) {
         await putSplits(
@@ -269,11 +274,13 @@ export default function ReviewDrawer({
         `/api/transactions/${detail.id}/annotation`,
         { classification, note: note || null, ...taxFields },
       );
-      setDetail((d) => (d ? {
-        ...d, classification: updated.classification, review_status: 'reviewed',
-        annotation_note: updated.note, tax_entity_id: updated.tax_entity_id, tax_treatment: updated.tax_treatment,
-      } : d));
-      setSaved({ classification, note, taxEntity: taxEntityOverride, taxTreatment });
+      if (txnIdRef.current === detail.id) {
+        setDetail((d) => (d ? {
+          ...d, classification: updated.classification, review_status: 'reviewed',
+          annotation_note: updated.note, tax_entity_id: updated.tax_entity_id, tax_treatment: updated.tax_treatment,
+        } : d));
+        setSaved({ classification, note, taxEntity: taxEntityOverride, taxTreatment });
+      }
       onSaved();
       return { ok: true, message: 'บันทึกแล้ว และทำเครื่องหมายตรวจแล้ว', severity: 'success' };
     } catch (e) {
@@ -290,7 +297,8 @@ export default function ReviewDrawer({
   const splitsRowsValid = splits.every((s) => s.category_id !== '' && amountError(s, true) === '');
 
   // ปุ่มบันทึกกดได้เสมอ — ตรวจตอนกด แล้วบอกที่ช่องที่ผิดและในข้อความผลว่าต้องแก้อะไร
-  const saveSplits = async (): Promise<SaveResult> => {
+  // reload = false: saveEdits เรียก onSaved เองครั้งเดียวหลังบันทึกครบทุกส่วน
+  const saveSplits = async (reload = true): Promise<SaveResult> => {
     if (!detail) return NOT_READY;
     setSplitSubmitted(true);
     if (!splitsRowsValid) return { ok: false, message: 'กรอกหมวดและจำนวนเงินให้ครบทุกแถว', severity: 'error' };
@@ -307,8 +315,9 @@ export default function ReviewDrawer({
         detail,
         splits.map((s) => ({ category_id: Number(s.category_id), amount_satang: parseBahtToSatang(s.amountText)!, note: s.note || null })),
       );
-      onSaved();
-      return { ok: true, message: splits.length === 0 ? `ล้างหมวดแล้ว รายการนี้กลับเป็น${UNCATEGORISED_LABEL}` : 'บันทึกการแยกยอดแล้ว', severity: 'success' };
+      if (reload) onSaved();
+      const cleared = needsCategory(detail.classification) ? `ล้างหมวดแล้ว รายการนี้กลับเป็น${UNCATEGORISED_LABEL}` : 'ล้างหมวดแล้ว';
+      return { ok: true, message: splits.length === 0 ? cleared : 'บันทึกการแยกยอดแล้ว', severity: 'success' };
     } catch (e) {
       return { ok: false, message: e instanceof Error ? e.message : 'บันทึกการแยกยอดไม่สำเร็จ', severity: 'error' };
     } finally {
@@ -318,13 +327,14 @@ export default function ReviewDrawer({
 
   // ร่างแยกยอดบันทึกก่อน แล้วจึงประเภท/โน้ต — ไม่ส่งหมวดเดียวซ้ำ (จะทับการแยกยอดที่เพิ่งบันทึก) ส่วนที่
   // saveClassification อ่านจาก closure หลัง await (id, ประเภท, โน้ต, ภาษี) saveSplits ไม่ได้แตะ
+  // หน้าโหลดรายการซ้ำ (onSaved) ครั้งเดียวต่อการบันทึก ไม่ใช่ครั้งละส่วน
   const saveEdits = async (annotation: boolean): Promise<SaveResult> => {
-    let result: SaveResult = { ok: true, message: '', severity: 'success' };
-    if (splitsDirty) {
-      result = await saveSplits();
-      if (!result.ok) return result;
-    }
-    return annotation ? saveClassification(!splitsDirty) : result;
+    if (!splitsDirty) return annotation ? saveClassification() : { ok: true, message: '', severity: 'success' };
+    const result = await saveSplits(false);
+    if (!result.ok) return result;
+    if (annotation) return saveClassification(false, true);
+    onSaved();
+    return result;
   };
   // ปุ่ม "บันทึก" ใน dialog บันทึกเฉพาะส่วนที่แก้ — แก้แค่การแยกยอดไม่ทำเครื่องหมายตรวจแล้วให้
   const annotationWillSave = annotationDirty || (categoryDirty && !splitsDirty);
@@ -333,13 +343,15 @@ export default function ReviewDrawer({
   const saveAndNext = async () => {
     // จับไว้ก่อน await — reload ของหน้ายังไม่กลับมา แถวถัดไปจึงยังเป็นแถวเดิม แม้แถวนี้จะหลุดจากคิวหลังบันทึก
     const go = onNext;
-    if (!go || busySaving) return;
+    if (!go || busySaving || !detail) return;
+    const fromId = detail.id;
     setSavingNext(true);
     const result = await saveEdits(true);
     setSavingNext(false);
     notify(result);
-    if (!result.ok) return;
-    focusAfterMoveFromRef.current = detail?.id ?? null;
+    // ระหว่างรอผู้ใช้เลื่อน/ปิดไปเองแล้ว — ไม่พาไปต่ออีกทอด
+    if (!result.ok || txnIdRef.current !== fromId) return;
+    focusAfterMoveFromRef.current = fromId;
     go();
   };
   // Ctrl/⌘+Enter ที่ไหนก็ได้ในแผง = บันทึกแล้วไปถัดไป — capture ก่อนช่องหมวด (Select เปิดเมนูเมื่อเจอ Enter ทุกแบบ)
@@ -395,7 +407,7 @@ export default function ReviewDrawer({
     try {
       await post(`/api/transfer-matches/${matchId}/${action}`, {});
       notify({ message: action === 'confirm' ? 'ยืนยันคู่โอนภายในแล้ว' : 'ปฏิเสธคู่โอนที่ระบบเสนอแล้ว', severity: 'success' });
-      await load(detail.id, true);
+      if (txnIdRef.current === detail.id) await load(detail.id, true);
       onSaved();
       // ปุ่มคู่นี้หายไปเมื่อสำเร็จ (ยืนยันแล้วเป็น chip, ปฏิเสธแล้วหายทั้งกล่อง) — focus ไปปุ่มบันทึกซึ่งเป็นขั้นถัดไป
       saveRef.current?.focus();
@@ -511,9 +523,11 @@ export default function ReviewDrawer({
                     value={categoryId}
                     onChange={(e) => setCategoryId(e.target.value)}
                     size="small"
-                    helperText={categoryId === ''
-                      ? `ยังไม่ได้เลือกหมวด — รายการนี้จะยังอยู่ในคิว ${UNCATEGORISED_LABEL}`
-                      : 'ทั้งยอดเข้าหมวดเดียว ถ้ามีหลายหมวดใช้ "แยกยอดตามหมวด" ด้านล่าง'}
+                    helperText={categoryId !== ''
+                      ? 'ทั้งยอดเข้าหมวดเดียว ถ้ามีหลายหมวดใช้ "แยกยอดตามหมวด" ด้านล่าง'
+                      : needsCategory(classification)
+                        ? `ยังไม่ได้เลือกหมวด — รายการนี้จะยังอยู่ในคิว ${UNCATEGORISED_LABEL}`
+                        : `ไม่ต้องเลือกหมวด — ${classification === 'internal_transfer' ? 'โอนภายใน' : 'รายการที่ไม่นับรวม'}ไม่อยู่ในคิว ${UNCATEGORISED_LABEL}`}
                   >
                     <MenuItem value=""><em>{UNCATEGORISED_LABEL}</em></MenuItem>
                     {categoryOptions}

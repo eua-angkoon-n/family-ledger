@@ -10,6 +10,8 @@ import {
   TablePagination,
   TextField,
   Typography,
+  useMediaQuery,
+  type Theme,
 } from '@mui/material';
 import DoneAllRounded from '@mui/icons-material/DoneAllRounded';
 import FilterListRounded from '@mui/icons-material/FilterListRounded';
@@ -50,6 +52,8 @@ const parseTxnId = (raw: string | null) => {
 export default function Transactions() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  // < sm: ช่องบัญชีย้ายเข้าแผงตัวกรองและคำอธิบายหน้าซ่อน — แถวแรกของตารางขึ้นสูงขึ้น (หมายเหตุขอบเขตข้อมูลย้ายไปท้ายหน้าอยู่แล้ว)
+  const narrow = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'), { noSsr: true });
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [banks, setBanks] = useState<Bank[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -277,6 +281,12 @@ export default function Transactions() {
   if (minBaht) hiddenFilters.push(['min_baht', `ยอดตั้งแต่ ${bahtLabel(minBaht)}`]);
   if (maxBaht) hiddenFilters.push(['max_baht', `ยอดไม่เกิน ${bahtLabel(maxBaht)}`]);
   const clearable = hiddenFilters.length > 0 || q !== '' || reviewStatus !== '' || uncategorised;
+  // < sm บัญชีอยู่ในแผง จึงนับในปุ่มและมี chip ด้วย — แต่ "ล้างตัวกรอง" ยังไม่ล้างบัญชี (clearable/emptyTitle ไม่นับมัน)
+  const panelFilters: [key: string, label: string][] = narrow && bankAccountId
+    ? [['bank_account_id', `บัญชี: ${accounts.find((a) => String(a.id) === bankAccountId)?.nickname ?? bankAccountId}`], ...hiddenFilters]
+    : hiddenFilters;
+  // แผงเปิดอยู่ = ตัวกรองเห็นในแผงแล้ว ไม่ต้องมี chip ซ้ำ (ยกเว้นภาษีตอนหน้าภาษีปิด ซึ่งไม่มีช่องในแผง)
+  const filterChips = panelFilters.filter(([key]) => !showMoreFilters || (!TAX_PAGES_ENABLED && key.startsWith('tax_')));
   // ปุ่มนี้ (และ EmptyState ที่ถือมัน) หายไปหลังล้าง — focus ไปช่องค้นหาที่อยู่ตลอด
   const clearAllButton = (
     <Button color="inherit" onClick={() => { setFilter(CLEAR_ALL_PATCH); searchRef.current?.focus(); }}>ล้างตัวกรอง</Button>
@@ -332,6 +342,7 @@ export default function Transactions() {
   // แทนในหน้านี้ (ไปหน้าถัดไปตรง ๆ จะข้ามแถวนั้น) แล้วค่อยเลือก: แถวถัดไปในหน้านี้ หรือแถวแรกของหน้าถัดไป
   const advanceRef = useRef(false);
   const advance = () => {
+    if (advanceRef.current) return; // กดซ้ำระหว่างรอโหลด = ไม่โหลดซ้ำ
     advanceRef.current = true;
     void reload(true);
   };
@@ -400,6 +411,20 @@ export default function Transactions() {
     }
   };
 
+  const accountSelect = (
+    <TextField
+      select
+      size="small"
+      label="บัญชี"
+      value={bankAccountId}
+      onChange={(e) => setFilter({ bank_account_id: e.target.value })}
+      sx={{ minWidth: 160 }}
+    >
+      <MenuItem value="">ทุกบัญชี</MenuItem>
+      {accounts.map((a) => <MenuItem key={a.id} value={a.id}>{a.nickname}</MenuItem>)}
+    </TextField>
+  );
+
   const fromRow = (page - 1) * LIMIT + 1;
   const toRow = fromRow + rows.length - 1;
 
@@ -409,7 +434,7 @@ export default function Transactions() {
         level={1}
         id="transactions-heading"
         title="ธุรกรรม"
-        description="จัดหมวด ตรวจรายการ และยืนยันคู่โอนภายใน ทุกรายการย้อนดูได้ถึง statement ต้นทาง"
+        description={narrow ? undefined : 'จัดหมวด ตรวจรายการ และยืนยันคู่โอนภายใน ทุกรายการย้อนดูได้ถึง statement ต้นทาง'}
       />
       {/* < sm ย้ายไปใต้ตาราง (ท้ายหน้า) ให้แถวแรกของตารางขึ้นสูงขึ้น — display none จึง screen reader อ่านครั้งเดียว */}
       <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, display: { xs: 'none', sm: 'block' } }}>{COVERAGE_NOTE}</Typography>
@@ -426,17 +451,7 @@ export default function Transactions() {
               sx={{ minHeight: 40, alignSelf: 'flex-start' }}
             />
           )}
-          <TextField
-            select
-            size="small"
-            label="บัญชี"
-            value={bankAccountId}
-            onChange={(e) => setFilter({ bank_account_id: e.target.value })}
-            sx={{ minWidth: 160 }}
-          >
-            <MenuItem value="">ทุกบัญชี</MenuItem>
-            {accounts.map((a) => <MenuItem key={a.id} value={a.id}>{a.nickname}</MenuItem>)}
-          </TextField>
+          {!narrow && accountSelect}
           <TextField
             size="small"
             label="ค้นหารายการ"
@@ -472,19 +487,20 @@ export default function Transactions() {
               ref={moreFiltersRef}
               startIcon={<FilterListRounded />}
               onClick={() => setShowMoreFilters((v) => !v)}
-              color={hiddenFilters.length > 0 ? 'primary' : 'inherit'}
+              color={panelFilters.length > 0 ? 'primary' : 'inherit'}
               aria-expanded={showMoreFilters}
               aria-controls="txn-more-filters"
-              aria-label={`ตัวกรองเพิ่มเติม${hiddenFilters.length > 0 ? ` (${hiddenFilters.length})` : ''}`}
+              aria-label={`ตัวกรองเพิ่มเติม${panelFilters.length > 0 ? ` (${panelFilters.length})` : ''}`}
             >
               ตัวกรอง<Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>เพิ่มเติม</Box>
-              {hiddenFilters.length > 0 ? ` (${hiddenFilters.length})` : ''}
+              {panelFilters.length > 0 ? ` (${panelFilters.length})` : ''}
             </Button>
           </Stack>
         </Stack>
 
         <Collapse in={showMoreFilters} id="txn-more-filters">
           <Stack direction="row" spacing={1.5} useFlexGap sx={{ flexWrap: 'wrap', pt: 0.5 }}>
+            {narrow && accountSelect}
             <TextField select size="small" label="ธนาคาร" value={bankId} onChange={(e) => setFilter({ bank_id: e.target.value })} sx={{ minWidth: 140 }}>
               <MenuItem value="">ทุกธนาคาร</MenuItem>
               {banks.map((b) => <MenuItem key={b.id} value={b.id}>{b.name}</MenuItem>)}
@@ -563,9 +579,9 @@ export default function Transactions() {
         </Collapse>
 
         {/* สรุปตัวกรองที่ซ่อนอยู่ในแผงที่พับไว้ — กด chip เพื่อเอาตัวกรองนั้นออก ตัวกรองภาษีตอนหน้าภาษีปิดไม่มีช่องในแผง จึงขึ้นเสมอ */}
-        {clearable && (
+        {(clearable || filterChips.length > 0) && (
           <Stack ref={filterChipRowRef} direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
-            {hiddenFilters.filter(([key]) => !showMoreFilters || (!TAX_PAGES_ENABLED && key.startsWith('tax_'))).map(([key, label], index) => (
+            {filterChips.map(([key, label], index) => (
               <Chip
                 key={key}
                 data-filter-chip
@@ -577,7 +593,7 @@ export default function Transactions() {
                 sx={{ minHeight: 40 }}
               />
             ))}
-            {clearAllButton}
+            {clearable && clearAllButton}
           </Stack>
         )}
       </Stack>
@@ -586,7 +602,16 @@ export default function Transactions() {
       <Box role="status" sx={visuallyHiddenSx}>
         {loading || (error && rows.length === 0) ? '' : rows.length === 0 ? emptyTitle : `${totalCount} รายการ`}
       </Box>
-      {error && <LoadError message={error} onRetry={rows.length === 0 ? () => void reload() : undefined} />}
+      {/* แถวเดิมยังอยู่ = ลองใหม่แบบ background (ไม่สลับเป็น skeleton) ซึ่งโหลดตัวเลขบน chip ด้วย — ไม่มีแถวและตัวเลขหายไปด้วย โหลดคู่กัน */}
+      {error && (
+        <LoadError
+          message={error}
+          onRetry={() => {
+            if (rows.length === 0 && queueCounts == null) void reloadCounts();
+            void reload(rows.length > 0);
+          }}
+        />
+      )}
 
       {loading ? (
         <TableSkeleton rows={8} />
