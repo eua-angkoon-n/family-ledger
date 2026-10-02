@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import {
   dkimPasses,
   fromAddress,
+  GmailReauthRequiredError,
   hasPdfMagic,
+  listMessagesFromSender,
   pickPdfAttachments,
+  refreshAccessToken,
   type GmailHeader,
   type GmailPayload,
 } from '../src/gmail.js';
@@ -143,4 +146,80 @@ test('pickPdfAttachments: KBank รับ statement หลักและตั�
     pickPdfAttachments(payload, '^STM_SA\\d{4}_\\d{2}[A-Z]{3}\\d{2}_\\d{2}[A-Z]{3}\\d{2}\\.pdf$'),
     [{ attachmentId: 'statement', filename: 'STM_SA2319_01AUG26_31AUG26.pdf' }],
   );
+});
+
+process.env.GOOGLE_CLIENT_ID ??= 'test-client-id';
+process.env.GOOGLE_CLIENT_SECRET ??= 'test-client-secret';
+
+/** แทน fetch ทั้งเทสต์แล้วคืนของจริงตอนจบ — คืน array ของ URL ที่ถูกเรียก */
+function stubFetch(t: TestContext, respond: () => Response): string[] {
+  const real = globalThis.fetch;
+  const urls: string[] = [];
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    urls.push(String(input instanceof Request ? input.url : input));
+    return respond();
+  }) as typeof fetch;
+  t.after(() => {
+    globalThis.fetch = real;
+  });
+  return urls;
+}
+
+const json = (status: number, body: unknown) =>
+  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+
+test('refreshAccessToken: 400 invalid_grant → GmailReauthRequiredError', async (t) => {
+  stubFetch(t, () => json(400, { error: 'invalid_grant', error_description: 'Token has been expired or revoked.' }));
+  await assert.rejects(refreshAccessToken('rt'), GmailReauthRequiredError);
+});
+
+for (const status of [500, 503]) {
+  test(`refreshAccessToken: ${status} → Error ธรรมดา ไม่ใช่ reauth (ชั่วคราว)`, async (t) => {
+    stubFetch(t, () => new Response('<html>Service Unavailable</html>', { status }));
+    await assert.rejects(refreshAccessToken('rt'), (e: unknown) => {
+      assert.ok(e instanceof Error);
+      assert.ok(!(e instanceof GmailReauthRequiredError));
+      assert.match(e.message, new RegExp(String(status)));
+      return true;
+    });
+  });
+}
+
+test('refreshAccessToken: 400 invalid_client → ไม่ใช่ reauth แต่บอกรหัส error ของ Google', async (t) => {
+  stubFetch(t, () => json(400, { error: 'invalid_client' }));
+  await assert.rejects(refreshAccessToken('secret-rt'), (e: unknown) => {
+    assert.ok(e instanceof Error);
+    assert.ok(!(e instanceof GmailReauthRequiredError));
+    assert.match(e.message, /400 invalid_client/);
+    assert.doesNotMatch(e.message, /secret-rt|test-client-secret/);
+    return true;
+  });
+});
+
+test('refreshAccessToken: สำเร็จ → คืน access_token', async (t) => {
+  stubFetch(t, () => json(200, { access_token: 'at-123', expires_in: 3599 }));
+  assert.equal(await refreshAccessToken('rt'), 'at-123');
+});
+
+test('refreshAccessToken: refresh ผ่านแต่ scope ไม่มี gmail.readonly (token เก่า) → GmailReauthRequiredError', async (t) => {
+  stubFetch(t, () => json(200, { access_token: 'at-123', scope: 'openid https://www.googleapis.com/auth/userinfo.email' }));
+  await assert.rejects(refreshAccessToken('rt'), GmailReauthRequiredError);
+});
+
+test('refreshAccessToken: scope มี gmail.readonly → คืน access_token', async (t) => {
+  stubFetch(t, () => json(200, { access_token: 'at-123', scope: 'openid https://www.googleapis.com/auth/gmail.readonly' }));
+  assert.equal(await refreshAccessToken('rt'), 'at-123');
+});
+
+test('listMessagesFromSender: มี after → q = from:x after:<epoch วินาที>', async (t) => {
+  const urls = stubFetch(t, () => json(200, { messages: [{ id: 'm1' }] }));
+  const after = new Date('2026-09-01T12:34:56.789Z');
+  assert.deepEqual(await listMessagesFromSender('at', 'x@bank.com', after), ['m1']);
+  assert.equal(new URL(urls[0]!).searchParams.get('q'), 'from:x@bank.com after:1788266096');
+});
+
+test('listMessagesFromSender: ไม่มี after → q = from:x อย่างเดียว', async (t) => {
+  const urls = stubFetch(t, () => json(200, {}));
+  assert.deepEqual(await listMessagesFromSender('at', 'x@bank.com'), []);
+  assert.equal(new URL(urls[0]!).searchParams.get('q'), 'from:x@bank.com');
 });

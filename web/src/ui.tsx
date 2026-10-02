@@ -170,7 +170,8 @@ export function ConfirmDialog({
   );
 }
 
-export type Notice = { message: string; severity: 'success' | 'error' };
+// info = ผลที่ไม่ใช่ทั้งสำเร็จและผิดพลาด เช่น ผู้ใช้กดยกเลิกเองในหน้าของ Google (สี info = muted ไม่ใช่สีสถานะใหม่)
+export type Notice = { message: string; severity: 'success' | 'error' | 'info' };
 
 // placement="top" ใช้ตอนมีแถบลอยด้านล่างจอ (แถบรายการที่เลือกในหน้าวางแผน) ไม่งั้น snackbar ทับปุ่มของแถบ
 export function FeedbackSnackbar({

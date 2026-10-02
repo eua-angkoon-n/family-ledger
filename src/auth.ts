@@ -6,13 +6,15 @@ import { env } from './env.js';
 import { audit } from './services/audit.js';
 
 // gmail.readonly เท่านั้น — ห้ามเติม scope `drive` ลงในไคลเอนต์ตัวนี้เด็ดขาด
-const SCOPES = ['openid', 'email', 'profile', 'https://www.googleapis.com/auth/gmail.readonly'];
+const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
+const SCOPES = ['openid', 'email', 'profile', GMAIL_SCOPE];
 
 declare module 'express-session' {
   interface SessionData {
     userId?: number;
     oauthState?: string;
     addMailbox?: boolean;
+    reconnectMailboxId?: number;
   }
 }
 
@@ -73,19 +75,6 @@ function logAuthFailure(reason: string, req: Request): void {
   console.warn(`auth ล้มเหลว: ${reason} ip=${req.ip ?? 'unknown'}`);
 }
 
-// ponytail: rate limit ในหน่วยความจำ พอสำหรับ instance เดียว ถ้าสเกลค่อยย้ายไปตาราง/redis
-const attempts = new Map<string, { n: number; resetAt: number }>();
-function tooManyAttempts(ip: string): boolean {
-  const now = Date.now();
-  const e = attempts.get(ip);
-  if (!e || now > e.resetAt) {
-    attempts.set(ip, { n: 1, resetAt: now + 15 * 60_000 });
-    return false;
-  }
-  e.n += 1;
-  return e.n > 10;
-}
-
 type AuthDependencies = {
   query: typeof query;
   encrypt: typeof encrypt;
@@ -102,46 +91,89 @@ export function createAuthRouter({
   fetch,
 }: AuthDependencies = defaultAuthDependencies): Router {
   const authRouter = Router();
+  // ponytail: rate limit ในหน่วยความจำ พอสำหรับ instance เดียว ถ้าสเกลค่อยย้ายไปตาราง/redis
+  // อยู่ในตัว router (prod มีตัวเดียว) — เทสต์ที่สร้าง router ใหม่ต่อเคสจึงไม่ชนเพดานของกันและกัน
+  const attempts = new Map<string, { n: number; resetAt: number }>();
+  function tooManyAttempts(ip: string): boolean {
+    const now = Date.now();
+    const e = attempts.get(ip);
+    if (!e || now > e.resetAt) {
+      attempts.set(ip, { n: 1, resetAt: now + 15 * 60_000 });
+      return false;
+    }
+    e.n += 1;
+    return e.n > 10;
+  }
   // audit ใช้ `query` ตัวที่ฉีดเข้ามา ไม่ใช่ pool ตรง ๆ — เทสต์ที่ปลอม query อยู่แล้วจะไม่แตะ DB จริง
   const auditable = { query: (text: string, params?: unknown[]) => query(text, params ?? []) };
   const saveEmailAccount = (userId: number, email: string, refreshTokenEnc: string) => query(
     `insert into email_account (user_id, email, refresh_token_enc) values ($1, $2, $3)
-     on conflict (user_id, email) do update set refresh_token_enc = excluded.refresh_token_enc`,
+     on conflict (user_id, email) do update set refresh_token_enc = excluded.refresh_token_enc, reauth_required_at = null`,
     [userId, email, refreshTokenEnc],
   );
 
-authRouter.get('/google', (req, res) => {
-  if (tooManyAttempts(req.ip ?? 'unknown')) {
-    logAuthFailure('ยิงถี่เกินเพดาน 10 ครั้ง/15 นาที', req);
-    return void res.status(429).send('ลองใหม่อีก 15 นาที');
+authRouter.get('/google', async (req, res, next) => {
+  try {
+    if (tooManyAttempts(req.ip ?? 'unknown')) {
+      logAuthFailure('ยิงถี่เกินเพดาน 10 ครั้ง/15 นาที', req);
+      return void res.status(429).send('ลองใหม่อีก 15 นาที');
+    }
+    // ?reconnect=<email_account_id> = เชื่อม Gmail ใหม่ให้กล่องเดิมของผู้ใช้ที่ล็อกอินอยู่ (Google ปฏิเสธ refresh token เดิม)
+    // ตอบเป็นข้อความตรง ๆ ไม่ redirect — ลิงก์ผิด/กล่องของคนอื่นต้องไม่ตกไปทางล็อกอินปกติแบบเงียบ ๆ
+    let reconnectMailboxId: number | undefined;
+    let loginHint: string | undefined;
+    if (req.query.reconnect !== undefined) {
+      const mailboxId = Number(req.query.reconnect);
+      if (!Number.isInteger(mailboxId) || mailboxId <= 0) return void res.status(400).send('reconnect ไม่ถูกต้อง');
+      if (!req.session.userId) return void res.status(401).send('ยังไม่ได้เข้าสู่ระบบ');
+      const mailbox = await query<{ email: string }>(
+        'select email from email_account where id = $1 and user_id = $2',
+        [mailboxId, req.session.userId],
+      );
+      loginHint = mailbox.rows[0]?.email;
+      if (!loginHint) return void res.status(403).send('กล่องอีเมลนี้ไม่ใช่ของคุณ');
+      reconnectMailboxId = mailboxId;
+    }
+    req.session.oauthState = randomBytes(16).toString('hex');
+    // ?add=1 = ผู้ใช้ที่ล็อกอินอยู่แล้วต่อกล่องอีเมลใบที่ 2 (requirement 1.1) ไม่ใช่การสมัครใหม่
+    req.session.addMailbox = req.query.add === '1';
+    req.session.reconnectMailboxId = reconnectMailboxId;
+    const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    url.search = new URLSearchParams({
+      client_id: env.googleClientId,
+      redirect_uri: `${env.baseUrl}/auth/google/callback`,
+      response_type: 'code',
+      scope: SCOPES.join(' '),
+      access_type: 'offline',
+      prompt: 'consent', // บังคับให้ได้ refresh_token ทุกครั้ง ไม่ใช่เฉพาะครั้งแรก
+      state: req.session.oauthState,
+      ...(loginHint ? { login_hint: loginHint } : {}),
+    }).toString();
+    res.redirect(url.toString());
+  } catch (e) {
+    next(e);
   }
-  req.session.oauthState = randomBytes(16).toString('hex');
-  // ?add=1 = ผู้ใช้ที่ล็อกอินอยู่แล้วต่อกล่องอีเมลใบที่ 2 (requirement 1.1) ไม่ใช่การสมัครใหม่
-  req.session.addMailbox = req.query.add === '1';
-  const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-  url.search = new URLSearchParams({
-    client_id: env.googleClientId,
-    redirect_uri: `${env.baseUrl}/auth/google/callback`,
-    response_type: 'code',
-    scope: SCOPES.join(' '),
-    access_type: 'offline',
-    prompt: 'consent', // บังคับให้ได้ refresh_token ทุกครั้ง ไม่ใช่เฉพาะครั้งแรก
-    state: req.session.oauthState,
-  }).toString();
-  res.redirect(url.toString());
 });
 
 authRouter.get('/google/callback', async (req, res, next) => {
   try {
-    const { code, state } = req.query;
+    const { code, state, error } = req.query;
     if (!req.session.oauthState || state !== req.session.oauthState) {
       logAuthFailure('state ไม่ตรงกับที่ออกให้', req);
       return void res.status(400).send('state ไม่ตรง — เริ่มเข้าสู่ระบบใหม่');
     }
-    // ต่อกล่องเพิ่มได้เฉพาะตอนล็อกอินอยู่แล้ว — ไม่งั้นตกไปทางสมัครปกติ
-    const addMailbox = req.session.addMailbox === true && req.session.userId != null;
+    // ต่อกล่องเพิ่ม/เชื่อมกล่องเดิมใหม่ได้เฉพาะตอนล็อกอินอยู่แล้ว — ไม่งั้นตกไปทางสมัครปกติ
+    const reconnectMailboxId = req.session.reconnectMailboxId;
+    const mailboxUserId = req.session.addMailbox === true || reconnectMailboxId != null ? req.session.userId : undefined;
     req.session.oauthState = undefined;
     req.session.addMailbox = undefined;
+    req.session.reconnectMailboxId = undefined;
+    // ผู้ใช้กดยกเลิก/ไม่อนุญาตในหน้าของ Google — Google ส่ง ?error= กลับมาแทน code
+    if (error !== undefined) {
+      logAuthFailure(`Google ตอบ error=${JSON.stringify(error).slice(0, 100)}`, req);
+      if (mailboxUserId != null) return void res.redirect('/accounts?gmail=denied');
+      return void res.redirect(error === 'access_denied' ? '/?auth_error=access_denied' : '/?auth_error=failed');
+    }
     if (typeof code !== 'string') {
       logAuthFailure('callback ไม่มี code', req);
       return void res.status(400).send('ไม่มี code');
@@ -164,7 +196,9 @@ authRouter.get('/google/callback', async (req, res, next) => {
       console.error('token exchange ล้มเหลว', tokenRes.status, await tokenRes.text());
       return void res.status(502).send('แลก token กับ Google ไม่สำเร็จ');
     }
-    const token = (await tokenRes.json()) as { access_token: string; refresh_token?: string };
+    const token = (await tokenRes.json()) as { access_token: string; refresh_token?: string; scope?: string };
+    // หน้า consent ให้เอาติ๊กอ่านอีเมลออกได้ — Google ยังออก token ให้ แต่ scope ไม่มี gmail.readonly
+    const hasGmail = (token.scope ?? '').split(' ').includes(GMAIL_SCOPE);
 
     // ถาม userinfo แทนการถอด id_token เอง — ไม่ต้องตรวจลายเซ็น JWT เองให้พลาด
     const infoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
@@ -176,15 +210,44 @@ authRouter.get('/google/callback', async (req, res, next) => {
     }
     const info = (await infoRes.json()) as { sub: string; email: string; name?: string };
 
-    // ต่อกล่องเพิ่ม: ผูกเข้ากับผู้ใช้ใน session ไม่ใช่หา app_user จาก google_sub
+    // ต่อกล่องเพิ่ม/เชื่อมใหม่: ผูกเข้ากับผู้ใช้ใน session ไม่ใช่หา app_user จาก google_sub และไม่เปลี่ยนผู้ใช้ใน session
     // (ยืนยันความเป็นเจ้าของกล่องด้วยการผ่าน OAuth ของกล่องนั้นแล้ว)
     // ponytail: กล่องเดียวกันผูกได้หลาย app_user (unique เป็น (user_id, email))
     // Google revoke ทีเดียวทั้งไคลเอนต์+ผู้ใช้ → reject คนหนึ่งจะตัดสิทธิ์อีกคนที่แชร์กล่องนั้นไปด้วย
     // รับได้ในสเกลครอบครัว ถ้าเจอปัญหาจริงค่อยแยกเป็น many-to-many
-    const existing = addMailbox
-      ? { rows: [] as { id: number }[] }
-      : await query<{ id: number }>('select id from app_user where google_sub = $1', [info.sub]);
-    let userId = addMailbox ? req.session.userId : existing.rows[0]?.id;
+    if (mailboxUserId != null) {
+      let mailboxEmail = info.email;
+      if (reconnectMailboxId != null) {
+        const mailbox = await query<{ email: string }>(
+          'select email from email_account where id = $1 and user_id = $2',
+          [reconnectMailboxId, mailboxUserId],
+        );
+        const saved = mailbox.rows[0]?.email;
+        // เลือกบัญชี Google ผิดตัว (หรือกล่องถูกลบไประหว่างทาง) → ไม่บันทึกอะไรเลย ห้ามเอา token ของอีกบัญชีไปทับ
+        // เช็คก่อน scope เพราะบอกให้ "ติ๊กอนุญาต" กับบัญชีที่ผิดอยู่แล้วไม่ช่วยอะไร
+        if (!saved || saved.toLowerCase() !== info.email.toLowerCase()) {
+          logAuthFailure(`เชื่อม Gmail ใหม่ด้วยบัญชี Google ที่ไม่ตรงกับกล่อง ${reconnectMailboxId}`, req);
+          return void res.redirect('/accounts?gmail=wrong_account');
+        }
+        mailboxEmail = saved; // ใช้ตัวพิมพ์ตามแถวเดิม ไม่งั้น upsert ได้แถวใหม่แทนการทับแถวที่ต้องเชื่อมใหม่
+      }
+      if (!hasGmail) return void res.redirect('/accounts?gmail=not_granted');
+      if (!token.refresh_token) return void res.redirect('/accounts?gmail=no_refresh_token');
+      await saveEmailAccount(mailboxUserId, mailboxEmail, encrypt(token.refresh_token));
+      // เก็บแค่อีเมล/ชื่อ — ห้ามใส่ token หรือ refresh_token_enc ลง audit_log เด็ดขาด
+      await audit(auditable, {
+        userId: mailboxUserId,
+        action: reconnectMailboxId != null ? 'auth.mailbox_reconnect' : 'auth.mailbox_add',
+        entityType: 'app_user',
+        entityId: mailboxUserId,
+        after: { email: mailboxEmail, display_name: info.name ?? '', gmail_connected: true },
+        ip: req.ip ?? null,
+      });
+      return void res.redirect('/accounts?gmail=connected');
+    }
+
+    const existing = await query<{ id: number }>('select id from app_user where google_sub = $1', [info.sub]);
+    let userId = existing.rows[0]?.id;
 
     // ผู้ใช้ใหม่สร้างทันทีที่นี่ ไม่มีขั้นกรอกรหัสเชิญคั่น — ด่านจริงคือ requireUser ที่ปล่อยเฉพาะ
     // approved: ADMIN_EMAIL ได้ approved อัตโนมัติ คนอื่นเป็น pending จนแอดมินกดอนุมัติ
@@ -199,23 +262,25 @@ authRouter.get('/google/callback', async (req, res, next) => {
       userId = created.rows[0]!.id;
     }
 
-    if (token.refresh_token) {
-      await saveEmailAccount(userId, info.email, encrypt(token.refresh_token));
+    // ล็อกอินโดยไม่ติ๊กอ่านอีเมลยังเข้าระบบได้ แต่ห้ามบันทึก/เขียนทับ refresh token ด้วย token ที่อ่านเมลไม่ได้
+    const gmailConnected = hasGmail && token.refresh_token != null;
+    if (gmailConnected) {
+      await saveEmailAccount(userId, info.email, encrypt(token.refresh_token!));
     }
 
     // เก็บแค่อีเมล/ชื่อ — ห้ามใส่ token หรือ refresh_token_enc ลง audit_log เด็ดขาด
     // (คลาสเดียวกับบั๊ก pdf_password_enc รั่วเข้า before_data ที่เจอใน Slice 8)
     await audit(auditable, {
       userId,
-      action: addMailbox ? 'auth.mailbox_add' : isNewUser ? 'auth.signup' : 'auth.login',
+      action: isNewUser ? 'auth.signup' : 'auth.login',
       entityType: 'app_user',
       entityId: userId,
-      after: { email: info.email, display_name: info.name ?? '', gmail_connected: Boolean(token.refresh_token) },
+      after: { email: info.email, display_name: info.name ?? '', gmail_connected: gmailConnected },
       ip: req.ip ?? null,
     });
 
     req.session.userId = userId;
-    res.redirect('/');
+    res.redirect(hasGmail ? '/' : '/?gmail=not_granted');
   } catch (e) {
     next(e);
   }

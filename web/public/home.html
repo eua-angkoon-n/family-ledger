@@ -40,12 +40,12 @@ footer a{margin-right:1rem}
 <p>เป็นระบบใช้งานภายในครอบครัว ผู้ใช้ใหม่ต้องได้รับอนุมัติจากผู้ดูแลระบบก่อนจึงจะเข้าใช้งานได้</p>
 
 <h2>ใช้ข้อมูลจากบัญชี Google อย่างไร</h2>
-<p>แอปขอสิทธิ์ <code>gmail.readonly</code> เพื่ออ่านอีเมลแบบอ่านอย่างเดียว เฉพาะอีเมลที่เป็น statement จากธนาคารและไฟล์ PDF ที่แนบมา เพื่อนำมาแกะเป็นรายการเดินบัญชี แอปไม่ส่ง ไม่ลบ และไม่แก้ไขอีเมลใด ๆ รายละเอียดทั้งหมดอยู่ใน<a href="/privacy.html">นโยบายความเป็นส่วนตัว</a></p>
+<p>แอปขอสิทธิ์ <code>gmail.readonly</code> เพื่ออ่านอีเมลแบบอ่านอย่างเดียว โดยให้ Gmail กรองด้วยที่อยู่ผู้ส่งของธนาคารตั้งแต่ฝั่ง Google จึงได้รับเฉพาะอีเมลที่มาจากที่อยู่ของธนาคาร แล้วอ่านเฉพาะอีเมลเหล่านั้นเพื่อคัดว่าเป็น statement จริง (DKIM และหัวเรื่อง) กับไฟล์ PDF ที่แนบมา เพื่อนำมาแกะเป็นรายการเดินบัญชี แอปไม่ดึงอีเมลอื่น ไม่ส่ง ไม่ลบ และไม่แก้ไขอีเมลใด ๆ รายละเอียดทั้งหมดอยู่ใน<a href="/privacy.html">นโยบายความเป็นส่วนตัว</a></p>
 
 <a class="cta" href="/">เข้าสู่ระบบ</a>
 
 <h2>About this app (English)</h2>
-<p class="en">Hyacinthia Ledger is a self-hosted, family-scale personal finance app. Thai banks email their monthly account statements as PDF attachments; the app reads those emails, extracts the transactions, and turns them into a shared household income-and-expense ledger, so family members never have to key transactions in by hand. It requests the <code>gmail.readonly</code> scope solely to locate bank-statement emails and read their PDF attachments — it never sends, modifies, or deletes mail. Access is limited to family members approved by the administrator. See the <a href="/privacy.html">Privacy Policy</a> and <a href="/terms.html">Terms of Service</a>.</p>
+<p class="en">Hyacinthia Ledger is a self-hosted, family-scale personal finance app. Thai banks email their monthly account statements as PDF attachments; the app reads those emails, extracts the transactions, and turns them into a shared household income-and-expense ledger, so family members never have to key transactions in by hand. It requests the <code>gmail.readonly</code> scope solely to search, filtered by the bank's sender address on Google's side, for emails from the bank, check that they are genuine statements (DKIM and subject) and read their PDF attachments — it never fetches mail outside that search, and never sends, modifies, or deletes mail. Access is limited to family members approved by the administrator. See the <a href="/privacy.html">Privacy Policy</a> and <a href="/terms.html">Terms of Service</a>.</p>
 
 <footer>
   <a href="/privacy.html">นโยบายความเป็นส่วนตัว / Privacy Policy</a>

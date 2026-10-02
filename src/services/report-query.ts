@@ -249,8 +249,10 @@ export type AccountCoverage = {
   bank_id: number;
   bank_name: string;
   account_purpose: 'personal' | 'business';
+  email_account_id: number;
   email: string;
   last_synced_at: string | null;
+  reauth_required_at: string | null;
   latest_txn_date: string | null;
   latest_parsed_period_end: string | null;
   parsed_statement_count: number;
@@ -280,8 +282,10 @@ export async function accountCoverage(userId: number): Promise<AccountCoverage[]
        b.id as bank_id,
        b.name as bank_name,
        a.account_purpose,
+       e.id as email_account_id,
        e.email,
        e.last_synced_at,
+       e.reauth_required_at,
        (select max(t.txn_date) from txn t where t.bank_account_id = a.id) as latest_txn_date,
        max(st.period_end) filter (where st.status = 'parsed') as latest_parsed_period_end,
        count(*) filter (where st.status = 'parsed') as parsed_statement_count,

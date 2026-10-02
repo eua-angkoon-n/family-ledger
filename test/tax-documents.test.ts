@@ -117,6 +117,21 @@ test('tax document vault: upload, dedupe, link, verify, download, audit, archive
     taxEntityId = body.id;
   });
 
+  // TAX_GMAIL_ENABLED = false: กล่องของตัวเองก็ได้ 404 ก่อนขอ token (ถ้าไปถึง refresh จะพังที่ decrypt เป็น 500)
+  await t.test('นำเข้าจาก Gmail ปิดอยู่ฝั่งเซิร์ฟเวอร์ → 404 ทั้งสองเส้น', async () => {
+    const list = await app.request(`/api/tax-documents/gmail-attachments?email_account_id=${emailAccountId}`);
+    assert.equal(list.status, 404);
+    const imported = await app.request('/api/tax-documents/from-gmail', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email_account_id: emailAccountId, gmail_message_id: 'msg-x', gmail_attachment_id: 'att-x', filename: 'x.pdf',
+        tax_entity_id: taxEntityId, document_type: 'receipt', tax_year: 2026, issuer_name: 'ทดสอบ', total_satang: 1000,
+      }),
+    });
+    assert.equal(imported.status, 404);
+  });
+
   let docId: number;
   await t.test('อัปโหลดเอกสารภาษี — ไฟล์บนดิสก์ต้องเข้ารหัสอยู่', async () => {
     const res = await app.request('/api/tax-documents', {

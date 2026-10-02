@@ -2,13 +2,17 @@ import { Router } from 'express';
 import { requireUser } from '../auth.js';
 import { pool, query } from '../db.js';
 import { HttpError, type Body } from '../http.js';
+import { GmailReauthRequiredError } from '../gmail.js';
 import { audit } from '../services/audit.js';
-import { syncEmailAccount } from '../worker.js';
+import { GmailUnavailableError, syncEmailAccount, type SyncSummary } from '../worker.js';
 
 export const emailAccountsRouter = Router();
 
 emailAccountsRouter.get('/email-accounts', requireUser(async (_req, res, user) => {
-  const { rows } = await query('select id, email, last_synced_at from email_account where user_id = $1', [user.id]);
+  const { rows } = await query(
+    'select id, email, last_synced_at, reauth_required_at from email_account where user_id = $1',
+    [user.id],
+  );
   res.json(rows);
 }));
 
@@ -18,7 +22,17 @@ emailAccountsRouter.post('/email-accounts/:id/sync', requireUser(async (req, res
   const owns = await query('select 1 from email_account where id = $1 and user_id = $2', [emailAccountId, user.id]);
   if (!owns.rowCount) throw new HttpError(403, 'กล่องอีเมลนี้ไม่ใช่ของคุณ');
   const full = (req.body as Body).full === true;
-  const summary = await syncEmailAccount(emailAccountId, { full });
+  let summary: SyncSummary;
+  try {
+    summary = await syncEmailAccount(emailAccountId, { full });
+  } catch (e) {
+    if (e instanceof GmailReauthRequiredError) throw new HttpError(409, 'ต้องเชื่อม Gmail ใหม่ก่อนซิงก์กล่องนี้');
+    if (e instanceof GmailUnavailableError) {
+      console.error(`[sync] mailbox=${emailAccountId}`, e);
+      throw new HttpError(502, 'ติดต่อ Google ไม่ได้ชั่วคราว ลองใหม่ภายหลัง');
+    }
+    throw e;
+  }
   // ไม่มี tx ให้เกาะ (sync ทำงานจบไปแล้วและเขียนหลายตารางเอง) — เขียนผ่าน pool
   // เก็บแค่ตัวเลขสรุป ห้ามแตะ refresh_token_enc ของกล่อง
   //

@@ -13,9 +13,10 @@ export type GmailPayload = {
 export type GmailMessage = { id: string; payload: GmailPayload };
 
 const GMAIL_BASE = 'https://gmail.googleapis.com/gmail/v1/users/me';
+const GMAIL_READONLY_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 
-/** history.list คืน 404 เมื่อ historyId เก่าเกินไป (Gmail เก็บ history ไม่ตลอดไป) — ผู้เรียกต้องถอยไป full sync */
-export class GmailHistoryStaleError extends Error {}
+/** Google ตอบ 400 invalid_grant = refresh token ใช้ไม่ได้แล้ว (ถูกเพิกถอน/หมดอายุ) — ผู้ใช้ต้องเชื่อม Gmail ใหม่ ไม่ใช่ปัญหาชั่วคราว */
+export class GmailReauthRequiredError extends Error {}
 
 export async function refreshAccessToken(refreshToken: string): Promise<string> {
   const res = await fetch('https://oauth2.googleapis.com/token', {
@@ -28,19 +29,26 @@ export async function refreshAccessToken(refreshToken: string): Promise<string> 
       grant_type: 'refresh_token',
     }),
   });
-  if (!res.ok) throw new Error(`ขอ access token ใหม่จาก Google ไม่สำเร็จ: ${res.status}`);
-  const body = (await res.json()) as { access_token: string };
+  if (!res.ok) {
+    // body อาจไม่ใช่ JSON (เช่น 5xx จาก proxy) → ถือว่าไม่รู้สาเหตุ = ชั่วคราว; ห้ามใส่ token/secret ลงข้อความ error
+    const err = await res.json().then((b) => (b as { error?: unknown } | null)?.error, () => undefined);
+    if (res.status === 400 && err === 'invalid_grant') {
+      throw new GmailReauthRequiredError('Google ปฏิเสธ refresh token (invalid_grant) — ต้องเชื่อม Gmail ใหม่');
+    }
+    const code = typeof err === 'string' ? ` ${err}` : '';
+    throw new Error(`ขอ access token ใหม่จาก Google ไม่สำเร็จ: ${res.status}${code}`);
+  }
+  const body = (await res.json()) as { access_token: string; scope?: string };
+  // token ที่ master เก่าบันทึกไว้โดยไม่ได้ gmail.readonly ยัง refresh ผ่าน แต่ messages.list จะได้ 403 ทุกชั่วโมง
+  // Google คืน scope มากับ refresh เสมอ — ไม่มี field นี้ (ไม่รู้) ไม่ถือว่าต้องเชื่อมใหม่
+  if (body.scope != null && !body.scope.split(' ').includes(GMAIL_READONLY_SCOPE)) {
+    throw new GmailReauthRequiredError('refresh token ไม่มีสิทธิ์ gmail.readonly — ต้องเชื่อม Gmail ใหม่');
+  }
   return body.access_token;
 }
 
 function authHeaders(accessToken: string): Record<string, string> {
   return { authorization: `Bearer ${accessToken}` };
-}
-
-export async function getProfile(accessToken: string): Promise<{ historyId: string }> {
-  const res = await fetch(`${GMAIL_BASE}/profile`, { headers: authHeaders(accessToken) });
-  if (!res.ok) throw new Error(`gmail profile ล้มเหลว: ${res.status}`);
-  return (await res.json()) as { historyId: string };
 }
 
 /** maxPages จำกัดไว้ให้ tax document picker (ผู้ใช้รอผลสด ๆ) ไม่ต้องไล่ทั้งกล่องเหมือน sync พื้นหลัง */
@@ -62,38 +70,10 @@ export async function listMessages(accessToken: string, q: string, opts: { maxPa
   return ids;
 }
 
-export function listMessagesFromSender(accessToken: string, senderEmail: string): Promise<string[]> {
-  return listMessages(accessToken, `from:${senderEmail}`);
-}
-
-/** startHistoryId เก่าเกินไป → โยน GmailHistoryStaleError ให้ผู้เรียกถอยไป full sync */
-export async function listHistory(
-  accessToken: string,
-  startHistoryId: string,
-): Promise<{ messageIds: string[]; historyId: string }> {
-  const ids = new Set<string>();
-  let pageToken: string | undefined;
-  let historyId = startHistoryId;
-  do {
-    const url = new URL(`${GMAIL_BASE}/history`);
-    url.searchParams.set('startHistoryId', startHistoryId);
-    url.searchParams.set('historyTypes', 'messageAdded');
-    if (pageToken) url.searchParams.set('pageToken', pageToken);
-    const res = await fetch(url, { headers: authHeaders(accessToken) });
-    if (res.status === 404) throw new GmailHistoryStaleError('historyId เก่าเกินไป');
-    if (!res.ok) throw new Error(`gmail history.list ล้มเหลว: ${res.status}`);
-    const body = (await res.json()) as {
-      history?: { messagesAdded?: { message: { id: string } }[] }[];
-      historyId?: string;
-      nextPageToken?: string;
-    };
-    for (const h of body.history ?? []) {
-      for (const m of h.messagesAdded ?? []) ids.add(m.message.id);
-    }
-    if (body.historyId) historyId = body.historyId;
-    pageToken = body.nextPageToken;
-  } while (pageToken);
-  return { messageIds: [...ids], historyId };
+/** after: ใช้ epoch วินาที — Gmail รับได้ และเลี่ยงการตีความ after:YYYY/MM/DD เป็นเที่ยงคืนเวลา PST */
+export function listMessagesFromSender(accessToken: string, senderEmail: string, after?: Date): Promise<string[]> {
+  const q = after ? `from:${senderEmail} after:${Math.floor(after.getTime() / 1000)}` : `from:${senderEmail}`;
+  return listMessages(accessToken, q);
 }
 
 /** format=full เสมอ — format=metadata ยุบ header ซ้ำ ซึ่งด่าน DKIM ต้องเห็นให้ครบ */

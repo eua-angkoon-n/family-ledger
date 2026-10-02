@@ -19,23 +19,33 @@ const authEnv = {
 
 type QueryCall = { sql: string; params: unknown[] };
 
+const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
+const NO_GMAIL_SCOPE = 'openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
+
 async function openTestApp(existingUserId?: number, googleEmail = 'member@example.com') {
   const calls: QueryCall[] = [];
+  // แก้ค่าได้กลางเทสต์ — จำลองผู้ใช้เลือกบัญชี Google อื่น/เอาติ๊ก gmail.readonly ออกในหน้า consent
+  const google = { email: googleEmail, scope: `${NO_GMAIL_SCOPE} ${GMAIL_SCOPE}` };
   const fakeQuery = async (sql: string, params: unknown[] = []) => {
     calls.push({ sql, params });
     if (sql.includes('select id from app_user')) {
       return { rows: existingUserId ? [{ id: existingUserId }] : [], rowCount: existingUserId ? 1 : 0 };
     }
     if (sql.includes('insert into app_user')) return { rows: [{ id: 42 }], rowCount: 1 };
+    // กล่อง id 5 เป็นของผู้ใช้เดิม (existingUserId) เท่านั้น
+    if (sql.includes('select email from email_account')) {
+      const owned = params[0] === 5 && params[1] === existingUserId;
+      return { rows: owned ? [{ email: 'Member@Example.com' }] : [], rowCount: owned ? 1 : 0 };
+    }
     return { rows: [], rowCount: 1 };
   };
   const fakeFetch = async (input: string | URL | Request) => {
     const url = String(input);
     if (url === 'https://oauth2.googleapis.com/token') {
-      return Response.json({ access_token: 'access-token', refresh_token: 'refresh-token' });
+      return Response.json({ access_token: 'access-token', refresh_token: 'refresh-token', scope: google.scope });
     }
     if (url === 'https://www.googleapis.com/oauth2/v3/userinfo') {
-      return Response.json({ sub: 'google-user-1', email: googleEmail, name: 'Family Member' });
+      return Response.json({ sub: 'google-user-1', email: google.email, name: 'Family Member' });
     }
     throw new Error(`unexpected fetch: ${url}`);
   };
@@ -43,6 +53,8 @@ async function openTestApp(existingUserId?: number, googleEmail = 'member@exampl
   const app = express();
   app.use(express.json());
   app.use(session({ secret: 'test-secret-test-secret-test-secret', resave: false, saveUninitialized: false }));
+  // /api/me อ่าน app_user จาก DB จริง (loadUser ไม่ได้ใช้ query ที่ฉีดเข้ามา) — ดูผู้ใช้ใน session ตรง ๆ แทน
+  app.get('/test/session', (req, res) => res.json({ userId: req.session.userId ?? null }));
   app.use('/auth', createAuthRouter({
     query: fakeQuery as never,
     encrypt: (value: string) => `encrypted:${value}`,
@@ -70,11 +82,13 @@ async function openTestApp(existingUserId?: number, googleEmail = 'member@exampl
     return response;
   };
 
-  return { calls, request, close: () => server.close() };
+  const sessionUserId = async () => ((await (await request('/test/session')).json()) as { userId: number | null }).userId;
+
+  return { calls, google, request, sessionUserId, close: () => server.close() };
 }
 
-async function completeGoogleLogin(request: (path: string, init?: RequestInit) => Promise<Response>) {
-  const start = await request('/auth/google');
+async function completeGoogleLogin(request: (path: string, init?: RequestInit) => Promise<Response>, startPath = '/auth/google') {
+  const start = await request(startPath);
   assert.equal(start.status, 302);
   const googleUrl = new URL(start.headers.get('location')!);
   const state = googleUrl.searchParams.get('state');
@@ -142,4 +156,102 @@ test('ไม่มี endpoint สมัครสมาชิกด้วยร�
     body: JSON.stringify({ inviteCode: 'family-only' }),
   });
   assert.equal(signup.status, 404);
+});
+
+const isMailboxWrite = ({ sql }: QueryCall) => sql.includes('insert into email_account');
+
+test('ล็อกอินโดยไม่ติ๊ก gmail.readonly ยังเข้าระบบได้ แต่ไม่บันทึก/ทับ refresh token ของกล่อง', async (t) => {
+  const app = await openTestApp(7);
+  t.after(app.close);
+  app.google.scope = NO_GMAIL_SCOPE;
+
+  const callback = await completeGoogleLogin(app.request);
+  assert.equal(callback.status, 302);
+  assert.equal(callback.headers.get('location'), '/?gmail=not_granted');
+  assert.equal(app.calls.some(isMailboxWrite), false);
+  assert.equal(await app.sessionUserId(), 7);
+  const loginAudit = app.calls.find(({ sql }) => sql.includes('insert into audit_log'));
+  assert.ok(loginAudit);
+  assert.equal(loginAudit.params[1], 'auth.login');
+  assert.equal(JSON.parse(String(loginAudit.params[5])).gmail_connected, false);
+});
+
+test('Google ส่ง ?error= กลับมา: state ผิดยังได้ 400, state ถูกได้ redirect ไม่แลก token', async (t) => {
+  const app = await openTestApp();
+  t.after(app.close);
+
+  const start = await app.request('/auth/google');
+  const state = new URL(start.headers.get('location')!).searchParams.get('state');
+  const wrongState = await app.request('/auth/google/callback?error=access_denied&state=wrong');
+  assert.equal(wrongState.status, 400);
+
+  const denied = await app.request(`/auth/google/callback?error=access_denied&state=${state}`);
+  assert.equal(denied.status, 302);
+  assert.equal(denied.headers.get('location'), '/?auth_error=access_denied');
+  assert.equal(app.calls.length, 0, 'ไม่แตะ DB เลย');
+  assert.equal(await app.sessionUserId(), null);
+});
+
+test('เชื่อม Gmail ใหม่ (?reconnect=) ด้วยบัญชีเดิม: ทับ token แถวเดิม ล้าง reauth_required_at ผู้ใช้ใน session ไม่เปลี่ยน', async (t) => {
+  const app = await openTestApp(7);
+  t.after(app.close);
+  await completeGoogleLogin(app.request);
+
+  const start = await app.request('/auth/google?reconnect=5');
+  assert.equal(start.status, 302);
+  const googleUrl = new URL(start.headers.get('location')!);
+  assert.equal(googleUrl.searchParams.get('login_hint'), 'Member@Example.com');
+  // ต้องหากล่องด้วย user ใน session เสมอ — กล่องของคนอื่นต้องหาไม่เจอ
+  assert.deepEqual(app.calls.findLast(({ sql }) => sql.includes('select email from email_account'))?.params, [5, 7]);
+
+  const before = app.calls.length;
+  // Google คืนอีเมลตัวพิมพ์เล็ก แถวเดิมเก็บ Member@Example.com — ต้องนับว่าเป็นบัญชีเดียวกัน
+  const callback = await app.request(`/auth/google/callback?code=oauth-code&state=${googleUrl.searchParams.get('state')}`);
+  assert.equal(callback.headers.get('location'), '/accounts?gmail=connected');
+  const after = app.calls.slice(before);
+  const upsert = after.find(isMailboxWrite);
+  assert.ok(upsert);
+  assert.match(upsert.sql, /reauth_required_at = null/);
+  assert.deepEqual(upsert.params, [7, 'Member@Example.com', 'encrypted:refresh-token']);
+  assert.equal(after.find(({ sql }) => sql.includes('insert into audit_log'))?.params[1], 'auth.mailbox_reconnect');
+  assert.equal(after.some(({ sql }) => sql.includes('app_user')), false, 'ไม่หา/สร้าง app_user ตอนเชื่อมใหม่');
+  assert.equal(await app.sessionUserId(), 7);
+});
+
+test('?reconnect= ต้องล็อกอินและเป็นเจ้าของกล่อง', async (t) => {
+  const app = await openTestApp(7);
+  t.after(app.close);
+
+  assert.equal((await app.request('/auth/google?reconnect=5')).status, 401);
+  await completeGoogleLogin(app.request);
+  assert.equal((await app.request('/auth/google?reconnect=abc')).status, 400);
+  assert.equal((await app.request('/auth/google?reconnect=6')).status, 403);
+});
+
+test('เชื่อม Gmail ใหม่แต่เลือกบัญชี Google อื่น: ไม่บันทึกอะไร ผู้ใช้ใน session ไม่เปลี่ยน', async (t) => {
+  const app = await openTestApp(7);
+  t.after(app.close);
+  await completeGoogleLogin(app.request);
+
+  app.google.email = 'someone-else@example.com';
+  const before = app.calls.length;
+  const callback = await completeGoogleLogin(app.request, '/auth/google?reconnect=5');
+  assert.equal(callback.headers.get('location'), '/accounts?gmail=wrong_account');
+  const after = app.calls.slice(before);
+  assert.equal(after.some(isMailboxWrite), false);
+  assert.equal(after.some(({ sql }) => sql.includes('insert into')), false);
+  assert.equal(await app.sessionUserId(), 7);
+});
+
+test('ต่อกล่องเพิ่ม (?add=1) โดยไม่ติ๊ก gmail.readonly: ไม่บันทึกกล่อง', async (t) => {
+  const app = await openTestApp(7);
+  t.after(app.close);
+  await completeGoogleLogin(app.request);
+
+  app.google.scope = NO_GMAIL_SCOPE;
+  const before = app.calls.length;
+  const callback = await completeGoogleLogin(app.request, '/auth/google?add=1');
+  assert.equal(callback.headers.get('location'), '/accounts?gmail=not_granted');
+  assert.equal(app.calls.slice(before).some(isMailboxWrite), false);
+  assert.equal(await app.sessionUserId(), 7);
 });

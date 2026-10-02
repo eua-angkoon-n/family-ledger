@@ -1,5 +1,6 @@
 import { Box, Chip, Paper, Stack, Typography } from '@mui/material';
 import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded';
+import LinkOffRounded from '@mui/icons-material/LinkOffRounded';
 import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded';
 import type { AccountCoverage } from '../api.js';
 import { formatDate, formatDateTime } from '../format.js';
@@ -30,7 +31,11 @@ export default function DataFreshness({ accounts }: { accounts: AccountCoverage[
                 {a.latest_txn_date ? `รายการล่าสุด ${formatDate(a.latest_txn_date)}` : 'ยังไม่มีรายการ'}
                 {a.last_synced_at && ` · ซิงก์ล่าสุด ${formatDateTime(a.last_synced_at)}`}
               </Typography>
-              {a.statement_behind ? (
+              {a.reauth_required_at ? (
+                // ซิงก์หยุดแล้วจนกว่าจะเชื่อมใหม่ — สำคัญกว่าสถานะความครบของ statement จึงแสดงแทน; error = ข้อผิดพลาดตาม DESIGN.md
+                // ไม่ทำเป็นลิงก์เพราะ chip เล็กสูง 28px ต่ำกว่า tap target 40px — ปุ่มเชื่อมใหม่อยู่ในแถบเตือนด้านบนและหน้าบัญชีของฉัน
+                <Chip size="small" icon={<LinkOffRounded />} label="ต้องเชื่อม Gmail ใหม่" color="error" variant="outlined" />
+              ) : a.statement_behind ? (
                 // ไม่มีสี "warning" ใน DESIGN.md (มีแค่ accent/income/expense/neutral) — ไม่เพิ่มสีใหม่เอง
                 // ใช้ไอคอน + ข้อความสื่อความหมายแทน (Semantic Color Rule ไม่ได้บังคับว่าต้องมีสีเสมอ)
                 <Chip size="small" icon={<WarningAmberRounded />} label="ข้อมูลอาจไม่ครบ" variant="outlined" />

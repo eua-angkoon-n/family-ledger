@@ -38,7 +38,8 @@ export type Bank = {
   is_active: boolean;
 };
 
-export type EmailAccount = { id: number; email: string; last_synced_at: string | null };
+// reauth_required_at มีค่า = Google ปฏิเสธ refresh token (invalid_grant) ต้องเชื่อม Gmail ใหม่ผ่าน /auth/google?reconnect=<id>
+export type EmailAccount = { id: number; email: string; last_synced_at: string | null; reauth_required_at: string | null };
 
 export type Account = {
   id: number;
@@ -170,8 +171,10 @@ export type AccountCoverage = {
   bank_id: number;
   bank_name: string;
   account_purpose: 'personal' | 'business';
+  email_account_id: number;
   email: string;
   last_synced_at: string | null;
+  reauth_required_at: string | null;
   latest_txn_date: string | null;
   latest_parsed_period_end: string | null;
   parsed_statement_count: number;
