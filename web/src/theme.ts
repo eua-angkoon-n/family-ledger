@@ -446,7 +446,26 @@ const theme = createTheme({
     },
     MuiChip: {
       // มุม md ตาม Badge ของ shadcn (rounded-md)
-      styleOverrides: { root: { fontWeight: 600, borderRadius: radii.md }, sizeSmall: { minHeight: 28 } },
+      // outlined สีปกติ (ตัวกรอง/toggle ที่ไม่ได้เลือก, หมวดในตาราง): ขอบเดิมของ MUI 1.56 (สว่าง) / 2.57 (มืด) และไอคอนลบ
+      // text.primary/26% 1.44 / 2.12 บน background — ใช้ขอบ input (สว่าง 3.03/3.14/3.64, มืด 3.61/3.17 บน background/card/popover) และไอคอน
+      // text.secondary (4.71 / 7.67 บน background) · hover พื้น accent ใช้ accent-foreground เหมือน tab (มืดเดิม 2.54 → 5.07)
+      // scope ที่ colorDefault — chip outlined สีสถานะ (success "ยืนยันแล้ว") คงขอบสีของมันเอง
+      styleOverrides: {
+        root: ({ theme }) => ({
+          fontWeight: 600,
+          borderRadius: radii.md,
+          '&.MuiChip-outlined.MuiChip-colorDefault': {
+            borderColor: theme.vars.palette.brand.input,
+            '& .MuiChip-deleteIcon, & .MuiChip-deleteIcon:hover': { color: theme.vars.palette.text.secondary },
+            '&.MuiChip-clickable:hover, &.MuiChip-clickable:hover .MuiChip-deleteIcon': { color: theme.vars.palette.brand.accentForeground },
+          },
+        }),
+        sizeSmall: { minHeight: 28 },
+      },
+    },
+    // หัวกลุ่มในเมนู (หมวดรายรับ/รายจ่าย) — ค่าเริ่มต้นเป็น background.paper (= card ครีม) เป็นแถบสีกลางเมนูพื้น popover
+    MuiListSubheader: {
+      styleOverrides: { root: ({ theme }) => ({ backgroundColor: theme.vars.palette.brand.popover }) },
     },
     MuiDialog: {
       styleOverrides: {

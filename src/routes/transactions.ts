@@ -21,7 +21,7 @@ export const transactionsRouter = Router();
 // 3 ช่องจาก 50 ของหน้าเดียวกันและถูกนับซ้ำ 3 ครั้งใน pagination รวม split เป็น json คอลัมน์เดียวผ่าน lateral แทน
 // ถ้าจะ "ทำให้เหมือนกัน" กับ category-breakdown ระวังพังทั้งสองจุดเพราะโจทย์ตรงข้ามกัน
 //
-// ponytail: full sort ทุกหน้าเพราะไม่มี (bank_account_id, txn_date desc, id desc) covering index — มีแค่
+// ponytail: full sort ทุกหน้าเพราะไม่มี (bank_account_id, txn_date desc, txn_time desc nulls last, id desc) covering index — มีแค่
 // txn_account_date_idx (bank_account_id, txn_date) ที่ช่วยเฉพาะกรองบัญชีเดียว รับได้ที่สเกลครอบครัว (หลักพัน
 // แถวต่อผู้ใช้) อัปเกรด: เพิ่ม index นั้นก่อน แล้วค่อยย้ายไป keyset pagination (keyset ที่ไม่มี index ให้ขี่
 // ไม่เร็วกว่า offset แค่ซับซ้อนขึ้นเปล่า ๆ)
@@ -47,7 +47,7 @@ transactionsRouter.get('/transactions', requireUser(async (req, res, user) => {
        from txn_split s join category c on c.id = s.category_id where s.txn_id = t.id
      ) sp on true
      ${TXN_FILTER_SQL}
-     order by t.txn_date desc, t.id desc
+     order by t.txn_date desc, t.txn_time desc nulls last, t.id desc
      limit $18 offset $19`,
     params,
   );

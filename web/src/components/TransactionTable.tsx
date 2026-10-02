@@ -19,10 +19,13 @@ import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded';
 import SwapHorizRounded from '@mui/icons-material/SwapHorizRounded';
 import CheckRounded from '@mui/icons-material/CheckRounded';
 import RadioButtonUncheckedRounded from '@mui/icons-material/RadioButtonUncheckedRounded';
-import type { TxnListRow } from '../api.js';
+import type { ReviewStatus, TxnListRow } from '../api.js';
 import { formatDate, formatDayMonth } from '../format.js';
 import { visuallyHiddenSx } from '../ui.js';
 import Money from './Money.js';
+
+/** ชื่อเดียวของสถานะนี้ทุกที่ (แถบ "ต้องจัดการ", การ์ดแดชบอร์ด, chip ตัวกรอง, ตาราง, drawer, คู่มือ) */
+export const UNCATEGORISED_LABEL = 'ยังไม่จัดหมวด';
 
 /** เลือกได้เฉพาะแถวที่ยังไม่ตรวจ — ไม่ส่งมา = หน้านี้ไม่มีแถวให้เลือก ไม่มีคอลัมน์ checkbox เลย */
 export type TxnSelection = {
@@ -44,30 +47,38 @@ type TransactionTableProps = {
 const MD_UP = { display: { xs: 'none', md: 'table-cell' } } as const;
 const BELOW_MD = { display: { md: 'none' } } as const;
 
+// ตรวจแล้ว/จัดหมวดแล้ว = เงียบ (สีรอง) · ยังไม่ตรวจ/ยังไม่จัดหมวด = เน้น (สีตัวอักษรหลัก ตัวหนา) เพราะเป็นสิ่งที่ต้องจัดการ
+// ทั้งคู่มีข้อความ ไม่ใช่สีอย่างเดียว (บน card 5.86 / 11.35, hover 6.79 / 12.13 สว่าง/มืด)
+const todoSx = (todo: boolean) => ({ color: todo ? 'text.primary' : 'text.secondary', fontWeight: todo ? 600 : 400 });
+const reviewLabel = (status: ReviewStatus) => (status === 'reviewed' ? 'ตรวจแล้ว' : 'ยังไม่ตรวจ');
+const categoryNames = (row: TxnListRow) => row.categories.map((c) => c.category_name).join(', ');
+// ≥ md บัญชี/หมวดอยู่บรรทัดเดียวที่ 1280px — ชื่อยาวตัดด้วย … ชื่อเต็มอยู่ใน title (กล่องข้างในเพราะ max-width ของ td ไม่มีผล)
+const ELLIPSIS_SX = { maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } as const;
+
 function CategoryCell({ row }: { row: TxnListRow }) {
   if (row.split_count === 0) {
-    return <Typography variant="body2" color="text.secondary">ไม่ได้จัดหมวด</Typography>;
+    return <Typography variant="body2" component="span" sx={todoSx(true)}>{UNCATEGORISED_LABEL}</Typography>;
   }
-  const shown = row.categories.slice(0, 2);
-  const extra = row.categories.length - shown.length;
+  // หมวดแรก + "+n" ในบรรทัดเดียว — screen reader อ่านชื่อครบจากข้อความซ่อนแทน "+1"
+  const extra = row.categories.length - 1;
   return (
-    <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 0.5 }}>
-      {shown.map((c) => <Chip key={c.category_id} size="small" label={c.category_name} variant="outlined" />)}
-      {extra > 0 && <Chip size="small" label={`+${extra}`} variant="outlined" />}
-    </Stack>
+    <>
+      <Stack direction="row" aria-hidden title={categoryNames(row)} sx={{ gap: 0.5, alignItems: 'center' }}>
+        <Chip size="small" label={row.categories[0]?.category_name} variant="outlined" sx={{ maxWidth: 140 }} />
+        {extra > 0 && <Chip size="small" label={`+${extra}`} variant="outlined" />}
+      </Stack>
+      <Box component="span" sx={visuallyHiddenSx}>{categoryNames(row)}</Box>
+    </>
   );
 }
 
-// ตรวจแล้ว = เงียบ (สีรอง) ยังไม่ตรวจ = เน้น (สีตัวอักษรหลัก ตัวหนา) เพราะเป็นสิ่งที่ต้องจัดการ — ทั้งคู่มีข้อความ ไม่ใช่สีอย่างเดียว
-function ReviewCell({ row }: { row: TxnListRow }) {
-  const reviewed = row.review_status === 'reviewed';
+export function ReviewStatusLabel({ status }: { status: ReviewStatus }) {
+  const reviewed = status === 'reviewed';
   const Icon = reviewed ? CheckRounded : RadioButtonUncheckedRounded;
   return (
-    <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center', whiteSpace: 'nowrap', color: reviewed ? 'text.secondary' : 'text.primary' }}>
+    <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center', whiteSpace: 'nowrap', color: todoSx(!reviewed).color }}>
       <Icon fontSize="small" aria-hidden />
-      <Typography variant="body2" component="span" sx={{ fontWeight: reviewed ? 400 : 600 }}>
-        {reviewed ? 'ตรวจแล้ว' : 'ยังไม่ตรวจ'}
-      </Typography>
+      <Typography variant="body2" component="span" sx={todoSx(!reviewed)}>{reviewLabel(status)}</Typography>
     </Stack>
   );
 }
@@ -82,7 +93,8 @@ export default function TransactionTable({ rows, showRunningBalance, onRowClick,
   // position relative ที่ TableContainer: ข้อความซ่อน (position absolute) ในหัวคอลัมน์ต้องถูก overflow ของกล่องนี้ตัด
   // ไม่งั้นมันหลุดไปยึดหน้าแล้วดันหน้าให้เลื่อนข้างที่ 900–1100px
   return (
-    <TableContainer component={Paper} variant="outlined" tabIndex={0} sx={{ mt: 1.5, position: 'relative' }} aria-busy={busy}>
+    // กล่องเลื่อนที่ focus ได้ต้องมีชื่อ — คนละชื่อกับตาราง ("รายการธุรกรรม") ข้างใน
+    <TableContainer component={Paper} variant="outlined" tabIndex={0} role="region" aria-label="ตารางธุรกรรม" sx={{ mt: 1.5, position: 'relative' }} aria-busy={busy}>
       {/* แถบบางบอกกำลังรีเฟรช แทนการลด opacity ทั้งตาราง — opacity จะลด contrast ของ text.secondary ที่ผ่าน AA
           อยู่แล้วให้ต่ำกว่าเกณฑ์ (ปัญหาเดียวกับที่แก้ใน SummaryCard) */}
       {busy && <LinearProgress aria-label="กำลังรีเฟรชรายการ" sx={{ height: 2 }} />}
@@ -160,6 +172,12 @@ export default function TransactionTable({ rows, showRunningBalance, onRowClick,
                     {row.description}
                   </Box>
                   <Typography variant="body2" color="text.secondary" sx={{ ...BELOW_MD, overflowWrap: 'anywhere' }}>{row.account_nickname}</Typography>
+                  {/* < md ไม่มีคอลัมน์หมวด/สถานะ — สรุปไว้ใต้ชื่อบัญชี มือถือจึงยังเห็นว่าแถวไหนต้องจัดการ */}
+                  <Typography variant="body2" component="div" sx={{ ...BELOW_MD, overflowWrap: 'anywhere' }}>
+                    <Box component="span" sx={todoSx(row.review_status !== 'reviewed')}>{reviewLabel(row.review_status)}</Box>
+                    {' '}<Box component="span" aria-hidden sx={{ color: 'text.secondary' }}>·</Box>{' '}
+                    <Box component="span" sx={todoSx(row.split_count === 0)}>{row.split_count === 0 ? UNCATEGORISED_LABEL : categoryNames(row)}</Box>
+                  </Typography>
                   {row.is_internal_transfer && (
                     <Typography variant="body2" color="text.secondary">
                       <SwapHorizRounded aria-hidden fontSize="inherit" sx={{ verticalAlign: '-0.125em', mr: 0.5 }} />
@@ -167,7 +185,7 @@ export default function TransactionTable({ rows, showRunningBalance, onRowClick,
                     </Typography>
                   )}
                 </TableCell>
-                <TableCell sx={MD_UP}>{row.account_nickname}</TableCell>
+                <TableCell sx={MD_UP}><Box title={row.account_nickname} sx={ELLIPSIS_SX}>{row.account_nickname}</Box></TableCell>
                 {/* ช่องที่ไม่ใช่ทิศของรายการเว้นว่าง ไม่ใส่ "—" — หัวคอลัมน์บอกทิศอยู่แล้ว */}
                 <TableCell align="right" sx={{ ...MD_UP, whiteSpace: 'nowrap' }}>{row.direction === 'credit' && amount}</TableCell>
                 <TableCell align="right" sx={{ ...MD_UP, whiteSpace: 'nowrap' }}>{row.direction === 'debit' && amount}</TableCell>
@@ -177,9 +195,9 @@ export default function TransactionTable({ rows, showRunningBalance, onRowClick,
                 {showRunningBalance && (
                   <TableCell align="right" sx={{ ...MD_UP, whiteSpace: 'nowrap' }}><Money satang={row.running_balance_satang} /></TableCell>
                 )}
-                <TableCell sx={MD_UP}><CategoryCell row={row} /></TableCell>
-                <TableCell sx={MD_UP}>{row.account_purpose === 'business' ? 'ธุรกิจ' : 'ส่วนตัว'}</TableCell>
-                <TableCell sx={MD_UP}><ReviewCell row={row} /></TableCell>
+                <TableCell sx={{ ...MD_UP, whiteSpace: 'nowrap' }}><CategoryCell row={row} /></TableCell>
+                <TableCell sx={{ ...MD_UP, whiteSpace: 'nowrap' }}>{row.account_purpose === 'business' ? 'ธุรกิจ' : 'ส่วนตัว'}</TableCell>
+                <TableCell sx={MD_UP}><ReviewStatusLabel status={row.review_status} /></TableCell>
                 <TableCell align="right" sx={{ py: 0.5, px: { xs: 0, md: 1 } }}>
                   <Tooltip title="ดูรายละเอียด">
                     <IconButton

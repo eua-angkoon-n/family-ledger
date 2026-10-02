@@ -297,6 +297,27 @@ test('ledger classification API: category / annotation / split / transfer-match'
     assert.deepEqual(audited.rows.map((r) => Number(r.entity_id)).sort((a, b) => a - b), [unreviewed, bare, flagged].sort((a, b) => a - b));
   });
 
+  // insert สลับลำดับ id กับเวลาโดยตั้งใจ — ถ้าเรียงแค่ txn_date, id desc เทสต์นี้ต้องพัง
+  await t.test('list: ธุรกรรมวันเดียวกันเรียงเวลาล่าสุดก่อน แถวไม่มีเวลาอยู่ท้ายวัน', async () => {
+    const accountId = await seedAccount('151-5-15151-5');
+    const statementId = await seedStatement(accountId, 'msg-list-order');
+    const seed = (txnTime: string | undefined, runningBalance: number) =>
+      seedTxn(statementId, accountId, { txnDate: '2026-08-15', txnTime, amount: 1000, direction: 'debit', runningBalance });
+    const at0804 = await seed('08:04:00', 98000);
+    const at2211 = await seed('22:11:00', 96000);
+    const untimed = await seed(undefined, 95000);
+    const at0802 = await seed('08:02:00', 99000);
+    const at2209 = await seed('22:09:00', 97000);
+    const nextDay = await seedTxn(statementId, accountId, {
+      txnDate: '2026-08-16', txnTime: '00:01:00', amount: 1000, direction: 'debit', runningBalance: 94000,
+    });
+
+    const res = await request(`/api/transactions?month=2026-08&bank_account_id=${accountId}`);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { rows: { id: number }[] };
+    assert.deepEqual(body.rows.map((r) => Number(r.id)), [nextDay, at2211, at2209, at0804, at0802, untimed]);
+  });
+
   await t.test('review (bulk): validation — ว่าง, เกิน 200, ไม่ใช่จำนวนเต็มบวก ได้ 400', async () => {
     const bad = [{}, { txn_ids: [] }, { txn_ids: Array.from({ length: 201 }, (_, i) => i + 1) },
       { txn_ids: [1.5] }, { txn_ids: ['1'] }, { txn_ids: [0] }, { txn_ids: [1e300] }, { txn_ids: 1 }];

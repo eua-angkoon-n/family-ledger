@@ -29,9 +29,10 @@ import {
 } from '../api.js';
 import { formatBaht, formatDate, parseBahtToSatang } from '../format.js';
 import { dataTextSx, radii } from '../theme.js';
-import { LoadError, type Notice } from '../ui.js';
+import { ConfirmDialog, LoadError, visuallyHiddenSx, type Notice } from '../ui.js';
 import IncomeQuickAddModal from './IncomeQuickAddModal.js';
 import Money from './Money.js';
+import { ReviewStatusLabel, UNCATEGORISED_LABEL } from './TransactionTable.js';
 
 const CLASSIFICATION_LABEL: Record<Classification, string> = {
   income: 'รายรับ',
@@ -43,9 +44,19 @@ const CLASSIFICATION_LABEL: Record<Classification, string> = {
 // h3 ใต้ชื่อ drawer (h2) ขั้น Headline Small ของ DESIGN.md
 const SECTION_HEADING_SX = { fontSize: '1rem', lineHeight: 1.5 } as const;
 
+// ปลายรายการใช้ aria-disabled ไม่ใช่ disabled — ปุ่มที่ถือ focus อยู่ยังอยู่ในลำดับ tab (focus ไม่หลุดไป <body>)
+// สีเดียวกับ disabled ของ MUI (action.disabled) จึงไม่มีคู่สีใหม่
+const NAV_BUTTON_SX = { '&[aria-disabled="true"]': { color: 'action.disabled', cursor: 'default', backgroundColor: 'transparent' } } as const;
+
 // category_id เป็น string เสมอ (ค่าว่าง = ยังไม่เลือก) — เลี่ยงปัญหา MUI Select ที่ value เป็น union
 // number | '' แล้ว TS สืบ generic type ของ onChange event ไม่ได้ตรงกับที่ประกาศ แปลงเป็น number ตอน submit
 type SplitRow = { key: string; category_id: string; amountText: string; note: string };
+
+// ค่าในฟอร์มตอนโหลด/บันทึกล่าสุด — เทียบกับค่านี้แทน detail เพราะ classification ที่บันทึกกับ is_internal_transfer ต่างกันได้
+type FormSnapshot = { classification: Classification; note: string; taxEntity: string; taxTreatment: string };
+type SaveResult = Notice & { ok: boolean };
+type PendingNav = { go: () => void; kind: 'close' | 'move' };
+const NOT_READY: SaveResult = { ok: false, message: 'ยังโหลดรายการไม่เสร็จ', severity: 'error' };
 
 // สตางค์ → ข้อความในช่องกรอก ด้วยเลขจำนวนเต็ม (ไม่หาร 100 แบบทศนิยม)
 const satangToInput = (satang: number) => `${Math.floor(satang / 100)}.${String(satang % 100).padStart(2, '0')}`;
@@ -53,6 +64,9 @@ const satangToInput = (satang: number) => `${Math.floor(satang / 100)}.${String(
 function splitsToRows(splits: TxnSplit[]): SplitRow[] {
   return splits.map((s) => ({ key: String(s.id), category_id: String(s.category_id), amountText: satangToInput(s.amount_satang), note: s.note ?? '' }));
 }
+
+// เทียบร่างกับที่บันทึกไว้โดยไม่สน key และยอดที่พิมพ์ต่างรูปแต่ค่าเท่ากัน ("100" = "100.00")
+const splitsKey = (rows: SplitRow[]) => JSON.stringify(rows.map((s) => [s.category_id, parseBahtToSatang(s.amountText) ?? s.amountText, s.note]));
 
 const singleCategoryOf = (splits: TxnSplit[]) => (splits.length === 1 ? String(splits[0]!.category_id) : '');
 
@@ -83,14 +97,21 @@ type ReviewDrawerProps = {
   onNext?: () => void;
   /** "รายการที่ 3 จาก 50 ในหน้านี้" — ไม่ส่งมา = เปิดจากลิงก์ ไม่อยู่ในรายการ ไม่มีแถบเลื่อนรายการ */
   position?: string;
+  /** มีการแก้ไขที่ยังไม่บันทึกหรือไม่ — ปุ่ม Back ของเบราว์เซอร์ไม่ผ่านตัวกั้นของ drawer หน้าจึงต้องรู้ */
+  onDirtyChange?: (dirty: boolean) => void;
+  /** เพิ่มค่าเมื่อหน้าขอปิด (กด Back) — มีการแก้ไขค้างจะถามก่อนเหมือนกดปิดเอง */
+  closeRequest?: number;
 };
 
 // Drawer เดียวทำสามงาน: จัดประเภท+หมวด, แยกยอดหลายหมวด, ยืนยัน/ปฏิเสธคู่โอนที่ระบบ suggest ไว้ —
 // นี่คือจุดแรกที่ผู้ใช้เห็นและกดยืนยัน suggested transfer match จริง (ย้ายมาจาก 4A ตาม 4b-dashboard.md)
-export default function ReviewDrawer({ txnId, categories, taxEntities, onClose, onExited, onSaved, onNotice, onPrev, onNext, position }: ReviewDrawerProps) {
+export default function ReviewDrawer({
+  txnId, categories, taxEntities, onClose, onExited, onSaved, onNotice, onPrev, onNext, position, onDirtyChange, closeRequest,
+}: ReviewDrawerProps) {
   const [detail, setDetail] = useState<TxnDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [saved, setSaved] = useState<FormSnapshot | null>(null);
   const [classification, setClassification] = useState<Classification>('expense');
   const [categoryId, setCategoryId] = useState('');
   const [note, setNote] = useState('');
@@ -98,26 +119,55 @@ export default function ReviewDrawer({ txnId, categories, taxEntities, onClose, 
   const [taxTreatment, setTaxTreatment] = useState('');
   const [incomeModalOpen, setIncomeModalOpen] = useState(false);
   const [savingClassification, setSavingClassification] = useState(false);
+  const [savingNext, setSavingNext] = useState(false);
   const [splits, setSplits] = useState<SplitRow[]>([]);
   const [splitSubmitted, setSplitSubmitted] = useState(false);
   const [savingSplits, setSavingSplits] = useState(false);
   const [actingMatchId, setActingMatchId] = useState<number | null>(null);
+  const [announcement, setAnnouncement] = useState<{ id: number; message: string } | null>(null);
+  const [pendingNav, setPendingNav] = useState<PendingNav | null>(null);
+  const [navError, setNavError] = useState('');
+  const [savingNav, setSavingNav] = useState(false);
   const requestIdRef = useRef(0);
+  // ผลที่ต้องประกาศหลัง dialog/drawer ปิดสนิท — ระหว่างนั้นทุกอย่างข้างหลังเป็น aria-hidden
+  const afterDialogNoticeRef = useRef<Notice | null>(null);
+  const exitNoticeRef = useRef<Notice | null>(null);
+  const focusSaveAfterLoadRef = useRef(false);
+  const focusSplitAtRef = useRef<number | null>(null);
+  const saveRef = useRef<HTMLButtonElement>(null);
+  const saveNextRef = useRef<HTMLButtonElement>(null);
+  const addSplitRef = useRef<HTMLButtonElement>(null);
+  const splitsBoxRef = useRef<HTMLElement>(null);
+
+  // snackbar ของหน้าอยู่ใน #root ซึ่งเป็น aria-hidden ระหว่างที่ drawer เปิด — live region ใน drawer ให้ screen reader
+  // ได้ยิน ส่วน snackbar ให้คนที่มองเห็น ประกาศจึงมีครั้งเดียว · id ใหม่ = node ใหม่ ข้อความเดิมซ้ำก็ยังประกาศ
+  const notify = (n: Notice) => {
+    setAnnouncement((a) => ({ id: (a?.id ?? 0) + 1, message: n.message }));
+    onNotice({ message: n.message, severity: n.severity });
+  };
 
   // กันคำขอที่มาไม่เรียงลำดับ (คลิกแถว A แล้ว B เร็ว ๆ ถ้า A ตอบช้ากว่าจะเขียนทับรายละเอียดของ B ที่กำลังเปิดอยู่)
-  const load = async (id: number) => {
+  // background = โหลดรายการเดิมซ้ำ (หลังยืนยันคู่โอน/บันทึกรายได้) ไม่แทนเนื้อหาด้วย skeleton — ปุ่มที่ถือ focus ยังอยู่
+  const load = async (id: number, background = false) => {
     const requestId = ++requestIdRef.current;
-    setLoading(true);
+    if (!background) setLoading(true);
     setError('');
     try {
       const d = await req<TxnDetail>(`/api/transactions/${id}`);
       if (requestId !== requestIdRef.current) return;
+      const snapshot: FormSnapshot = {
+        classification: initialClassification(d),
+        note: d.annotation_note ?? '',
+        taxEntity: d.tax_entity_id == null ? '' : String(d.tax_entity_id),
+        taxTreatment: d.tax_treatment ?? '',
+      };
       setDetail(d);
-      setClassification(initialClassification(d));
+      setSaved(snapshot);
+      setClassification(snapshot.classification);
       setCategoryId(singleCategoryOf(d.splits));
-      setNote(d.annotation_note ?? '');
-      setTaxEntityOverride(d.tax_entity_id == null ? '' : String(d.tax_entity_id));
-      setTaxTreatment(d.tax_treatment ?? '');
+      setNote(snapshot.note);
+      setTaxEntityOverride(snapshot.taxEntity);
+      setTaxTreatment(snapshot.taxTreatment);
       setSplits(splitsToRows(d.splits));
       setSplitSubmitted(false);
       setIncomeModalOpen(false);
@@ -131,15 +181,43 @@ export default function ReviewDrawer({ txnId, categories, taxEntities, onClose, 
 
   useEffect(() => {
     if (txnId != null) void load(txnId);
+    else setAnnouncement(null);
   }, [txnId]);
 
+  // การแก้ไขที่ยังไม่บันทึก — ระหว่างโหลด/ยังเป็นรายละเอียดของแถวก่อน (detail.id ≠ txnId) ไม่นับ ไม่งั้นถามซ้ำหลังเพิ่งทิ้ง
+  const annotationDirty = saved != null && (
+    classification !== saved.classification
+    || note !== saved.note
+    || (TAX_PAGES_ENABLED && (taxEntityOverride !== saved.taxEntity || taxTreatment !== saved.taxTreatment))
+  );
+  const categoryDirty = detail != null && detail.splits.length <= 1 && categoryId !== singleCategoryOf(detail.splits);
+  const splitsDirty = detail != null && splitsKey(splits) !== splitsKey(splitsToRows(detail.splits));
+  const dirty = !loading && detail != null && detail.id === txnId && (annotationDirty || categoryDirty || splitsDirty);
+  useEffect(() => { onDirtyChange?.(dirty); }, [dirty]);
+
+  // "บันทึกแล้วไปถัดไป": ปุ่มหายไประหว่างโหลดแถวถัดไป (skeleton) — คืน focus ที่ปุ่มเดิม หรือปุ่มบันทึกเมื่อหมดแถวแล้ว
+  useEffect(() => {
+    if (!focusSaveAfterLoadRef.current || loading || detail == null || detail.id !== txnId) return;
+    focusSaveAfterLoadRef.current = false;
+    (saveNextRef.current ?? saveRef.current)?.focus();
+  }, [loading, detail, txnId]);
+
+  // ลบแถวแยกยอด: focus ไปปุ่มลบของแถวที่เลื่อนขึ้นมาแทน หรือ "แบ่งยอดเพิ่ม" เมื่อไม่เหลือแถวถัดไป
+  useEffect(() => {
+    const index = focusSplitAtRef.current;
+    if (index == null) return;
+    focusSplitAtRef.current = null;
+    const buttons = splitsBoxRef.current?.querySelectorAll<HTMLElement>('[data-split-delete]');
+    (buttons?.[index] ?? addSplitRef.current)?.focus();
+  }, [splits]);
+
   const putSplits = async (txn: TxnDetail, payload: { category_id: number; amount_satang: number; note: string | null }[]) => {
-    const saved = await put<{ id: number; category_id: number; amount_satang: number; note: string | null }[]>(
+    const savedSplits = await put<{ id: number; category_id: number; amount_satang: number; note: string | null }[]>(
       `/api/transactions/${txn.id}/splits`,
       payload,
     );
     // PUT คืนแถว txn_split ดิบ ไม่มีชื่อหมวด — หมวดที่เลิกใช้แล้วไม่อยู่ใน categories จึงใช้ชื่อเดิมจาก detail
-    const withNames = saved.map((s) => ({
+    const withNames = savedSplits.map((s) => ({
       ...s,
       category_name: categories.find((c) => c.id === s.category_id)?.name ?? txn.splits.find((x) => x.category_id === s.category_id)?.category_name ?? '',
     }));
@@ -151,12 +229,13 @@ export default function ReviewDrawer({ txnId, categories, taxEntities, onClose, 
 
   // บันทึก = ตั้งประเภทรายการ + หมวด (ทั้งยอดเข้าหมวดเดียว) + ทำเครื่องหมายตรวจแล้ว (PATCH annotation ตั้ง reviewed เสมอ)
   // หมวดเดียวบันทึกผ่าน PUT splits เป็น split เดียวเต็มยอด — ส่งเฉพาะเมื่อเปลี่ยน และไม่แตะเมื่อแยกไว้หลายหมวด
-  const saveClassification = async () => {
-    if (!detail) return;
+  // withCategory = false: เพิ่งบันทึกการแยกยอดไป ช่องหมวดเดียวในตอนนี้เป็นค่าเก่าของ closure ห้ามส่งทับ
+  const saveClassification = async (withCategory = true): Promise<SaveResult> => {
+    if (!detail) return NOT_READY;
     setSavingClassification(true);
     let splitsSaved = false;
     try {
-      if (detail.splits.length <= 1 && categoryId !== singleCategoryOf(detail.splits)) {
+      if (withCategory && detail.splits.length <= 1 && categoryId !== singleCategoryOf(detail.splits)) {
         await putSplits(
           detail,
           categoryId === '' ? [] : [{ category_id: Number(categoryId), amount_satang: detail.amount_satang, note: detail.splits[0]?.note ?? null }],
@@ -175,12 +254,13 @@ export default function ReviewDrawer({ txnId, categories, taxEntities, onClose, 
         ...d, classification: updated.classification, review_status: 'reviewed',
         annotation_note: updated.note, tax_entity_id: updated.tax_entity_id, tax_treatment: updated.tax_treatment,
       } : d));
-      onNotice({ message: 'บันทึกแล้ว และทำเครื่องหมายตรวจแล้ว', severity: 'success' });
+      setSaved({ classification, note, taxEntity: taxEntityOverride, taxTreatment });
       onSaved();
+      return { ok: true, message: 'บันทึกแล้ว และทำเครื่องหมายตรวจแล้ว', severity: 'success' };
     } catch (e) {
-      onNotice({ message: e instanceof Error ? e.message : 'บันทึกไม่สำเร็จ', severity: 'error' });
       // หมวดบันทึกไปแล้วแม้ขั้นถัดไปพัง — ตารางต้องเห็นหมวดใหม่
       if (splitsSaved) onSaved();
+      return { ok: false, message: e instanceof Error ? e.message : 'บันทึกไม่สำเร็จ', severity: 'error' };
     } finally {
       setSavingClassification(false);
     }
@@ -190,20 +270,17 @@ export default function ReviewDrawer({ txnId, categories, taxEntities, onClose, 
   const remainingSatang = detail ? detail.amount_satang - splitTotalSatang : 0;
   const splitsRowsValid = splits.every((s) => s.category_id !== '' && amountError(s, true) === '');
 
-  // ปุ่มบันทึกกดได้เสมอ — ตรวจตอนกด แล้วบอกที่ช่องที่ผิดและใน snackbar ว่าต้องแก้อะไร
-  const saveSplits = async () => {
-    if (!detail) return;
+  // ปุ่มบันทึกกดได้เสมอ — ตรวจตอนกด แล้วบอกที่ช่องที่ผิดและในข้อความผลว่าต้องแก้อะไร
+  const saveSplits = async (): Promise<SaveResult> => {
+    if (!detail) return NOT_READY;
     setSplitSubmitted(true);
-    if (!splitsRowsValid) {
-      onNotice({ message: 'กรอกหมวดและจำนวนเงินให้ครบทุกแถว', severity: 'error' });
-      return;
-    }
+    if (!splitsRowsValid) return { ok: false, message: 'กรอกหมวดและจำนวนเงินให้ครบทุกแถว', severity: 'error' };
     if (splits.length > 0 && remainingSatang !== 0) {
-      onNotice({
+      return {
+        ok: false,
         message: `ยอดแยกรวมต้องเท่ากับ ฿${formatBaht(detail.amount_satang)} (${remainingSatang > 0 ? 'ยังขาด' : 'เกิน'} ฿${formatBaht(Math.abs(remainingSatang))})`,
         severity: 'error',
-      });
-      return;
+      };
     }
     setSavingSplits(true);
     try {
@@ -211,13 +288,77 @@ export default function ReviewDrawer({ txnId, categories, taxEntities, onClose, 
         detail,
         splits.map((s) => ({ category_id: Number(s.category_id), amount_satang: parseBahtToSatang(s.amountText)!, note: s.note || null })),
       );
-      onNotice({ message: splits.length === 0 ? 'ล้างการแยกยอดแล้ว' : 'บันทึกการแยกยอดแล้ว', severity: 'success' });
       onSaved();
+      return { ok: true, message: splits.length === 0 ? `ล้างหมวดแล้ว รายการนี้กลับเป็น${UNCATEGORISED_LABEL}` : 'บันทึกการแยกยอดแล้ว', severity: 'success' };
     } catch (e) {
-      onNotice({ message: e instanceof Error ? e.message : 'บันทึกการแยกยอดไม่สำเร็จ', severity: 'error' });
+      return { ok: false, message: e instanceof Error ? e.message : 'บันทึกการแยกยอดไม่สำเร็จ', severity: 'error' };
     } finally {
       setSavingSplits(false);
     }
+  };
+
+  // ร่างแยกยอดบันทึกก่อน แล้วจึงประเภท/โน้ต — ไม่ส่งหมวดเดียวซ้ำ (จะทับการแยกยอดที่เพิ่งบันทึก) ส่วนที่
+  // saveClassification อ่านจาก closure หลัง await (id, ประเภท, โน้ต, ภาษี) saveSplits ไม่ได้แตะ
+  const saveEdits = async (annotation: boolean): Promise<SaveResult> => {
+    let result: SaveResult = { ok: true, message: '', severity: 'success' };
+    if (splitsDirty) {
+      result = await saveSplits();
+      if (!result.ok) return result;
+    }
+    return annotation ? saveClassification(!splitsDirty) : result;
+  };
+  // ปุ่ม "บันทึก" ใน dialog บันทึกเฉพาะส่วนที่แก้ — แก้แค่การแยกยอดไม่ทำเครื่องหมายตรวจแล้วให้
+  const annotationWillSave = annotationDirty || (categoryDirty && !splitsDirty);
+
+  const busySaving = savingClassification || savingSplits;
+  const saveAndNext = async () => {
+    // จับไว้ก่อน await — reload ของหน้ายังไม่กลับมา แถวถัดไปจึงยังเป็นแถวเดิม แม้แถวนี้จะหลุดจากคิวหลังบันทึก
+    const go = onNext;
+    if (!go || busySaving) return;
+    setSavingNext(true);
+    const result = await saveEdits(true);
+    setSavingNext(false);
+    notify(result);
+    if (!result.ok) return;
+    focusSaveAfterLoadRef.current = true;
+    go();
+  };
+
+  // ทุกทางออก (ก่อนหน้า/ถัดไป, Esc, คลิกฉากหลัง, ปุ่มปิด, Back) ผ่านที่นี่ — มีการแก้ไขค้างถามก่อน
+  const guard = (go: (() => void) | undefined, kind: PendingNav['kind']) => {
+    if (!go) return;
+    if (dirty) {
+      setNavError('');
+      setPendingNav({ go, kind });
+    } else {
+      go();
+    }
+  };
+  useEffect(() => {
+    if (closeRequest) guard(onClose, 'close');
+  }, [closeRequest]);
+
+  // บันทึกไม่สำเร็จ = dialog ค้างไว้พร้อมข้อความ (role alert ใน dialog ซึ่งเป็น modal บนสุด) ให้เลือกแก้/ทิ้ง/ลองใหม่
+  const confirmSave = async () => {
+    const nav = pendingNav;
+    if (!nav) return;
+    setSavingNav(true);
+    const result = await saveEdits(annotationWillSave);
+    setSavingNav(false);
+    if (!result.ok) {
+      setNavError(result.message);
+      return;
+    }
+    const notice: Notice = { message: result.message, severity: result.severity };
+    if (nav.kind === 'close') exitNoticeRef.current = notice;
+    else afterDialogNoticeRef.current = notice;
+    setPendingNav(null);
+    nav.go();
+  };
+  const discardEdits = () => {
+    const nav = pendingNav;
+    setPendingNav(null);
+    nav?.go();
   };
 
   const actOnMatch = async (matchId: number, action: 'confirm' | 'reject') => {
@@ -225,11 +366,11 @@ export default function ReviewDrawer({ txnId, categories, taxEntities, onClose, 
     setActingMatchId(matchId);
     try {
       await post(`/api/transfer-matches/${matchId}/${action}`, {});
-      onNotice({ message: action === 'confirm' ? 'ยืนยันคู่โอนภายในแล้ว' : 'ปฏิเสธคู่โอนที่ระบบเสนอแล้ว', severity: 'success' });
-      await load(detail.id);
+      notify({ message: action === 'confirm' ? 'ยืนยันคู่โอนภายในแล้ว' : 'ปฏิเสธคู่โอนที่ระบบเสนอแล้ว', severity: 'success' });
+      await load(detail.id, true);
       onSaved();
     } catch (e) {
-      onNotice({ message: e instanceof Error ? e.message : 'ดำเนินการไม่สำเร็จ', severity: 'error' });
+      notify({ message: e instanceof Error ? e.message : 'ดำเนินการไม่สำเร็จ', severity: 'error' });
     } finally {
       setActingMatchId(null);
     }
@@ -253,23 +394,41 @@ export default function ReviewDrawer({ txnId, categories, taxEntities, onClose, 
     <Drawer
       anchor="right"
       open={txnId != null}
-      onClose={onClose}
+      onClose={() => guard(onClose, 'close')}
       disableRestoreFocus
-      slotProps={{ paper: { 'aria-labelledby': 'review-drawer-heading' }, transition: { onExited } }}
+      slotProps={{
+        paper: { 'aria-labelledby': 'review-drawer-heading' },
+        transition: {
+          onExited: () => {
+            onExited?.();
+            const notice = exitNoticeRef.current;
+            exitNoticeRef.current = null;
+            if (notice) onNotice(notice);
+          },
+        },
+      }}
     >
       <Box sx={{ width: { xs: '100vw', sm: 440 }, p: 3, height: '100%', overflowY: 'auto' }}>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start', justifyContent: 'space-between', mb: position ? 1 : 2 }}>
           <Typography variant="h2" id="review-drawer-heading" sx={{ fontSize: '1.25rem', pt: 0.75 }}>รายละเอียดธุรกรรม</Typography>
-          <IconButton aria-label="ปิด" onClick={onClose}><CloseRounded /></IconButton>
+          <IconButton aria-label="ปิด" onClick={() => guard(onClose, 'close')}><CloseRounded /></IconButton>
         </Stack>
         {/* เลื่อนรายการโดยไม่ต้องปิด — focus อยู่ที่ปุ่มเดิม กด Enter ซ้ำได้ ตำแหน่งประกาศผ่าน live region */}
         {position && (
           <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 1, mb: 2 }}>
-            <Button color="inherit" startIcon={<ChevronLeftRounded />} onClick={onPrev} disabled={!onPrev}>ก่อนหน้า</Button>
+            <Button color="inherit" startIcon={<ChevronLeftRounded />} onClick={() => guard(onPrev, 'move')} aria-disabled={!onPrev} disableRipple={!onPrev} sx={NAV_BUTTON_SX}>
+              ก่อนหน้า
+            </Button>
             <Typography variant="body2" color="text.secondary" aria-live="polite" sx={{ ...dataTextSx, textAlign: 'center' }}>{position}</Typography>
-            <Button color="inherit" endIcon={<ChevronRightRounded />} onClick={onNext} disabled={!onNext}>ถัดไป</Button>
+            <Button color="inherit" endIcon={<ChevronRightRounded />} onClick={() => guard(onNext, 'move')} aria-disabled={!onNext} disableRipple={!onNext} sx={NAV_BUTTON_SX}>
+              ถัดไป
+            </Button>
           </Stack>
         )}
+        {/* อยู่นอกส่วนที่ถูกแทนด้วย skeleton — live region ต้องอยู่ใน DOM ก่อนข้อความเปลี่ยนจึงประกาศแน่นอน */}
+        <Box role="status" sx={visuallyHiddenSx}>
+          {announcement && <span key={announcement.id}>{announcement.message}</span>}
+        </Box>
 
         {error && <LoadError message={error} onRetry={txnId != null ? () => void load(txnId) : undefined} />}
 
@@ -286,6 +445,7 @@ export default function ReviewDrawer({ txnId, categories, taxEntities, onClose, 
               <Typography variant="body2" color="text.secondary" sx={dataTextSx}>
                 {formatDate(detail.txn_date)} · {detail.account_nickname} ({detail.bank_name})
               </Typography>
+              <Box sx={{ mt: 0.5 }}><ReviewStatusLabel status={detail.review_status} /></Box>
               <Money
                 satang={detail.direction === 'debit' ? -detail.amount_satang : detail.amount_satang}
                 tone={detail.is_internal_transfer ? 'neutral' : detail.direction === 'credit' ? 'income' : 'expense'}
@@ -318,7 +478,7 @@ export default function ReviewDrawer({ txnId, categories, taxEntities, onClose, 
                     size="small"
                     helperText='ทั้งยอดเข้าหมวดเดียว ถ้ามีหลายหมวดใช้ "แยกยอดตามหมวด" ด้านล่าง'
                   >
-                    <MenuItem value=""><em>ไม่ระบุหมวด</em></MenuItem>
+                    <MenuItem value=""><em>{UNCATEGORISED_LABEL}</em></MenuItem>
                     {categoryOptions}
                   </TextField>
                 )}
@@ -378,18 +538,40 @@ export default function ReviewDrawer({ txnId, categories, taxEntities, onClose, 
                     )}
                   </>
                 )}
-                <Button variant="contained" onClick={() => void saveClassification()} disabled={savingClassification} aria-busy={savingClassification} sx={{ alignSelf: 'flex-start' }}>
-                  {savingClassification ? 'กำลังบันทึก…' : 'บันทึกและตรวจแล้ว'}
-                </Button>
+                {/* กำลังบันทึก = aria-disabled ไม่ใช่ disabled — ปุ่มที่ถูกปิดระหว่างถือ focus ทำ focus หลุด */}
+                <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1 }}>
+                  <Button
+                    ref={saveRef}
+                    variant="contained"
+                    onClick={async () => { if (!busySaving) notify(await saveClassification()); }}
+                    aria-disabled={busySaving}
+                    aria-busy={savingClassification && !savingNext}
+                  >
+                    {savingClassification && !savingNext ? 'กำลังบันทึก…' : 'บันทึกและตรวจแล้ว'}
+                  </Button>
+                  {onNext && (
+                    <Button
+                      ref={saveNextRef}
+                      variant="outlined"
+                      endIcon={<ChevronRightRounded />}
+                      onClick={() => void saveAndNext()}
+                      aria-disabled={busySaving}
+                      aria-busy={savingNext}
+                    >
+                      {savingNext ? 'กำลังบันทึก…' : 'บันทึกแล้วไปถัดไป'}
+                    </Button>
+                  )}
+                </Stack>
               </Stack>
             </Box>
 
             <Divider />
 
-            <Box component="section" aria-labelledby="splits-heading">
+            <Box component="section" aria-labelledby="splits-heading" ref={splitsBoxRef}>
               <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
                 <Typography component="h3" variant="h2" id="splits-heading" sx={SECTION_HEADING_SX}>แยกยอดตามหมวด</Typography>
                 <Button
+                  ref={addSplitRef}
                   size="small"
                   startIcon={<AddRounded />}
                   // แถวแรกได้ยอดเต็มและหมวดที่เลือกไว้ แถวถัดไปได้ยอดที่ยังเหลือ
@@ -400,12 +582,12 @@ export default function ReviewDrawer({ txnId, categories, taxEntities, onClose, 
                     note: '',
                   }])}
                 >
-                  เพิ่มรายการ
+                  แบ่งยอดเพิ่ม
                 </Button>
               </Stack>
 
               {splits.length === 0 ? (
-                <Typography variant="body2" color="text.secondary">ใช้เมื่อรายการเดียวมีหลายหมวด เช่นซื้อของที่มีทั้งอาหารและของใช้ กด "เพิ่มรายการ" แล้วแบ่งยอดให้ครบ</Typography>
+                <Typography variant="body2" color="text.secondary">ใช้เมื่อรายการเดียวมีหลายหมวด เช่นซื้อของที่มีทั้งอาหารและของใช้ กด "แบ่งยอดเพิ่ม" แล้วแบ่งยอดให้ครบ</Typography>
               ) : (
                 <Stack spacing={1.5}>
                   {splits.map((row, index) => {
@@ -417,7 +599,7 @@ export default function ReviewDrawer({ txnId, categories, taxEntities, onClose, 
                         <TextField
                           select
                           size="small"
-                          label={`หมวด รายการที่ ${n}`}
+                          label={`หมวดที่ ${n}`}
                           value={row.category_id}
                           onChange={(e) => setSplits((rows) => rows.map((r, i) => (i === index ? { ...r, category_id: e.target.value } : r)))}
                           error={categoryMissing}
@@ -434,10 +616,17 @@ export default function ReviewDrawer({ txnId, categories, taxEntities, onClose, 
                           onChange={(e) => setSplits((rows) => rows.map((r, i) => (i === index ? { ...r, amountText: e.target.value } : r)))}
                           error={amountMessage !== ''}
                           helperText={amountMessage || undefined}
-                          slotProps={{ htmlInput: { inputMode: 'decimal', 'aria-label': `จำนวนเงิน รายการที่ ${n} (บาท)`, sx: dataTextSx } }}
+                          slotProps={{ htmlInput: { inputMode: 'decimal', 'aria-label': `จำนวนเงิน หมวดที่ ${n} (บาท)`, sx: dataTextSx } }}
                           sx={{ width: 110, flexShrink: 0 }}
                         />
-                        <IconButton aria-label={`ลบรายการที่ ${n}`} onClick={() => setSplits((rows) => rows.filter((_, i) => i !== index))}>
+                        <IconButton
+                          data-split-delete
+                          aria-label={`ลบหมวดที่ ${n}`}
+                          onClick={() => {
+                            focusSplitAtRef.current = index;
+                            setSplits((rows) => rows.filter((_, i) => i !== index));
+                          }}
+                        >
                           <DeleteOutlineRounded />
                         </IconButton>
                       </Stack>
@@ -456,15 +645,26 @@ export default function ReviewDrawer({ txnId, categories, taxEntities, onClose, 
                 </Stack>
               )}
 
-              <Button
-                variant="outlined"
-                onClick={() => void saveSplits()}
-                disabled={savingSplits}
-                aria-busy={savingSplits}
-                sx={{ mt: 1.5 }}
-              >
-                {savingSplits ? 'กำลังบันทึก…' : splits.length === 0 ? 'บันทึก (ล้างการแยกยอด)' : 'บันทึกการแยกยอด'}
-              </Button>
+              {/* ไม่มีทั้งร่างและที่บันทึกไว้ = ไม่มีอะไรให้บันทึก · ลบร่างหมดแต่มีที่บันทึกไว้ = กดแล้วล้างหมวดของรายการ */}
+              {(splits.length > 0 || detail.splits.length > 0) && (
+                <Button
+                  variant="outlined"
+                  color={splits.length === 0 ? 'error' : 'primary'}
+                  onClick={async () => {
+                    if (savingSplits) return;
+                    const clearing = splits.length === 0;
+                    const result = await saveSplits();
+                    notify(result);
+                    // ปุ่มนี้หายไปหลังล้างสำเร็จ — focus ไป "แบ่งยอดเพิ่ม" ที่อยู่ตลอด
+                    if (result.ok && clearing) addSplitRef.current?.focus();
+                  }}
+                  aria-disabled={savingSplits}
+                  aria-busy={savingSplits}
+                  sx={{ mt: 1.5 }}
+                >
+                  {savingSplits ? 'กำลังบันทึก…' : splits.length === 0 ? 'ล้างหมวดทั้งหมด' : 'บันทึกการแยกยอด'}
+                </Button>
+              )}
             </Box>
 
             {detail.transfer_matches.length > 0 && (
@@ -529,12 +729,36 @@ export default function ReviewDrawer({ txnId, categories, taxEntities, onClose, 
           open
           onClose={() => setIncomeModalOpen(false)}
           onSaved={() => {
-            onNotice({ message: 'บันทึกรายได้เต็มแล้ว', severity: 'success' });
-            void load(detail.id);
+            notify({ message: 'บันทึกรายได้เต็มแล้ว', severity: 'success' });
+            void load(detail.id, true);
             onSaved();
           }}
         />
       )}
+      <ConfirmDialog
+        open={pendingNav != null}
+        title="มีการแก้ไขที่ยังไม่บันทึก"
+        description={
+          <>
+            {annotationWillSave
+              ? 'บันทึกก่อนไปต่อไหม การบันทึกจะทำเครื่องหมายรายการนี้ว่าตรวจแล้วด้วย ถ้าทิ้ง ค่าที่แก้ไว้จะกลับเป็นค่าเดิม'
+              : 'บันทึกการแยกยอดก่อนไปต่อไหม ถ้าทิ้ง ค่าที่แก้ไว้จะกลับเป็นค่าเดิม'}
+            {navError && <Alert severity="error" sx={{ mt: 2 }}>{navError}</Alert>}
+          </>
+        }
+        confirmLabel="บันทึก"
+        secondaryLabel="ทิ้งการแก้ไข"
+        secondaryColor="error"
+        onSecondary={discardEdits}
+        busy={savingNav}
+        onClose={() => setPendingNav(null)}
+        onConfirm={() => void confirmSave()}
+        onExited={() => {
+          const notice = afterDialogNoticeRef.current;
+          afterDialogNoticeRef.current = null;
+          if (notice) notify(notice);
+        }}
+      />
     </Drawer>
   );
 }

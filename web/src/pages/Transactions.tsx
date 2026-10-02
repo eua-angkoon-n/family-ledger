@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Box,
   Button,
@@ -21,7 +21,7 @@ import {
 import MonthPicker, { currentMonth } from '../components/MonthPicker.js';
 import { FloatingSelectionBar } from '../components/PlanSelectionBar.js';
 import ReviewDrawer from '../components/ReviewDrawer.js';
-import TransactionTable from '../components/TransactionTable.js';
+import TransactionTable, { UNCATEGORISED_LABEL } from '../components/TransactionTable.js';
 import { TAX_PAGES_ENABLED } from '../features.js';
 import { formatBaht, formatDate, parseBahtToSatang } from '../format.js';
 import { dataTextSx } from '../theme.js';
@@ -30,17 +30,24 @@ import { EmptyState, FeedbackSnackbar, LoadError, PageHeader, TableSkeleton, typ
 const LIMIT = 50;
 const COVERAGE_NOTE = 'ข้อมูลเงินจริงคำนวณจาก bank statement ที่นำเข้าสู่ระบบเท่านั้น ไม่รวมเงินสดและ e-Wallet';
 // ตัวกรองในแผง "ตัวกรองเพิ่มเติม" — ค้างอยู่ใน URL ได้แม้แผงพับ จึงต้องสรุปเป็น chip ให้เห็นและลบได้
-const HIDDEN_FILTER_KEYS = ['bank_id', 'category_id', 'uncategorised', 'direction', 'account_purpose', 'is_internal_transfer', 'tax_treatment', 'tax_entity_id', 'min_baht', 'max_baht'] as const;
+// (uncategorised มี toggle chip ของตัวเองบนแถบเครื่องมือ จึงไม่อยู่ในนี้)
+const HIDDEN_FILTER_KEYS = ['bank_id', 'category_id', 'direction', 'account_purpose', 'is_internal_transfer', 'tax_treatment', 'tax_entity_id', 'min_baht', 'max_baht'] as const;
 // "ล้างตัวกรอง" ล้างทุกอย่างยกเว้นเดือน/ช่วงวันที่และบัญชี
-const CLEAR_ALL_PATCH = Object.fromEntries([...HIDDEN_FILTER_KEYS, 'q', 'review_status'].map((k) => [k, null]));
+const CLEAR_ALL_PATCH = Object.fromEntries([...HIDDEN_FILTER_KEYS, 'q', 'review_status', 'uncategorised'].map((k) => [k, null]));
 const PAGINATION_ARIA: Record<string, string> = { first: 'หน้าแรก', last: 'หน้าสุดท้าย', next: 'หน้าถัดไป', previous: 'หน้าก่อนหน้า' };
+const AMOUNT_FORMAT_HINT = 'ใส่ตัวเลข เช่น 1,500.50';
 const bahtLabel = (raw: string) => {
   const satang = parseBahtToSatang(raw);
   return satang == null ? raw : `฿${formatBaht(satang)}`;
 };
+const parseTxnId = (raw: string | null) => {
+  const id = Number(raw);
+  return raw != null && Number.isSafeInteger(id) && id > 0 ? id : null;
+};
 
 export default function Transactions() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [banks, setBanks] = useState<Bank[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -54,7 +61,8 @@ export default function Transactions() {
   const [searchInput, setSearchInput] = useState(searchParams.get('q') ?? '');
   const [minBahtInput, setMinBahtInput] = useState(searchParams.get('min_baht') ?? '');
   const [maxBahtInput, setMaxBahtInput] = useState(searchParams.get('max_baht') ?? '');
-  const [selectedTxnId, setSelectedTxnId] = useState<number | null>(null);
+  const linkedTxnId = parseTxnId(searchParams.get('txn'));
+  const [selectedTxnId, setSelectedTxnId] = useState<number | null>(linkedTxnId);
   const [checked, setChecked] = useState<ReadonlySet<number>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   // ตำแหน่งล่าสุดของแถวที่เปิดใน drawer — แถวที่บันทึกแล้วหลุดจากตัวกรอง (คิว "ยังไม่ตรวจ") ยังเลื่อน/คืน focus ไปแถวถัดไปได้
@@ -62,11 +70,38 @@ export default function Transactions() {
   const lastTxnIdRef = useRef<number | null>(null);
   const tableBoxRef = useRef<HTMLDivElement>(null);
   const reviewChipRef = useRef<HTMLDivElement>(null);
-  const linkedTxnId = searchParams.get('txn');
+  const searchRef = useRef<HTMLInputElement>(null);
+  const moreFiltersRef = useRef<HTMLButtonElement>(null);
+  const filterChipRowRef = useRef<HTMLDivElement>(null);
+  const focusFilterChipAtRef = useRef<number | null>(null);
+
+  // drawer ที่เปิดอยู่สะท้อนใน ?txn= — เปิดจากแถว = push (ปุ่ม Back บนมือถือปิด drawer), ก่อนหน้า/ถัดไป = replace
+  // (Back ไม่ไล่ย้อนทีละรายการ), ปิด = ย้อน entry ที่ push ไว้ หรือ replace ถ้าเปิดมาจากลิงก์ · ไม่ผ่าน setFilter เพราะมันรีเซ็ตหน้า
+  const pushedTxnRef = useRef(false);
+  const drawerDirtyRef = useRef(false);
+  const [closeRequest, setCloseRequest] = useState(0);
+  const writeTxnParam = (id: number | null, replace: boolean) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (id == null) next.delete('txn');
+      else next.set('txn', String(id));
+      return next;
+    }, { replace });
+  };
+  // URL เปลี่ยนจากนอกหน้า (ลิงก์, Back/Forward) — openTxn/closeTxn ตั้ง state พร้อม URL จึงเท่ากันอยู่แล้ว
   useEffect(() => {
-    const txnId = Number(linkedTxnId);
-    selectedIndexRef.current = -1;
-    setSelectedTxnId(linkedTxnId != null && Number.isSafeInteger(txnId) && txnId > 0 ? txnId : null);
+    if (linkedTxnId === selectedTxnId) return;
+    if (linkedTxnId == null && drawerDirtyRef.current) {
+      // Back ระหว่างมีการแก้ไขค้าง: คืน ?txn= แล้วให้ drawer ถามก่อนเหมือนกดปิดเอง
+      pushedTxnRef.current = true;
+      writeTxnParam(selectedTxnId, false);
+      setCloseRequest((n) => n + 1);
+      return;
+    }
+    pushedTxnRef.current = false;
+    // เปิดจากลิงก์ไม่รู้ตำแหน่งในรายการ — ส่วนการปิดคงตำแหน่งไว้ให้คืน focus ไปแถวที่เลื่อนขึ้นมาแทนได้
+    if (linkedTxnId != null) selectedIndexRef.current = -1;
+    setSelectedTxnId(linkedTxnId);
   }, [linkedTxnId]);
   const [refreshing, setRefreshing] = useState(false);
   const requestIdRef = useRef(0);
@@ -200,7 +235,6 @@ export default function Transactions() {
 
   const hiddenFilters: [key: string, label: string][] = [];
   if (bankId) hiddenFilters.push(['bank_id', `ธนาคาร: ${banks.find((b) => String(b.id) === bankId)?.name ?? bankId}`]);
-  if (uncategorised) hiddenFilters.push(['uncategorised', 'หมวด: ไม่ได้จัดหมวด']);
   if (categoryId) hiddenFilters.push(['category_id', `หมวด: ${categories.find((c) => String(c.id) === categoryId)?.name ?? categoryId}`]);
   if (direction) hiddenFilters.push(['direction', direction === 'credit' ? 'เงินเข้า' : 'เงินออก']);
   if (accountPurpose) hiddenFilters.push(['account_purpose', `ประเภทบัญชี: ${accountPurpose === 'business' ? 'ธุรกิจ' : 'ส่วนตัว'}`]);
@@ -210,10 +244,28 @@ export default function Transactions() {
   if (taxEntityIdFilter) hiddenFilters.push(['tax_entity_id', `ผู้เสียภาษี: ${taxEntities.find((te) => String(te.id) === taxEntityIdFilter)?.display_name ?? taxEntityIdFilter}`]);
   if (minBaht) hiddenFilters.push(['min_baht', `ยอดตั้งแต่ ${bahtLabel(minBaht)}`]);
   if (maxBaht) hiddenFilters.push(['max_baht', `ยอดไม่เกิน ${bahtLabel(maxBaht)}`]);
-  const clearable = hiddenFilters.length > 0 || q !== '' || reviewStatus !== '';
+  const clearable = hiddenFilters.length > 0 || q !== '' || reviewStatus !== '' || uncategorised;
+  // ปุ่มนี้ (และ EmptyState ที่ถือมัน) หายไปหลังล้าง — focus ไปช่องค้นหาที่อยู่ตลอด
   const clearAllButton = (
-    <Button color="inherit" onClick={() => setFilter(CLEAR_ALL_PATCH)}>ล้างตัวกรอง</Button>
+    <Button color="inherit" onClick={() => { setFilter(CLEAR_ALL_PATCH); searchRef.current?.focus(); }}>ล้างตัวกรอง</Button>
   );
+  // เอา chip ออก: focus ไป chip ที่เลื่อนขึ้นมาแทน ไม่มีแล้วไป "ตัวกรองเพิ่มเติม" (อยู่ตลอด)
+  const removeHiddenFilter = (key: string, index: number) => {
+    focusFilterChipAtRef.current = index;
+    setFilter({ [key]: null });
+  };
+  useEffect(() => {
+    const index = focusFilterChipAtRef.current;
+    if (index == null) return;
+    focusFilterChipAtRef.current = null;
+    const chips = filterChipRowRef.current?.querySelectorAll<HTMLElement>('[data-filter-chip]');
+    (chips?.[index] ?? moreFiltersRef.current)?.focus();
+  }, [searchParams]);
+  const emptyTitle = hiddenFilters.length > 0 || q !== ''
+    ? 'ไม่พบธุรกรรมในเงื่อนไขนี้'
+    : reviewStatus === 'unreviewed' && !uncategorised ? 'ไม่มีรายการที่ยังไม่ตรวจ'
+      : uncategorised && reviewStatus === '' ? `ไม่มีรายการที่${UNCATEGORISED_LABEL}`
+        : 'ไม่พบธุรกรรมในเงื่อนไขนี้';
 
   // แถวที่เปิดอยู่ใน drawer: หาไม่เจอ (บันทึกแล้วหลุดจากตัวกรอง) ใช้ตำแหน่งเดิม — แถวถัดไปเลื่อนขึ้นมาแทนที่ตรงนั้นพอดี
   const currentIndex = selectedTxnId == null ? -1 : rows.findIndex((r) => r.id === selectedTxnId);
@@ -224,12 +276,25 @@ export default function Transactions() {
   const anchorIndex = currentIndex >= 0 ? currentIndex : selectedIndexRef.current;
   const prevRow = anchorIndex >= 0 ? rows[anchorIndex - 1] : undefined;
   const nextRow = currentIndex >= 0 ? rows[currentIndex + 1] : anchorIndex >= 0 ? rows[anchorIndex] : undefined;
+  // ก่อนหน้า/ถัดไปไล่ได้เฉพาะแถวของหน้านี้ — มีหลายหน้าจึงบอก "ในหน้านี้" ไม่งั้น "จาก 120" อ่านเหมือนไล่ได้ครบ
+  const inPage = totalCount > rows.length ? ' ในหน้านี้' : '';
   const position = currentIndex >= 0
-    ? `รายการที่ ${currentIndex + 1} จาก ${rows.length}`
-    : anchorIndex >= 0 ? `เหลือ ${rows.length} รายการ` : undefined;
-  const openTxn = (id: number) => {
+    ? `รายการที่ ${currentIndex + 1} จาก ${rows.length}${inPage}`
+    : anchorIndex >= 0 ? `เหลือ ${rows.length} รายการ${inPage}` : undefined;
+  const openTxn = (id: number, fromDrawer = false) => {
     selectedIndexRef.current = rows.findIndex((r) => r.id === id);
     setSelectedTxnId(id);
+    if (!fromDrawer) pushedTxnRef.current = true;
+    writeTxnParam(id, fromDrawer);
+  };
+  const closeTxn = () => {
+    setSelectedTxnId(null);
+    if (pushedTxnRef.current) {
+      pushedTxnRef.current = false;
+      navigate(-1);
+    } else {
+      writeTxnParam(null, true);
+    }
   };
 
   // คืน focus เอง (drawer ตั้ง disableRestoreFocus): ปุ่มของแถวที่เปิดล่าสุด → แถวที่เลื่อนขึ้นมาแทน → กล่องตาราง → chip
@@ -279,7 +344,8 @@ export default function Transactions() {
         title="ธุรกรรม"
         description="จัดหมวด ตรวจรายการ และยืนยันคู่โอนภายใน ทุกรายการย้อนดูได้ถึง statement ต้นทาง"
       />
-      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{COVERAGE_NOTE}</Typography>
+      {/* < sm ย้ายไปใต้ตาราง (ท้ายหน้า) ให้แถวแรกของตารางขึ้นสูงขึ้น — display none จึง screen reader อ่านครั้งเดียว */}
+      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, display: { xs: 'none', sm: 'block' } }}>{COVERAGE_NOTE}</Typography>
 
       <Stack spacing={1.5} sx={{ mt: 3 }} data-tour="txn-toolbar">
         {/* useFlexGap: spacing แบบ margin ของ Stack ทำแถวที่ตัดขึ้นบรรทัดใหม่เยื้องเข้า */}
@@ -288,6 +354,7 @@ export default function Transactions() {
           {rangeMode && (
             <Chip
               label={`ช่วง ${formatDate(rangeFrom!)} – ${formatDate(rangeTo!)}`}
+              variant="outlined"
               onDelete={() => setFilter({ from: null, to: null, month: currentMonth() })}
               sx={{ minHeight: 40, alignSelf: 'flex-start' }}
             />
@@ -310,27 +377,43 @@ export default function Transactions() {
             onChange={(e) => setSearchInput(e.target.value)}
             onBlur={(e) => commitSearch(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') commitSearch((e.target as HTMLInputElement).value); }}
+            inputRef={searchRef}
             sx={{ minWidth: 200, flexGrow: 1 }}
           />
-          <Chip
-            ref={reviewChipRef}
-            label="ยังไม่ตรวจ"
-            variant={reviewStatus === 'unreviewed' ? 'filled' : 'outlined'}
-            color={reviewStatus === 'unreviewed' ? 'primary' : 'default'}
-            onClick={() => setFilter({ review_status: reviewStatus === 'unreviewed' ? null : 'unreviewed' })}
-            aria-pressed={reviewStatus === 'unreviewed'}
-            sx={{ minHeight: 40, alignSelf: { xs: 'flex-start', sm: 'center' } }}
-          />
-          <Button
-            startIcon={<FilterListRounded />}
-            onClick={() => setShowMoreFilters((v) => !v)}
-            color={hiddenFilters.length > 0 ? 'primary' : 'inherit'}
-            aria-expanded={showMoreFilters}
-            aria-controls="txn-more-filters"
-            sx={{ alignSelf: { xs: 'flex-start', sm: 'center' } }}
-          >
-            ตัวกรองเพิ่มเติม{hiddenFilters.length > 0 ? ` (${hiddenFilters.length})` : ''}
-          </Button>
+          {/* สอง toggle คิวงาน + ปุ่มแผงตัวกรอง เป็นแถวเดียว (ตัดบรรทัดได้) — จอ xs ไม่กินสามแถว
+              xs ปุ่มเหลือ "ตัวกรอง" ให้พอดี 375px ชื่อสำหรับ screen reader คงเต็มเหมือนจอกว้าง */}
+          <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
+            <Chip
+              ref={reviewChipRef}
+              label="ยังไม่ตรวจ"
+              variant={reviewStatus === 'unreviewed' ? 'filled' : 'outlined'}
+              color={reviewStatus === 'unreviewed' ? 'primary' : 'default'}
+              onClick={() => setFilter({ review_status: reviewStatus === 'unreviewed' ? null : 'unreviewed' })}
+              aria-pressed={reviewStatus === 'unreviewed'}
+              sx={{ minHeight: 40 }}
+            />
+            {/* เลือกหมวดใดหมวดหนึ่งกับ "ยังไม่จัดหมวด" ขัดกัน — เปิดอันนี้จึงล้าง category_id (เหมือนช่องหมวดในแผง) */}
+            <Chip
+              label={UNCATEGORISED_LABEL}
+              variant={uncategorised ? 'filled' : 'outlined'}
+              color={uncategorised ? 'primary' : 'default'}
+              onClick={() => setFilter({ uncategorised: uncategorised ? null : '1', category_id: null })}
+              aria-pressed={uncategorised}
+              sx={{ minHeight: 40 }}
+            />
+            <Button
+              ref={moreFiltersRef}
+              startIcon={<FilterListRounded />}
+              onClick={() => setShowMoreFilters((v) => !v)}
+              color={hiddenFilters.length > 0 ? 'primary' : 'inherit'}
+              aria-expanded={showMoreFilters}
+              aria-controls="txn-more-filters"
+              aria-label={`ตัวกรองเพิ่มเติม${hiddenFilters.length > 0 ? ` (${hiddenFilters.length})` : ''}`}
+            >
+              ตัวกรอง<Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>เพิ่มเติม</Box>
+              {hiddenFilters.length > 0 ? ` (${hiddenFilters.length})` : ''}
+            </Button>
+          </Stack>
         </Stack>
 
         <Collapse in={showMoreFilters} id="txn-more-filters">
@@ -352,7 +435,7 @@ export default function Transactions() {
               sx={{ minWidth: 160 }}
             >
               <MenuItem value="">ทุกหมวด</MenuItem>
-              <MenuItem value="__uncategorised__">ไม่ได้จัดหมวด</MenuItem>
+              <MenuItem value="__uncategorised__">{UNCATEGORISED_LABEL}</MenuItem>
               {categories.map((c) => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
             </TextField>
             <TextField select size="small" label="เข้า/ออก" value={direction} onChange={(e) => setFilter({ direction: e.target.value })} sx={{ minWidth: 120 }}>
@@ -393,9 +476,9 @@ export default function Transactions() {
               onBlur={() => commitAmountFilter('min_baht', minBahtInput)}
               onKeyDown={(e) => { if (e.key === 'Enter') commitAmountFilter('min_baht', minBahtInput); }}
               error={minBahtInput !== '' && parseBahtToSatang(minBahtInput) == null}
-              helperText={minBahtInput !== '' && parseBahtToSatang(minBahtInput) == null ? 'รูปแบบไม่ถูกต้อง' : undefined}
+              helperText={minBahtInput !== '' && parseBahtToSatang(minBahtInput) == null ? AMOUNT_FORMAT_HINT : undefined}
               slotProps={{ htmlInput: { inputMode: 'decimal', sx: dataTextSx } }}
-              sx={{ width: 130 }}
+              sx={{ width: 160 }}
             />
             <TextField
               size="small"
@@ -405,23 +488,24 @@ export default function Transactions() {
               onBlur={() => commitAmountFilter('max_baht', maxBahtInput)}
               onKeyDown={(e) => { if (e.key === 'Enter') commitAmountFilter('max_baht', maxBahtInput); }}
               error={maxBahtInput !== '' && parseBahtToSatang(maxBahtInput) == null}
-              helperText={maxBahtInput !== '' && parseBahtToSatang(maxBahtInput) == null ? 'รูปแบบไม่ถูกต้อง' : undefined}
+              helperText={maxBahtInput !== '' && parseBahtToSatang(maxBahtInput) == null ? AMOUNT_FORMAT_HINT : undefined}
               slotProps={{ htmlInput: { inputMode: 'decimal', sx: dataTextSx } }}
-              sx={{ width: 130 }}
+              sx={{ width: 160 }}
             />
           </Stack>
         </Collapse>
 
         {/* สรุปตัวกรองที่ซ่อนอยู่ในแผงที่พับไว้ — กด chip เพื่อเอาตัวกรองนั้นออก ตัวกรองภาษีตอนหน้าภาษีปิดไม่มีช่องในแผง จึงขึ้นเสมอ */}
         {clearable && (
-          <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
-            {hiddenFilters.filter(([key]) => !showMoreFilters || (!TAX_PAGES_ENABLED && key.startsWith('tax_'))).map(([key, label]) => (
+          <Stack ref={filterChipRowRef} direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
+            {hiddenFilters.filter(([key]) => !showMoreFilters || (!TAX_PAGES_ENABLED && key.startsWith('tax_'))).map(([key, label], index) => (
               <Chip
                 key={key}
+                data-filter-chip
                 label={label}
                 variant="outlined"
-                onClick={() => setFilter({ [key]: null })}
-                onDelete={() => setFilter({ [key]: null })}
+                onClick={() => removeHiddenFilter(key, index)}
+                onDelete={() => removeHiddenFilter(key, index)}
                 aria-label={`เอาตัวกรอง ${label} ออก`}
                 sx={{ minHeight: 40 }}
               />
@@ -438,7 +522,7 @@ export default function Transactions() {
       ) : error && rows.length === 0 ? null : rows.length === 0 ? (
         <EmptyState
           icon={<ReceiptLongRounded sx={{ fontSize: 40 }} />}
-          title={reviewStatus === 'unreviewed' && hiddenFilters.length === 0 && q === '' ? 'ไม่มีรายการที่ยังไม่ตรวจ' : 'ไม่พบธุรกรรมในเงื่อนไขนี้'}
+          title={emptyTitle}
           description={clearable ? 'ลองเปลี่ยนเดือน หรือล้างตัวกรองที่ตั้งไว้' : 'ลองเปลี่ยนเดือนหรือบัญชี'}
           action={clearable ? clearAllButton : undefined}
         />
@@ -451,7 +535,7 @@ export default function Transactions() {
             <TransactionTable
               rows={rows}
               showRunningBalance={Boolean(bankAccountId)}
-              onRowClick={openTxn}
+              onRowClick={(id) => openTxn(id)}
               busy={refreshing}
               selection={unreviewedRows.length > 0 ? {
                 selected: checked,
@@ -477,6 +561,7 @@ export default function Transactions() {
           />
         </>
       )}
+      <Typography variant="body2" color="text.secondary" sx={{ mt: 2, display: { sm: 'none' } }}>{COVERAGE_NOTE}</Typography>
 
       {checkedIds.length > 0 && (
         <FloatingSelectionBar label="รายการที่เลือก">
@@ -498,13 +583,15 @@ export default function Transactions() {
         txnId={selectedTxnId}
         categories={categories}
         taxEntities={taxEntities}
-        onClose={() => setSelectedTxnId(null)}
+        onClose={closeTxn}
         onExited={() => focusTable(lastTxnIdRef.current, selectedIndexRef.current)}
         onSaved={() => void reload(true)}
         onNotice={setNotice}
-        onPrev={prevRow ? () => openTxn(prevRow.id) : undefined}
-        onNext={nextRow ? () => openTxn(nextRow.id) : undefined}
+        onPrev={prevRow ? () => openTxn(prevRow.id, true) : undefined}
+        onNext={nextRow ? () => openTxn(nextRow.id, true) : undefined}
         position={position}
+        onDirtyChange={(dirty) => { drawerDirtyRef.current = dirty; }}
+        closeRequest={closeRequest}
       />
       {/* แถบที่เลือกอยู่ล่างจอ — snackbar ย้ายขึ้นบน (Floating Selection Bar Rule) */}
       <FeedbackSnackbar notice={notice} onClose={() => setNotice(null)} placement={checkedIds.length > 0 ? 'top' : 'bottom'} />
