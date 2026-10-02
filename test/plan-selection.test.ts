@@ -93,7 +93,7 @@ test('canPay: ทุกเงื่อนไข', () => {
   assert.equal(canPay(item({ kind: 'payroll_deduction' })), 'รายการหักจากรายได้ไม่ต้องจ่าย');
   assert.equal(canPay(item({ explicit_status: 'skipped' })), 'ข้ามหรือยกเลิกแล้ว');
   assert.equal(canPay(item({ explicit_status: 'cancelled' })), 'ข้ามหรือยกเลิกแล้ว');
-  assert.equal(canPay(item({ income_record_id: 3 })), 'จัดการในรายได้ด้านบน');
+  assert.equal(canPay(item({ income_record_id: 3 })), 'จัดการในส่วนรายได้');
   assert.equal(canPay(item({ installment_due_id: 3 })), 'จ่ายที่หน้าแผนผ่อน');
   assert.equal(canPay(item({ payment_state: 'paid', paid_satang: 10000 })), 'จ่ายครบแล้ว');
 });
@@ -102,7 +102,7 @@ test('canSkip: ทุกเงื่อนไข', () => {
   assert.equal(canSkip(item()), null);
   assert.equal(canSkip(item({ kind: 'income' })), null);
   assert.equal(canSkip(item({ explicit_status: 'skipped' })), 'ข้ามหรือยกเลิกแล้ว');
-  assert.equal(canSkip(item({ income_record_id: 3 })), 'จัดการในรายได้ด้านบน');
+  assert.equal(canSkip(item({ income_record_id: 3 })), 'จัดการในส่วนรายได้');
   assert.equal(canSkip(item({ installment_due_id: 3 })), 'จัดการที่หน้าแผนผ่อน');
 });
 
@@ -110,7 +110,7 @@ test('canDelete: ทุกเงื่อนไข', () => {
   assert.equal(canDelete(item()), null);
   assert.equal(canDelete(item({ payments: [payment('cancelled')] })), null);
   assert.equal(canDelete(item({ explicit_status: 'skipped' })), null);
-  assert.equal(canDelete(item({ income_record_id: 3 })), 'จัดการในรายได้ด้านบน');
+  assert.equal(canDelete(item({ income_record_id: 3 })), 'จัดการในส่วนรายได้');
   assert.equal(canDelete(item({ installment_due_id: 3 })), 'จัดการที่หน้าแผนผ่อน');
   assert.equal(canDelete(item({ recurring_rule_id: 3 })), 'รายการประจำ — ใช้ ข้าม แทน');
   assert.equal(canDelete(item({ payments: [payment('cancelled'), payment('declared')] })), 'มีการประกาศจ่ายค้างอยู่');

@@ -807,6 +807,7 @@ export default function ReviewDrawer({
         }
         confirmLabel="บันทึก"
         secondaryLabel="ทิ้งการแก้ไข"
+        cancelLabel="แก้ต่อ"
         secondaryColor="error"
         onSecondary={discardEdits}
         busy={savingNav}

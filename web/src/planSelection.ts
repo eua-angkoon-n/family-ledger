@@ -10,6 +10,9 @@ export const STATUS_ORDER: PaymentState[] = [
 // ค่า sentinel ของ "ไม่ระบุหมวด" ใน select — category_id จริงเป็นตัวเลขเสมอ จึงไม่ชนกัน
 export const NO_CATEGORY = 'none';
 
+/** ประโยคเดียวที่ใช้ทุกที่ในหน้าวางแผน (หัวหน้า, ประกาศจ่าย, รายได้, ปิดเดือน) — ADR-0004: แผนไม่จับคู่กับ statement */
+export const PLAN_NOT_MATCHED_NOTE = 'แผนไม่จับคู่กับ statement — ยอดจ่ายและรายได้นับตามที่คุณบันทึกเอง เงินเข้าออกจริงดูที่หน้าธุรกรรม';
+
 export type SelectionTotals = { income: number; deduction: number; expense: number; reserve: number; available: number };
 
 /**
@@ -34,7 +37,7 @@ export function canPay(item: PlanItem): string | null {
   if (item.kind === 'income') return 'บันทึกที่รายได้และรายการหัก';
   if (item.kind === 'payroll_deduction') return 'รายการหักจากรายได้ไม่ต้องจ่าย';
   if (item.explicit_status !== 'active') return 'ข้ามหรือยกเลิกแล้ว';
-  if (item.income_record_id != null) return 'จัดการในรายได้ด้านบน';
+  if (item.income_record_id != null) return 'จัดการในส่วนรายได้';
   if (item.installment_due_id != null) return 'จ่ายที่หน้าแผนผ่อน';
   if (item.payment_state === 'paid') return 'จ่ายครบแล้ว';
   return null;
@@ -42,7 +45,7 @@ export function canPay(item: PlanItem): string | null {
 
 export function canSkip(item: PlanItem): string | null {
   if (item.explicit_status !== 'active') return 'ข้ามหรือยกเลิกแล้ว';
-  if (item.income_record_id != null) return 'จัดการในรายได้ด้านบน';
+  if (item.income_record_id != null) return 'จัดการในส่วนรายได้';
   if (item.installment_due_id != null) return 'จัดการที่หน้าแผนผ่อน';
   return null;
 }
@@ -50,7 +53,7 @@ export function canSkip(item: PlanItem): string | null {
 // ตรงกับเงื่อนไข 409 ของ DELETE ฝั่ง server + ห้ามลบรายการประจำ: ลบไปแล้วเปิดเดือนนี้ครั้งหน้า
 // ระบบจะสร้างกลับมาใหม่ ผู้ใช้จะเห็นว่า "ลบไม่ได้" แบบงง ๆ ข้ามคือสิ่งที่ตั้งใจจริง
 export function canDelete(item: PlanItem): string | null {
-  if (item.income_record_id != null) return 'จัดการในรายได้ด้านบน';
+  if (item.income_record_id != null) return 'จัดการในส่วนรายได้';
   if (item.installment_due_id != null) return 'จัดการที่หน้าแผนผ่อน';
   if (item.recurring_rule_id != null) return 'รายการประจำ — ใช้ ข้าม แทน';
   if (!item.payments.every((p) => p.status === 'cancelled')) return 'มีการประกาศจ่ายค้างอยู่';

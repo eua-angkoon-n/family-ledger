@@ -8,14 +8,18 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
+  IconButton,
   Paper,
   Skeleton,
   Snackbar,
   Stack,
+  Tooltip,
   Typography,
   type ButtonProps,
+  type IconButtonProps,
 } from '@mui/material';
 import { GuideButton } from './guide/GuideButton.js';
+import { AMOUNT_FORMAT_HINT, parseBahtToSatang } from './format.js';
 import { dataTextSx, descriptionSx } from './theme.js';
 
 // ซ่อนจากตาแต่ screen reader ยังอ่าน (ตารางข้อมูลของกราฟ, live region) — ค่าเป็น string เพราะ sx ตีความ 1 = 100%
@@ -30,6 +34,46 @@ export const visuallyHiddenSx = {
   whiteSpace: 'nowrap',
   border: 0,
 } as const;
+
+/** props ของ TextField ช่องยอดเงิน: ค่าที่อ่านไม่ได้เป็น error พร้อมรูปแบบที่ถูกใต้ช่อง (ช่องว่างไม่ใช่ error — required ดูแลเอง) */
+export const amountFieldHelp = (value: string) =>
+  value !== '' && parseBahtToSatang(value) == null ? { error: true, helperText: AMOUNT_FORMAT_HINT } : {};
+
+// ตารางจอแคบ (< md) ตัดคอลัมน์รองด้วย display ทั้งหัวและแถวพร้อมกัน แล้วพับค่าลงบรรทัดรองใต้ชื่อ (Tables ใน DESIGN.md)
+export const MD_UP = { display: { xs: 'none', md: 'table-cell' } } as const;
+export const BELOW_MD = { display: { md: 'none' } } as const;
+
+/**
+ * action รองของแถวตาราง (The Row Action Rule): icon button + Tooltip — `label` คือชื่อเต็มสำหรับ screen reader
+ * (ใส่ชื่อแถวด้วย เช่น "แก้ไข ค่าเช่าบ้าน") ส่วน `tooltip` คือคำสั้นที่ตาเห็น (ไม่ส่ง = ใช้ label)
+ * `disabledReason` = ทำไม่ได้เพราะตัวรายการเอง: ปุ่มยังอยู่ในลำดับ tab (aria-disabled) tooltip บอกเหตุผล ทั้งเมาส์และ focus
+ * span ห่อไว้เสมอ: Tooltip ของ MUI ฟัง event จากปุ่มที่ disabled ไม่ได้
+ */
+export function RowIconButton({
+  label,
+  tooltip,
+  disabledReason,
+  onClick,
+  children,
+  ...props
+}: { label: string; tooltip?: string; disabledReason?: string | null } & Omit<IconButtonProps, 'aria-label'>) {
+  const blocked = disabledReason != null && disabledReason !== '';
+  return (
+    <Tooltip title={blocked ? disabledReason : (tooltip ?? label)} describeChild={blocked}>
+      <span>
+        <IconButton
+          size="small"
+          aria-label={label}
+          aria-disabled={blocked || undefined}
+          onClick={blocked ? undefined : onClick}
+          {...props}
+        >
+          {children}
+        </IconButton>
+      </span>
+    </Tooltip>
+  );
+}
 
 /**
  * เลขเวอร์ชันมุมล่างขวา แสดงทุกหน้ารวมหน้าเข้าสู่ระบบ ค่ามาจาก `GET /api/me`
@@ -155,6 +199,8 @@ type ConfirmDialogProps = {
   description: ReactNode;
   confirmLabel: string;
   confirmColor?: ButtonProps['color'];
+  /** ปุ่มปิดโดยไม่ทำอะไร — ไม่ใช้ "ยกเลิก" เป็นค่าเริ่มต้น เพราะชนกับ action อย่าง "ยกเลิกแผน"/"ยกเลิกการจ่าย" */
+  cancelLabel?: string;
   busy?: boolean;
   onClose: () => void;
   onConfirm: () => void;
@@ -172,6 +218,7 @@ export function ConfirmDialog({
   description,
   confirmLabel,
   confirmColor = 'primary',
+  cancelLabel = 'ไม่ใช่ตอนนี้',
   busy = false,
   onClose,
   onConfirm,
@@ -203,7 +250,7 @@ export function ConfirmDialog({
       {/* gap แทน margin ของ MUI — สามปุ่มที่ 320px ตัดขึ้นบรรทัดใหม่โดยไม่เยื้อง
           busy = aria-disabled + กดแล้วไม่ทำอะไร ไม่ใช่ disabled — ปุ่มยืนยันที่ถือ focus อยู่ไม่ทำ focus หลุดไป <body> */}
       <DialogActions disableSpacing sx={{ flexWrap: 'wrap', gap: 1 }}>
-        <Button color="inherit" onClick={busy ? undefined : onClose} aria-disabled={busy} autoFocus>ยกเลิก</Button>
+        <Button color="inherit" onClick={busy ? undefined : onClose} aria-disabled={busy} autoFocus>{cancelLabel}</Button>
         {secondaryLabel && onSecondary && (
           <Button color={secondaryColor} onClick={busy ? undefined : onSecondary} aria-disabled={busy}>{secondaryLabel}</Button>
         )}

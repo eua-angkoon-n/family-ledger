@@ -22,7 +22,7 @@ export const monthlyPlansRouter = Router();
 const KINDS = ['income', 'payroll_deduction', 'expense', 'reserve'] as const;
 const ITEM_STATUSES = ['active', 'skipped', 'cancelled'] as const;
 const COVERAGE_NOTE =
-  'ข้อมูลเงินจริงคำนวณจาก Bank Statement ที่นำเข้าสู่ระบบเท่านั้น ไม่รวมเงินสดและ e-Wallet';
+  'ข้อมูลเงินจริงคำนวณจาก bank statement ที่นำเข้าสู่ระบบเท่านั้น ไม่รวมเงินสดและ e-Wallet';
 
 // วางแผนล่วงหน้าได้ 12 เดือน — GET สร้างแถว monthly_plan ให้เองแบบ lazy เพราะฉะนั้นถ้าไม่จำกัด
 // การยิง /monthly-plans/2999-12 จะสร้างแถวขยะได้ไม่จำกัด

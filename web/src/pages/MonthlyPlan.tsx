@@ -7,10 +7,13 @@ import {
   Button,
   Checkbox,
   Chip,
+  Collapse,
   FormLabel,
-  IconButton,
+  LinearProgress,
+  Link as MuiLink,
   MenuItem,
   Paper,
+  Skeleton,
   Stack,
   Table,
   TableBody,
@@ -20,21 +23,24 @@ import {
   TableRow,
   TableSortLabel,
   TextField,
-  Tooltip,
   Typography,
-  type IconButtonProps,
+  type SxProps,
+  type Theme,
 } from '@mui/material';
 import AddRounded from '@mui/icons-material/AddRounded';
 import ArchiveOutlined from '@mui/icons-material/ArchiveOutlined';
+import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded';
 import ContentCopyRounded from '@mui/icons-material/ContentCopyRounded';
 import EditRounded from '@mui/icons-material/EditRounded';
 import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
+import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded';
 import ReplayRounded from '@mui/icons-material/ReplayRounded';
 import LockOutlined from '@mui/icons-material/LockOutlined';
 import LockOpenOutlined from '@mui/icons-material/LockOpenOutlined';
 import PaidRounded from '@mui/icons-material/PaidRounded';
 import SkipNextRounded from '@mui/icons-material/SkipNextRounded';
+import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded';
 import {
   del,
   patch,
@@ -44,7 +50,6 @@ import {
   type Category,
   type MonthlyPlan as Plan,
   type PlanItem,
-  type PlanItemPayment,
   type PlanKind,
   type RecurringRule,
 } from '../api.js';
@@ -56,7 +61,7 @@ import IncomeSection, { type IncomeSectionHandle } from '../components/IncomeSec
 import PlanSelectionBar from '../components/PlanSelectionBar.js';
 import SummaryCard, { summaryRowSx } from '../components/SummaryCard.js';
 import { createFormFieldChangeHandler } from '../form.js';
-import { formatDate, parseBahtToSatang } from '../format.js';
+import { formatDate, formatDayMonth, parseBahtToSatang } from '../format.js';
 import {
   canDelete,
   canPay,
@@ -68,6 +73,7 @@ import {
   matchesItemFilter,
   matchesRuleFilter,
   NO_CATEGORY,
+  PLAN_NOT_MATCHED_NOTE,
   STATUS_ORDER,
   todayLocal,
   type ItemFilter,
@@ -76,8 +82,20 @@ import {
   type RuleSortKey,
   type SortDir,
 } from '../planSelection.js';
-import { dataTextSx, descriptionSx } from '../theme.js';
-import { ConfirmDialog, EmptyState, FeedbackSnackbar, LoadError, PageHeader, TableSkeleton, type Notice } from '../ui.js';
+import { dataTextSx, descriptionSx, radii } from '../theme.js';
+import {
+  amountFieldHelp,
+  BELOW_MD,
+  ConfirmDialog,
+  EmptyState,
+  FeedbackSnackbar,
+  LoadError,
+  MD_UP,
+  PageHeader,
+  RowIconButton,
+  TableSkeleton,
+  type Notice,
+} from '../ui.js';
 
 
 // API จำกัดการวางแผนล่วงหน้าไว้ 12 เดือน (MAX_MONTHS_AHEAD ใน src/routes/monthly-plans.ts)
@@ -97,9 +115,23 @@ const UNITS = [
   { value: 'year', label: 'ปี' },
 ] as const;
 
-// padding แนวนอน 10px แทน 16px ของ theme — ตารางรายการ 9 คอลัมน์พอดีกล่อง ~1150px ที่จอ ≥ 1200px และ
+// padding แนวนอน 10px แทน 16px ของ theme (จอแคบ 6px) — ตารางรายการ 9 คอลัมน์พอดีกล่อง ~1150px ที่จอ ≥ 1200px และ
 // ตารางรายการประจำพอดีที่ 900px โดยไม่ต้องเลื่อนแนวนอน ยกเว้นคอลัมน์ checkbox ที่คุม padding เอง (พื้นที่กด 40px)
-const COMPACT_CELLS = { '& .MuiTableCell-root:not(.MuiTableCell-paddingCheckbox)': { px: 1.25 } };
+const COMPACT_CELLS = { '& .MuiTableCell-root:not(.MuiTableCell-paddingCheckbox)': { px: { xs: 0.75, md: 1.25 } } };
+// ชื่อแถวตัดที่ 2 บรรทัด ข้อความเต็มอยู่ใน title (ท่าเดียวกับหน้าธุรกรรม)
+const CLAMP_2 = { display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, overflow: 'hidden', overflowWrap: 'anywhere' } as const;
+// < md คอลัมน์ชื่อกินที่ที่เหลือ (maxWidth 0 กันไม่ให้ดันตารางกว้างเกินกล่อง) — ≥ md กว้างตามเนื้อหาเหมือนเดิม
+const NAME_CELL = { width: { xs: '100%', md: 'auto' }, maxWidth: { xs: 0, md: 'none' } } as const;
+
+const RULES_OPEN_KEY = 'hyacinthia.planning.rulesOpen';
+// localStorage โดนบล็อกได้ (โหมดส่วนตัว) — อ่านไม่ได้ = พับไว้ (ค่าเริ่มต้น) เขียนไม่ได้ = จำแค่รอบนี้
+function readRulesOpen(): boolean {
+  try {
+    return localStorage.getItem(RULES_OPEN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
 
 const EMPTY_ITEM = { kind: 'expense', name: '', amount_baht: '', due_date: '', category_id: '', note: '' };
 const EMPTY_RULE = {
@@ -123,6 +155,13 @@ function errorMessage(e: unknown, fallback: string): string {
 
 type Sort<K> = { key: K; dir: SortDir };
 type Excluded = { item: PlanItem; reason: string };
+type ChipStatus = 'in_plan' | 'unpaid' | 'overdue' | 'partial' | 'paid';
+
+// ชิปบิล = รายจ่าย (ชุดเดียวกับ payment_status ของ API และแดชบอร์ด) ยกเว้น "เกินกำหนด" ซึ่งเป็นตัวนับปัญหาของทุกแถว:
+// รายได้ที่เลยวันรับเงินแล้วยังไม่บันทึกก็ขึ้นเกินกำหนดในตาราง (API นับเฉพาะรายจ่าย) — ทุกชิปจึงนับจากแถวด้วยตัวกรอง
+// ชุดเดียวกับที่กดแล้วได้ ตัวเลขบนชิปเท่ากับจำนวนแถวที่เห็นเสมอ
+const chipFilter = (status: ChipStatus): ItemFilter => ({ kind: status === 'overdue' ? '' : 'expense', status, category: '' });
+const sameFilter = (a: ItemFilter, b: ItemFilter) => a.kind === b.kind && a.status === b.status && a.category === b.category;
 
 // คลิกคอลัมน์ใหม่ = เรียงขึ้นก่อน, คลิกคอลัมน์เดิม = กลับทิศ (null = ลำดับจาก API ตั้งแต่ยังไม่เคยกด)
 function nextSort<K>(prev: Sort<K> | null, key: K): Sort<K> {
@@ -134,11 +173,12 @@ function SortCell<K extends string>(props: {
   sort: Sort<K> | null;
   onSort: (key: K) => void;
   align?: 'right';
+  sx?: SxProps<Theme>;
   children: ReactNode;
 }) {
   const dir = props.sort != null && props.sort.key === props.sortKey ? props.sort.dir : undefined;
   return (
-    <TableCell align={props.align} sortDirection={dir ?? false}>
+    <TableCell align={props.align} sortDirection={dir ?? false} sx={props.sx}>
       {/* minHeight 40 = พื้นที่กดขั้นต่ำ, margin ติดลบกันหัวตารางสูงขึ้นตาม, nowrap กันหัวคอลัมน์หักเป็น "จ่าย/แล้ว" */}
       <TableSortLabel active={dir != null} direction={dir ?? 'asc'} onClick={() => props.onSort(props.sortKey)} sx={{ minHeight: 40, my: -1, whiteSpace: 'nowrap' }}>
         {props.children}
@@ -147,17 +187,18 @@ function SortCell<K extends string>(props: {
   );
 }
 
-// ปุ่มรองของแถวเป็นไอคอน + tooltip ให้ตารางพอดี 1152px โดยไม่ต้องเลื่อนแนวนอน (ปุ่มหลักของแถวยังเป็นข้อความ)
-// span ห่อไว้เสมอ: Tooltip ของ MUI ฟัง event จากปุ่มที่ disabled ไม่ได้ (ท่าเดียวกับปุ่มออกจากระบบใน App.tsx)
-function RowIconButton({ label, children, ...props }: { label: string } & Omit<IconButtonProps, 'aria-label'>) {
+// บรรทัดรองใต้ชื่อแถว: ส่วนที่ `desktop` ขึ้นทุกขนาดจอ (ต้องอยู่ต้นรายการ) ที่เหลือแทนคอลัมน์ที่จอ < md ซ่อนไป
+function SecondaryLine({ parts }: { parts: { node: ReactNode; desktop?: boolean }[] }) {
+  if (parts.length === 0) return null;
   return (
-    <Tooltip title={label}>
-      <span>
-        <IconButton size="small" aria-label={label} {...props}>
-          {children}
-        </IconButton>
-      </span>
-    </Tooltip>
+    <Typography variant="body2" color="text.secondary" component="div" sx={{ overflowWrap: 'anywhere', ...(parts[0]?.desktop ? {} : BELOW_MD) }}>
+      {parts.map(({ node, desktop }, i) => (
+        <Box component="span" key={i} sx={desktop ? undefined : BELOW_MD}>
+          {i > 0 && <Box component="span" aria-hidden>{' · '}</Box>}
+          {node}
+        </Box>
+      ))}
+    </Typography>
   );
 }
 
@@ -165,7 +206,7 @@ function RowIconButton({ label, children, ...props }: { label: string } & Omit<I
 // เพิ่งถูกลบ/เลิกใช้ ต้องยังมีตัวเลือกอยู่ ไม่งั้น select ของ MUI ได้ค่าที่ไม่มีใน option
 function categoryOptions(rows: { category_id: number | null; category_name: string | null }[], current: string) {
   const options = new Map<string, string>();
-  for (const r of rows) if (r.category_id != null) options.set(String(r.category_id), r.category_name ?? '—');
+  for (const r of rows) if (r.category_id != null) options.set(String(r.category_id), r.category_name ?? 'ไม่มีชื่อ');
   if (current !== '' && current !== NO_CATEGORY && !options.has(current)) options.set(current, 'หมวดที่เลือกไว้');
   return [...options].sort((a, b) => a[1].localeCompare(b[1], 'th'));
 }
@@ -211,6 +252,11 @@ function BulkList({ intro, targets, excluded }: { intro: string; targets: PlanIt
   );
 }
 
+function frequencyLabel(rule: RecurringRule): string {
+  const unit = UNITS.find((u) => u.value === rule.frequency_unit)?.label ?? '';
+  return `ทุก ${rule.frequency_interval} ${unit}${rule.anchor_day != null ? ` (วันที่ ${rule.anchor_day})` : ''}`;
+}
+
 export default function MonthlyPlan() {
   const [searchParams, setSearchParams] = useSearchParams();
   const month = searchParams.get('month') ?? currentMonth();
@@ -221,25 +267,34 @@ export default function MonthlyPlan() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // แต่ละส่วนบอกความล้มเหลวของ request ตัวเอง (The Section Failure Rule) — รายการประจำโหลดไม่ได้ไม่ใช่ "ยังไม่มี"
+  const [rulesError, setRulesError] = useState('');
+  const [refsError, setRefsError] = useState('');
   const [formError, setFormError] = useState('');
   const [notice, setNotice] = useState<Notice | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [closing, setClosing] = useState(false);
   const requestIdRef = useRef(0);
+  const [rulesOpen, setRulesOpen] = useState(readRulesOpen);
 
+  // ค่าตอนเปิดฟอร์มของทุก modal — ต่างจากนี้ = มีการแก้ค้าง Modal ถามก่อนปิด (The Unsaved Edit Rule)
   const [itemForm, setItemForm] = useState(EMPTY_ITEM);
+  const [itemInitial, setItemInitial] = useState(EMPTY_ITEM);
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
   const [itemModalOpen, setItemModalOpen] = useState(false);
   const setItemField = createFormFieldChangeHandler(setItemForm);
 
   const [ruleForm, setRuleForm] = useState(EMPTY_RULE);
+  const [ruleInitial, setRuleInitial] = useState(EMPTY_RULE);
   const [editingRuleId, setEditingRuleId] = useState<number | null>(null);
   const [ruleModalOpen, setRuleModalOpen] = useState(false);
   const setRuleField = createFormFieldChangeHandler(setRuleForm);
 
   const [payingItem, setPayingItem] = useState<PlanItem | null>(null);
   const [paymentForm, setPaymentForm] = useState(EMPTY_PAYMENT);
+  const [paymentInitial, setPaymentInitial] = useState(EMPTY_PAYMENT);
   const setPaymentField = createFormFieldChangeHandler(setPaymentForm);
+  const [deletingItem, setDeletingItem] = useState<PlanItem | null>(null);
 
   // ตัวกรองชุดเดียวใช้ร่วมกันระหว่างชิปสถานะกับ dropdown เหนือตาราง — จำนวนแถวจึงเท่ากับเลขบนชิปเสมอ
   const [itemFilter, setItemFilter] = useState<ItemFilter>(EMPTY_ITEM_FILTER);
@@ -252,24 +307,21 @@ export default function MonthlyPlan() {
   const [bulkPayForm, setBulkPayForm] = useState({ paid_date: '', bank_account_id: '' });
   const setBulkPayField = createFormFieldChangeHandler(setBulkPayForm);
   const [bulkAmounts, setBulkAmounts] = useState<Record<number, string>>({});
+  const [bulkInitial, setBulkInitial] = useState('');
   const hadSelectionRef = useRef(false);
   // งานแบบกลุ่มแยกจาก submitting ของปุ่มรายแถว — ถ้าใช้ตัวเดียวกัน ปุ่มรายแถวที่กดกลางคัน
   // จะคืน submitting=false ตอนจบ แถบกลับมากดได้ แล้วกด "จ่ายแล้ว" ซ้ำกับเป้าหมายเดิม = ประกาศจ่ายซ้ำ
   // ref กันการกดซ้ำก่อน state รอบใหม่ render ทัน (closure ของ dialog ยังเห็นค่าเก่า)
   const [bulkRunning, setBulkRunning] = useState(false);
   const bulkRunningRef = useRef(false);
-  const hadBulkRef = useRef(false);
   const [bulkFailures, setBulkFailures] = useState<{
     verb: string;
     total: number;
     failed: { item: PlanItem; message: string }[];
   } | null>(null);
-  const failureAlertRef = useRef<HTMLDivElement>(null);
 
   const [archivingRule, setArchivingRule] = useState<RecurringRule | null>(null);
-  // ปุ่มต้นทางของ dialog บางตัวหายไปหลังทำสำเร็จ ("ปิดเดือนนี้" ถูกแทนด้วยปุ่มเปิดเดือน, "เลือกคู่"
-  // หายเมื่อ payment ไม่ needs_review แล้ว) MUI คืน focus ให้เฉพาะเมื่อ element เดิมยังอยู่ —
-  // ไม่งั้น focus ตกไปที่ body ใช้ปุ่มที่อยู่ถาวรบนหน้าเป็นที่รับ focus แทน (ท่าเดียวกับ Accounts.tsx)
+  // ปุ่มที่รับ focus แทนเมื่อ element ต้นทางหายไป (แถวที่ลบ, แถบเลือกที่ปิด, ปุ่มบันทึกรายได้ที่กลายเป็นลิงก์)
   const addItemButtonRef = useRef<HTMLButtonElement>(null);
   const incomeRef = useRef<IncomeSectionHandle>(null);
   const incomeChangedRef = useRef(false);
@@ -290,33 +342,40 @@ export default function MonthlyPlan() {
   const reload = async (background = false) => {
     const requestId = ++requestIdRef.current;
     if (!background) setLoading(true);
-    setError('');
     const [planResult, rulesResult] = await Promise.allSettled([
       req<Plan>(`/api/monthly-plans/${monthRef.current}`),
       req<RecurringRule[]>('/api/recurring-rules'),
     ]);
     if (requestId !== requestIdRef.current) return;
-    const failures: string[] = [];
-    if (planResult.status === 'fulfilled') setPlan(planResult.value);
-    else {
-      failures.push(errorMessage(planResult.reason, 'โหลดแผนรายเดือนไม่สำเร็จ'));
+    if (planResult.status === 'fulfilled') {
+      setPlan(planResult.value);
+      setError('');
+    } else {
+      setError(errorMessage(planResult.reason, 'โหลดแผนรายเดือนไม่สำเร็จ'));
       if (!background) setPlan(null);
     }
-    if (rulesResult.status === 'fulfilled') setRules(rulesResult.value);
-    else failures.push(errorMessage(rulesResult.reason, 'โหลดรายการประจำไม่สำเร็จ'));
-    setError(failures.join(' • '));
+    if (rulesResult.status === 'fulfilled') {
+      setRules(rulesResult.value);
+      setRulesError('');
+    } else setRulesError(errorMessage(rulesResult.reason, 'โหลดรายการประจำไม่สำเร็จ'));
     setLoading(false);
   };
 
+  // บัญชี/หมวดของช่องเลือกในฟอร์ม — โหลดไม่ได้ต้องบอกพร้อมปุ่มลองใหม่ ไม่ใช่ช่องเลือกว่างเงียบ ๆ
+  const loadRefs = async () => {
+    setRefsError('');
+    const [accountsResult, categoriesResult] = await Promise.allSettled([
+      req<Account[]>('/api/accounts'),
+      req<Category[]>('/api/categories?is_active=true'),
+    ]);
+    if (accountsResult.status === 'fulfilled') setAccounts(accountsResult.value);
+    if (categoriesResult.status === 'fulfilled') setCategories(categoriesResult.value);
+    const failed = [accountsResult.status === 'rejected' && 'บัญชี', categoriesResult.status === 'rejected' && 'หมวด'].filter(Boolean);
+    if (failed.length > 0) setRefsError(`โหลดรายชื่อ${failed.join('และ')}ไม่สำเร็จ ช่องเลือก${failed.join('และ')}จึงยังว่าง`);
+  };
+
   useEffect(() => {
-    void (async () => {
-      const [accountsResult, categoriesResult] = await Promise.allSettled([
-        req<Account[]>('/api/accounts'),
-        req<Category[]>('/api/categories?is_active=true'),
-      ]);
-      if (accountsResult.status === 'fulfilled') setAccounts(accountsResult.value);
-      if (categoriesResult.status === 'fulfilled') setCategories(categoriesResult.value);
-    })();
+    void loadRefs();
   }, []);
 
   useEffect(() => {
@@ -338,9 +397,16 @@ export default function MonthlyPlan() {
     });
   }, [plan]);
 
-  // แถบลอยหายไปพร้อมปุ่มที่ถือ focus อยู่ ("ล้างที่เลือก" หรือทำครบทุกแถว) focus จึงตกไปที่ body —
-  // ส่งต่อให้ checkbox หัวตาราง (ยังอยู่ใกล้งานที่ทำ) หรือปุ่มเพิ่มรายการถ้าตารางหายไปแล้ว
-  // preventScroll: ไม่กระชากหน้าจอของคนที่ใช้เมาส์ แค่ให้ Tab ถัดไปเริ่มจากจุดที่สมเหตุสมผล
+  // element ที่ถือ focus หายไปจาก DOM แล้ว focus ตกไปที่ body — ส่งต่อให้ checkbox หัวตาราง (ยังอยู่ใกล้งานที่ทำ)
+  // หรือปุ่มเพิ่มรายการถ้าตารางหายไปแล้ว preventScroll: ไม่กระชากหน้าจอของคนที่ใช้เมาส์ แค่ให้ Tab ถัดไปเริ่มจากจุดที่สมเหตุสมผล
+  const rescueFocus = () => {
+    if (document.activeElement == null || document.activeElement === document.body) {
+      (document.getElementById('plan-select-all') ?? addItemButtonRef.current)?.focus({ preventScroll: true });
+    }
+  };
+
+  // แถบลอยหายไปพร้อมปุ่มที่ถือ focus อยู่ ("ล้างที่เลือก" หรือทำครบทุกแถว) — ปุ่มบนแถบเป็น aria-disabled ระหว่างทำ
+  // แบบกลุ่ม focus จึงหายเฉพาะตอนที่แถบหายไปทั้งแถบเท่านั้น
   useEffect(() => {
     if (selected.size > 0) {
       hadSelectionRef.current = true;
@@ -348,40 +414,34 @@ export default function MonthlyPlan() {
     }
     if (!hadSelectionRef.current) return;
     hadSelectionRef.current = false;
-    if (document.activeElement == null || document.activeElement === document.body) {
-      (document.getElementById('plan-select-all') ?? addItemButtonRef.current)?.focus({ preventScroll: true });
-    }
+    rescueFocus();
   }, [selected.size > 0]);
 
-  // ปุ่มบนแถบ disabled ตลอดงานแบบกลุ่ม focus ที่ MUI คืนให้หลังปิด dialog จึงตกไปที่ body —
-  // พอจบงานส่งให้ Alert รายการที่ไม่สำเร็จ (ถ้ามี) ไม่งั้น checkbox หัวตาราง ทำงานตอนเปลี่ยนจาก
-  // กำลังทำ → เสร็จเท่านั้น และ effect รันหลัง commit แล้ว Alert ที่เพิ่ง set จึงอยู่ใน DOM แล้ว
-  useEffect(() => {
-    if (bulkRunning) {
-      hadBulkRef.current = true;
-      return;
-    }
-    if (!hadBulkRef.current) return;
-    hadBulkRef.current = false;
-    if (document.activeElement == null || document.activeElement === document.body) {
-      (failureAlertRef.current ?? document.getElementById('plan-select-all') ?? addItemButtonRef.current)?.focus({ preventScroll: true });
-    }
-  }, [bulkRunning]);
-
   // บันทึกรายได้จากปุ่มบนแถวแล้ว MUI คืน focus ให้ปุ่มนั้นตอนปิดฟอร์ม แต่ reload ทำให้ปุ่มหายไป
-  // (แถวผูก income_record แล้ว) focus จึงตกไปที่ body — รอ plan ใหม่ commit ก่อนค่อยส่งต่อ
+  // (แถวผูก income_record แล้วเหลือลิงก์ "จัดการในรายได้") — รอ plan ใหม่ commit ก่อนค่อยส่งต่อ
   // ตั้ง flag ที่ปุ่มบนแถวเท่านั้น ปุ่ม "แก้ไข"/"เพิ่มรายได้เต็ม" ในส่วนรายได้ไม่ควรถูกดึง focus ออกมาที่ตาราง
   useEffect(() => {
     if (!incomeChangedRef.current) return;
     incomeChangedRef.current = false;
-    if (document.activeElement == null || document.activeElement === document.body) {
-      (document.getElementById('plan-select-all') ?? addItemButtonRef.current)?.focus({ preventScroll: true });
-    }
+    rescueFocus();
   }, [plan]);
 
-  const closed = plan?.status === 'closed';
-  const items = plan?.items ?? [];
+  // ระหว่างสลับเดือน plan ยังเป็นของเดือนก่อน — ทุกส่วนที่มาจากแผนแสดง placeholder ในที่เดิมแทนข้อมูลเก่า
+  const planReady = plan != null && !loading;
+  const closed = planReady && plan.status === 'closed';
+  const items = planReady ? plan.items : [];
   const activeRules = rules.filter((r) => r.is_active);
+  // โหลดครั้งแรกยังไม่รู้จำนวน — ไม่แสดง "(0)" หรือ "ยังไม่มีรายการประจำ" ก่อนข้อมูลมา (รายการประจำไม่ผูกกับเดือน สลับเดือนแล้วคงของเดิมไว้)
+  const rulesPending = loading && rules.length === 0;
+  const toggleRules = () => {
+    const next = !rulesOpen;
+    setRulesOpen(next);
+    try {
+      localStorage.setItem(RULES_OPEN_KEY, next ? '1' : '0');
+    } catch {
+      // เขียนไม่ได้ = จำแค่รอบนี้
+    }
+  };
 
   const visibleItems = items.filter((i) => matchesItemFilter(i, itemFilter));
   if (itemSort) visibleItems.sort(comparePlanItems(itemSort.key, itemSort.dir));
@@ -397,11 +457,10 @@ export default function MonthlyPlan() {
   const setRuleFilterField = (key: keyof RuleFilter) => (event: { target: { value: string } }) =>
     setRuleFilter((f) => ({ ...f, [key]: event.target.value }));
 
-  // ชิปสถานะ = ทางลัดของตัวกรอง {รายจ่าย, สถานะ X} กดชิปที่เปิดอยู่ซ้ำ = ล้างตัวกรอง
-  const chipOn = (status: ItemFilter['status']) =>
-    itemFilter.kind === 'expense' && itemFilter.status === status && itemFilter.category === '';
-  const toggleChip = (status: ItemFilter['status']) =>
-    setItemFilter(chipOn(status) ? EMPTY_ITEM_FILTER : { kind: 'expense', status, category: '' });
+  // ชิปสถานะ = ทางลัดของตัวกรอง (chipFilter) กดชิปที่เปิดอยู่ซ้ำ = ล้างตัวกรอง
+  const chipOn = (status: ChipStatus) => sameFilter(itemFilter, chipFilter(status));
+  const toggleChip = (status: ChipStatus) => setItemFilter(chipOn(status) ? EMPTY_ITEM_FILTER : chipFilter(status));
+  const chipCount = (status: ChipStatus) => items.filter((i) => matchesItemFilter(i, chipFilter(status))).length;
 
   // แถวที่ถูกซ่อนด้วยตัวกรองยังนับ — ปุ่มแบบกลุ่มทำกับทุกแถวที่เลือก ไม่ใช่แค่ที่เห็น
   const selectedItems = items.filter((i) => selected.has(i.id));
@@ -431,13 +490,13 @@ export default function MonthlyPlan() {
       return next;
     });
 
-  // ปุ่มบนแถบเครื่องมือ (คัดลอกเดือนก่อน / ปิด-เปิดเดือน / ข้าม / เลิกใช้) ไม่มี Alert ของ formError
+  // ปุ่มบนแถบเครื่องมือ (คัดลอกเดือนก่อน / ปิด-เปิดเดือน / ข้าม / ลบ / เลิกใช้) ไม่มี Alert ของ formError
   // ให้แสดง ถ้าโยน error ลง formError ตัวเดียวเสมอ ความล้มเหลวของปุ่มเหล่านั้นจะเงียบหายไปทั้งหมด —
   // มี modal เปิดอยู่ค่อยแสดงในฟอร์ม (อยู่ติดกับสิ่งที่ผู้ใช้กรอกผิด) ไม่มีก็ส่งเข้า snackbar
   const run = async (action: () => Promise<unknown>, successMessage: string, onDone?: () => void) => {
     // ปุ่มรายแถว disabled ระหว่างงานแบบกลุ่มแล้ว — ตัวนี้กันคลิกที่หลุดมาก่อน re-render
     if (bulkRunningRef.current) return;
-    // ConfirmDialog (closing / archivingRule) ไม่มีช่องแสดง error ในตัว จึงไม่นับเป็น "อยู่ในฟอร์ม"
+    // ConfirmDialog (closing / archivingRule / deletingItem) ไม่มีช่องแสดง error ในตัว จึงไม่นับเป็น "อยู่ในฟอร์ม"
     const inModal = itemModalOpen || ruleModalOpen || payingItem != null;
     setFormError('');
     setSubmitting(true);
@@ -506,21 +565,22 @@ export default function MonthlyPlan() {
   // (เหตุผลอยู่ที่ comment ของ openPayment) ส่วนวันที่ใช้วันนี้ เพราะหลายแถวมีวันครบกำหนดคนละวัน
   const openBulkPay = () => {
     if (bulkRunningRef.current) return;
-    setBulkPayForm({ paid_date: todayLocal(), bank_account_id: accounts[0] ? String(accounts[0].id) : '' });
-    setBulkAmounts(
-      Object.fromEntries(
-        payPlan.ok.map((i) => [
-          i.id,
-          i.amount_mode === 'estimated' ? '' : (Math.max(0, i.planned_amount_satang - i.paid_satang) / 100).toFixed(2),
-        ]),
-      ),
+    const form = { paid_date: todayLocal(), bank_account_id: accounts[0] ? String(accounts[0].id) : '' };
+    const amounts = Object.fromEntries(
+      payPlan.ok.map((i) => [
+        i.id,
+        i.amount_mode === 'estimated' ? '' : (Math.max(0, i.planned_amount_satang - i.paid_satang) / 100).toFixed(2),
+      ]),
     );
+    setBulkPayForm(form);
+    setBulkAmounts(amounts);
+    setBulkInitial(JSON.stringify([form, amounts]));
     setFormError('');
     setBulkAction('pay');
   };
 
   const submitBulkPay = () => {
-    if (bulkRunningRef.current) return;
+    if (bulkRunningRef.current || payPlan.ok.length === 0) return;
     const { paid_date, bank_account_id } = bulkPayForm;
     if (paid_date === '' || bank_account_id === '') {
       setFormError('เลือกวันที่จ่ายและบัญชีที่จ่าย');
@@ -546,16 +606,16 @@ export default function MonthlyPlan() {
     );
   };
 
-  const openAddItem = () => {
-    setEditingItemId(null);
-    setItemForm({ ...EMPTY_ITEM, due_date: '' });
+  const startItemForm = (id: number | null, form: typeof EMPTY_ITEM) => {
+    setEditingItemId(id);
+    setItemForm(form);
+    setItemInitial(form);
     setFormError('');
     setItemModalOpen(true);
   };
-
-  const openEditItem = (item: PlanItem) => {
-    setEditingItemId(item.id);
-    setItemForm({
+  const openAddItem = () => startItemForm(null, EMPTY_ITEM);
+  const openEditItem = (item: PlanItem) =>
+    startItemForm(item.id, {
       kind: item.kind,
       name: item.name,
       amount_baht: (item.planned_amount_satang / 100).toFixed(2),
@@ -563,11 +623,9 @@ export default function MonthlyPlan() {
       category_id: item.category_id == null ? '' : String(item.category_id),
       note: item.note ?? '',
     });
-    setFormError('');
-    setItemModalOpen(true);
-  };
 
   const submitItem = () => {
+    if (submitting) return;
     const satang = parseBahtToSatang(itemForm.amount_baht);
     if (satang == null) {
       setFormError('จำนวนเงินไม่ถูกต้อง');
@@ -592,16 +650,16 @@ export default function MonthlyPlan() {
     );
   };
 
-  const openAddRule = () => {
-    setEditingRuleId(null);
-    setRuleForm({ ...EMPTY_RULE, start_date: `${month}-01` });
+  const startRuleForm = (id: number | null, form: typeof EMPTY_RULE) => {
+    setEditingRuleId(id);
+    setRuleForm(form);
+    setRuleInitial(form);
     setFormError('');
     setRuleModalOpen(true);
   };
-
-  const openEditRule = (rule: RecurringRule) => {
-    setEditingRuleId(rule.id);
-    setRuleForm({
+  const openAddRule = () => startRuleForm(null, { ...EMPTY_RULE, start_date: `${month}-01` });
+  const openEditRule = (rule: RecurringRule) =>
+    startRuleForm(rule.id, {
       name: rule.name,
       kind: rule.kind,
       amount_mode: rule.amount_mode,
@@ -614,11 +672,9 @@ export default function MonthlyPlan() {
       default_account_id: rule.default_account_id == null ? '' : String(rule.default_account_id),
       category_id: rule.category_id == null ? '' : String(rule.category_id),
     });
-    setFormError('');
-    setRuleModalOpen(true);
-  };
 
   const submitRule = () => {
+    if (submitting) return;
     const satang = parseBahtToSatang(ruleForm.amount_baht);
     if (satang == null) {
       setFormError('จำนวนเงินไม่ถูกต้อง');
@@ -628,7 +684,7 @@ export default function MonthlyPlan() {
     // และล้าง anchor_day เงียบ ๆ — ต้องดักที่นี่ให้ผู้ใช้เห็นว่ากรอกอะไรผิด
     const interval = Number(ruleForm.frequency_interval);
     if (!Number.isInteger(interval) || interval < 1 || interval > 366) {
-      setFormError('ความถี่ต้องเป็นจำนวนเต็ม 1–366');
+      setFormError('ทุกกี่รอบต้องเป็นจำนวนเต็ม 1–366');
       return;
     }
     const anchorDay = ruleForm.anchor_day === '' ? null : Number(ruleForm.anchor_day);
@@ -655,34 +711,39 @@ export default function MonthlyPlan() {
           ? post('/api/recurring-rules', body)
           : patch(`/api/recurring-rules/${editingRuleId}`, body),
       editingRuleId == null ? 'เพิ่มรายการประจำแล้ว' : 'บันทึกรายการประจำแล้ว — มีผลกับเดือนที่ยังไม่สร้างรายการ',
-      () => setRuleModalOpen(false),
+      () => {
+        setRuleModalOpen(false);
+        // ส่วนที่พับไว้ต้องกางให้เห็นกฎที่เพิ่งบันทึก
+        if (!rulesOpen) toggleRules();
+      },
     );
   };
 
   // เติมค่าเริ่มต้นให้ครบที่สุดที่รู้: ยอดคงเหลือที่ยังไม่จ่าย, วันครบกำหนด และ "บัญชีที่คาดว่าจะใช้"
   // ของรายการประจำต้นทาง (§9.2) — ถ้าไม่อ่านค่านั้นที่นี่ ช่องนั้นในฟอร์มกฎก็ไม่มีใครใช้เลย
   //
-  // ยกเว้นยอด: รายการยอดประมาณการปล่อยช่องว่างให้พิมพ์ยอดจากบิลจริง — reconcile เทียบยอดเป๊ะถึงสตางค์
-  // (`t.amount_satang = p.amount_satang`) เติมยอดที่เดาไว้ให้แล้วผู้ใช้กดผ่าน = ประกาศจ่าย 4,000
-  // ที่ไม่มี txn ไหนตรง ค้างรอ statement ถาวร ขณะที่เงินออกจริง 3,800 ลอยไม่ถูกจับคู่
+  // ยกเว้นยอด: รายการยอดประมาณการปล่อยช่องว่างให้พิมพ์ยอดจากบิลจริง — ยอดที่เดาไว้ถ้าเติมให้แล้วผู้ใช้กดผ่าน
+  // จะนับเป็นยอดจ่ายทันที (ADR-0004 ไม่มี statement มาแก้ให้) ยอดจริงของเดือนนั้นจึงผิดไปเงียบ ๆ
   const openPayment = (item: PlanItem) => {
     const remaining = Math.max(0, item.planned_amount_satang - item.paid_satang);
     const rule = item.recurring_rule_id == null ? undefined : rules.find((r) => r.id === item.recurring_rule_id);
     const defaultAccountId = rule?.default_account_id ?? accounts[0]?.id ?? null;
-    setPayingItem(item);
-    setPaymentForm({
+    const form = {
       amount_baht:
         item.amount_mode === 'estimated'
           ? ''
           : ((remaining > 0 ? remaining : item.planned_amount_satang) / 100).toFixed(2),
       paid_date: item.due_date ?? `${month}-01`,
       bank_account_id: defaultAccountId == null ? '' : String(defaultAccountId),
-    });
+    };
+    setPayingItem(item);
+    setPaymentForm(form);
+    setPaymentInitial(form);
     setFormError('');
   };
 
   const submitPayment = () => {
-    if (!payingItem) return;
+    if (!payingItem || submitting) return;
     const satang = parseBahtToSatang(paymentForm.amount_baht);
     if (satang == null || satang <= 0) {
       setFormError('จำนวนเงินไม่ถูกต้อง');
@@ -700,567 +761,644 @@ export default function MonthlyPlan() {
     );
   };
 
-  const summary = plan?.payment_status;
+  const summary = planReady ? plan.payment_status : null;
   // payingItem เป็น snapshot ตอนกดปุ่ม — หลัง reload ต้องอ่านของจริงจาก plan ไม่งั้นรายการจ่าย
   // ที่เพิ่งบันทึกหรือเพิ่งยกเลิกจะไม่อัปเดตในกล่องที่ยังเปิดอยู่
   const payingItemLive = payingItem == null ? null : items.find((i) => i.id === payingItem.id) ?? payingItem;
+  const refsAlert = refsError && <LoadError message={refsError} onRetry={() => void loadRefs()} />;
+  // ปุ่มที่ถือ focus อยู่แล้วกดไม่ได้ชั่วคราว = aria-disabled (Buttons ใน DESIGN.md) — disabled ถอดออกจากลำดับ tab
+  const toolbarBusy = submitting || bulkRunning;
+
+  // ปุ่มของแถว — วาดสองที่: คอลัมน์จัดการ (≥ md) และใต้ชื่อแถว (< md, ไม่มีไอคอนนำหน้าเพื่อให้พอดีความกว้าง)
+  // แถวที่ผูกกับรายได้/แผนผ่อนจัดการที่ต้นทางเท่านั้น จึงเหลือลิงก์เดียวแทนปุ่มที่กดไม่ได้ 4 ปุ่ม
+  const rowActions = (item: PlanItem, compact: boolean) => {
+    if (item.income_record_id != null) {
+      return <Button size="small" href="#income-section" sx={{ whiteSpace: 'nowrap' }}>จัดการในรายได้</Button>;
+    }
+    if (item.installment_due_id != null) {
+      return <Button size="small" component={Link} to="/installments" sx={{ whiteSpace: 'nowrap' }}>ดูแผนผ่อน</Button>;
+    }
+    const inactive = item.explicit_status !== 'active';
+    const locked = closed || bulkRunning;
+    const icon = compact ? undefined : <PaidRounded />;
+    const deleteReason = canDelete(item);
+    return (
+      <>
+        {/* "จ่ายแล้ว" เป็นปุ่มของรายจ่าย/เงินกันไว้เท่านั้น — เงินเข้าต้องบันทึกที่ "รายได้และรายการหัก"
+            เพื่อแยกยอดเต็มออกจากยอดสุทธิ (ADR-0002 ข้อ 5) รายการหักจากเงินเดือนไม่มีปุ่มหลัก เงินไม่ได้ออกจาก
+            บัญชีเรา มันขึ้น "หักจากรายได้" เองเมื่อถูกผูกจากฟอร์มรายได้
+
+            เงื่อนไข `paid_satang === 0`: แถวที่ยังมีประกาศจ่ายค้างอยู่ต้องเหลือปุ่ม "จ่ายแล้ว" ไว้ เพราะปุ่ม
+            ยกเลิกการประกาศจ่ายอยู่ใน modal นั้นที่เดียว ยกเลิกแล้ว paid_satang กลับเป็น 0 ปุ่มจะสลับเป็น
+            ปุ่มบันทึกรายได้ให้เอง ซึ่งเปิดฟอร์มรายได้ที่เชื่อมแถวนี้ไว้แล้วทันที
+
+            key แยกสองปุ่ม: ไม่มี key React จะใช้ <button> เดิมต่อแล้วแค่ disable หลังบันทึกรายได้
+            focus จึงค้างบนปุ่ม disabled แทนที่จะตกไปที่ body ให้ effect ของ incomeChangedRef ส่งต่อ */}
+        {item.kind === 'income' && item.paid_satang === 0 ? (
+          <Button
+            key="income"
+            size="small"
+            startIcon={icon}
+            disabled={locked || inactive}
+            onClick={() => {
+              incomeChangedRef.current = true;
+              incomeRef.current?.openNewFor(item.id);
+            }}
+          >
+            บันทึกรายได้เต็ม
+          </Button>
+        ) : item.kind === 'payroll_deduction' && item.paid_satang === 0 ? null : (
+          <Button key="pay" size="small" startIcon={icon} disabled={locked || inactive} onClick={() => openPayment(item)} sx={{ whiteSpace: 'nowrap' }}>
+            จ่ายแล้ว
+          </Button>
+        )}
+        <RowIconButton label={`แก้ไข ${item.name}`} tooltip="แก้ไข" disabled={locked} onClick={() => openEditItem(item)}>
+          <EditRounded fontSize="small" />
+        </RowIconButton>
+        {inactive ? (
+          <RowIconButton
+            label={`เอา ${item.name} กลับเข้าแผน`}
+            tooltip="เอากลับเข้าแผน"
+            color="inherit"
+            disabled={locked}
+            onClick={() => void run(() => patch(`/api/monthly-plan-items/${item.id}`, { explicit_status: 'active' }), 'เอารายการกลับเข้าแผนแล้ว')}
+          >
+            <ReplayRounded fontSize="small" />
+          </RowIconButton>
+        ) : (
+          <RowIconButton
+            label={`ข้าม ${item.name}`}
+            tooltip="ข้าม"
+            color="inherit"
+            disabled={locked}
+            onClick={() => void run(() => post(`/api/monthly-plan-items/${item.id}/skip`, {}), 'ข้ามรายการนี้แล้ว')}
+          >
+            <SkipNextRounded fontSize="small" />
+          </RowIconButton>
+        )}
+        {/* ลบไม่ได้เพราะตัวรายการเอง (รายการประจำ / มีการจ่ายค้าง) = aria-disabled + tooltip บอกเหตุผล (ชุดเดียวกับ dialog แบบกลุ่ม) */}
+        <RowIconButton
+          label={`ลบ ${item.name}`}
+          tooltip="ลบ"
+          color="error"
+          disabled={locked}
+          disabledReason={locked || deleteReason == null ? null : `ลบไม่ได้ — ${deleteReason}`}
+          onClick={() => setDeletingItem(item)}
+        >
+          <DeleteOutlineRounded fontSize="small" />
+        </RowIconButton>
+      </>
+    );
+  };
+
+  const paidPercent =
+    summary != null && summary.total_due_satang > 0
+      ? Math.min(100, Math.max(0, Math.round((summary.paid_satang / summary.total_due_satang) * 100)))
+      : 0;
+  const overdueCount = chipCount('overdue');
 
   return (
     // ที่ว่างท้ายหน้าให้พ้นแถบลอย PlanSelectionBar วัดความสูงจริงแล้วเว้นเอง
     <Box>
-      <PageHeader
-        level={1}
-        id="planning-heading"
-        title="วางแผนรายเดือน"
-        description="รายการประจำ รายการเฉพาะเดือน และการยืนยันการจ่ายกับ statement จริง"
-        action={
-          <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', justifyContent: 'flex-end' }} data-tour="plan-toolbar">
-            <Button
-              variant="outlined"
-              startIcon={<ContentCopyRounded />}
-              disabled={closed || submitting || bulkRunning || loading}
-              onClick={() => void run(() => post(`/api/monthly-plans/${month}/copy-previous`, {}), 'คัดลอกจากเดือนก่อนแล้ว')}
-            >
-              คัดลอกเดือนก่อน
-            </Button>
-            <Button
-              ref={addItemButtonRef}
-              variant="contained"
-              startIcon={<AddRounded />}
-              disabled={closed || loading}
-              onClick={openAddItem}
-            >
-              เพิ่มรายการ
-            </Button>
-          </Stack>
-        }
-      />
+      <PageHeader level={1} id="planning-heading" title="วางแผนรายเดือน" description={PLAN_NOT_MATCHED_NOTE} />
       <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
         {plan?.data_coverage_note ??
           'ข้อมูลเงินจริงคำนวณจาก bank statement ที่นำเข้าสู่ระบบเท่านั้น ไม่รวมเงินสดและ e-Wallet'}
       </Typography>
 
-      <Stack direction="row" spacing={1.5} sx={{ mt: 3, alignItems: 'center', flexWrap: 'wrap' }}>
+      {/* แถบเครื่องมือของเดือนแถวเดียว (คู่มือไฮไลต์ทั้งแถว): เลือกเดือน · ปิด/เปิดเดือน · คัดลอก · เพิ่มรายการ */}
+      <Stack direction="row" data-tour="plan-toolbar" sx={{ mt: 3, alignItems: 'center', flexWrap: 'wrap', gap: 1.5 }}>
         <MonthPicker value={month} onChange={setMonth} maxMonth={MAX_MONTH} />
-        <Button component={Link} to="/installments" variant="outlined">แผนผ่อนและยอดคงเหลือ</Button>
-        {/* ระหว่างสลับเดือน `closed` ยังเป็นค่าของเดือนก่อน และถ้าโหลดพลาด (plan == null) ก็ไม่รู้สถานะ
-            เลย — ปุ่มล็อกจึงต้องรอให้ plan ของเดือนนี้มาถึงก่อน ไม่งั้นกดปิด/เปิดใส่เดือนผิดได้ */}
-        {plan != null && !loading && (
-          closed ? (
-            <Button
-              variant="outlined"
-              startIcon={<LockOpenOutlined />}
-              disabled={submitting || bulkRunning}
-              onClick={() => void run(() => post(`/api/monthly-plans/${month}/reopen`, {}), 'เปิดเดือนนี้ให้แก้ได้แล้ว')}
-            >
-              เปิดเดือนนี้อีกครั้ง
-            </Button>
-          ) : (
-            <Button
-              variant="outlined"
-              startIcon={<LockOutlined />}
-              disabled={submitting || bulkRunning}
-              onClick={() => setClosing(true)}
-            >
-              ปิดเดือนนี้
-            </Button>
-          )
+        {/* ระหว่างสลับเดือนยังไม่รู้สถานะของเดือนใหม่ ปุ่มล็อกจึงกดไม่ได้จนแผนของเดือนนี้มาถึง (คงที่ไว้ให้ layout
+            ไม่กระโดด) — ปุ่มเดียวสลับป้าย ปิด ↔ เปิด React ใช้ <button> เดิม focus หลังปิด dialog จึงกลับมาที่เดิม */}
+        {plan != null && (
+          <Button
+            variant="outlined"
+            // ป้ายอ่านจากแผนที่มีอยู่ (ระหว่างโหลดเป็นของเดือนก่อน) ให้ความกว้างปุ่มไม่สลับไปมา แต่กดได้เมื่อแผนเดือนนี้มาถึงแล้วเท่านั้น
+            startIcon={plan.status === 'closed' ? <LockOpenOutlined /> : <LockOutlined />}
+            disabled={!planReady}
+            aria-disabled={toolbarBusy}
+            onClick={() => {
+              if (toolbarBusy) return;
+              if (closed) void run(() => post(`/api/monthly-plans/${month}/reopen`, {}), 'เปิดเดือนนี้ให้แก้ได้แล้ว');
+              else setClosing(true);
+            }}
+          >
+            {plan.status === 'closed' ? 'เปิดเดือนนี้อีกครั้ง' : 'ปิดเดือนนี้'}
+          </Button>
         )}
+        <Box sx={{ flexGrow: 1, display: { xs: 'none', sm: 'block' } }} />
+        <Button
+          variant="outlined"
+          startIcon={<ContentCopyRounded />}
+          disabled={closed || !planReady}
+          aria-disabled={toolbarBusy}
+          onClick={() => {
+            if (!toolbarBusy) void run(() => post(`/api/monthly-plans/${month}/copy-previous`, {}), 'คัดลอกจากเดือนก่อนแล้ว');
+          }}
+        >
+          คัดลอกเดือนก่อน
+        </Button>
+        <Button ref={addItemButtonRef} variant="contained" startIcon={<AddRounded />} disabled={closed || !planReady} onClick={openAddItem}>
+          เพิ่มรายการ
+        </Button>
       </Stack>
+      {/* ลิงก์ไปหน้าอื่น ไม่ใช่เครื่องมือของเดือน — เป็นลิงก์ข้อความ ไม่ใช่ปุ่ม outlined แบบเดียวกับแถบด้านบน */}
+      <MuiLink component={Link} to="/installments" sx={{ display: 'inline-flex', alignItems: 'center', minHeight: 40, mt: 0.5 }}>
+        แผนผ่อนและยอดคงเหลือ
+        <ChevronRightRounded fontSize="small" aria-hidden />
+      </MuiLink>
 
-      {closed && !loading && (
-        <Alert severity="info" sx={{ mt: 2, ...descriptionSx }}>
-          เดือนนี้ปิดแล้ว แก้รายการไม่ได้จนกดเปิดอีกครั้ง — statement ที่มาถึงภายหลังยังจับคู่กับรายการที่ประกาศจ่ายไว้ได้
-          ตัวเลขด้านล่างคำนวณสดจากข้อมูลล่าสุดเสมอ ไม่ใช่ภาพนิ่งตอนปิดเดือน
+      {closed && (
+        <Alert severity="info" role="status" sx={{ mt: 2, ...descriptionSx }}>
+          เดือนนี้ปิดแล้ว แก้รายการไม่ได้จนกดเปิดอีกครั้ง ตัวเลขด้านล่างคำนวณสดจากข้อมูลล่าสุดเสมอ ไม่ใช่ภาพนิ่งตอนปิดเดือน ·{' '}
+          {PLAN_NOT_MATCHED_NOTE}
         </Alert>
       )}
 
       {error && <LoadError message={error} onRetry={plan == null ? () => void reload() : undefined} />}
 
-      {loading ? (
-        <TableSkeleton rows={8} />
-      ) : plan == null ? null : (
-        <Stack spacing={4} sx={{ mt: 3 }}>
-          <Box component="section" aria-labelledby="plan-totals-heading">
-            <Typography variant="h2" id="plan-totals-heading" sx={{ fontSize: '1.25rem', mb: 1.5 }}>
-              สรุปตามแผน
-            </Typography>
-            {/* มือถือ ใบที่ 5 (เงินเหลือใช้ = ผลลัพธ์) กินเต็มแถว — summaryRowSx จัดให้ */}
-            <Box sx={summaryRowSx(5)}>
-              <SummaryCard dense title="รายได้เต็มตามแผน" value={<Money satang={plan.totals.planned_income_satang} tone="income" />} />
-              <SummaryCard dense title="รายการหักจากรายได้" value={<Money satang={plan.totals.planned_deduction_satang} />} />
-              <SummaryCard dense title="ค่าใช้จ่ายตามแผน" value={<Money satang={plan.totals.planned_expense_satang} tone="expense" />} />
-              <SummaryCard
-                dense
-                title="เงินกันไว้"
-                value={<Money satang={plan.totals.planned_reserve_satang} />}
-                caption="กันงบไว้ ไม่ใช่รายจ่าย และไม่ลดยอดคงเหลือในบัญชี"
-              />
-              <SummaryCard
-                dense
-                title="เงินเหลือใช้ตามแผน"
-                value={
-                  <Money
-                    satang={plan.totals.planned_available_satang}
-                    tone={plan.totals.planned_available_satang < 0 ? 'expense' : 'income'}
-                  />
-                }
-                caption="รายได้เต็ม − รายการหัก − รายจ่ายตามแผน − เงินกันไว้"
-              />
-            </Box>
-          </Box>
-
-          {summary && summary.total_count > 0 && (
-            <Box component="section" aria-labelledby="plan-payment-heading">
-              <Typography variant="h2" id="plan-payment-heading" sx={{ fontSize: '1.25rem', mb: 1.5 }}>
-                สถานะการจ่ายบิล
+      <Stack spacing={4} sx={{ mt: 3 }}>
+        {/* โหลดแผนไม่สำเร็จ = LoadError ด้านบนแทนส่วนที่มาจากแผน (Section Failure Rule) รายการประจำยังแสดงตามปกติ */}
+        {(loading || plan != null) && (
+          <>
+            <Box component="section" aria-labelledby="plan-totals-heading">
+              <Typography variant="h2" id="plan-totals-heading" sx={{ fontSize: '1.25rem', mb: 1.5 }}>
+                สรุปตามแผน
               </Typography>
-              <Paper variant="outlined" sx={{ p: 2 }}>
-                {/* กดชิป = กรองตาราง "รายการของเดือนนี้" ด้านล่าง (ท่าเดียวกับชิปใน Transactions.tsx)
-                    ชิปที่เลือกใช้ accent ตาม Restrained Accent Rule (selection) ส่วนสีสถานะเดิมคงไว้เป็นเส้นขอบ */}
-                <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
-                  {(
-                    [
-                      ['in_plan', 'ต้องจ่ายทั้งหมด', summary.total_count, 'default'],
-                      ['unpaid', 'ยังไม่จ่าย', summary.unpaid_count, 'default'],
-                      ['overdue', 'เกินกำหนด', summary.overdue_count, summary.overdue_count > 0 ? 'error' : 'default'],
-                      ['partial', 'จ่ายบางส่วน', summary.partial_count, 'default'],
-                      ['paid', 'จ่ายแล้ว', summary.paid_count, summary.paid_count > 0 ? 'success' : 'default'],
-                    ] as const
-                  ).map(([status, label, count, color]) => {
-                    const on = chipOn(status);
-                    return (
-                      <Chip
-                        key={status}
-                        label={`${label} ${count}`}
-                        variant={on ? 'filled' : 'outlined'}
-                        color={on ? 'primary' : color}
-                        aria-pressed={on}
-                        onClick={() => toggleChip(status)}
-                        sx={{ minHeight: 40 }}
-                      />
-                    );
-                  })}
-                </Stack>
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
-                  จ่ายแล้ว <Money satang={summary.paid_satang} /> จากยอดตามแผน <Money satang={summary.total_due_satang} />
-                </Typography>
-              </Paper>
+              {/* มือถือ ใบที่ 5 (เงินเหลือใช้ = ผลลัพธ์) กินเต็มแถว — summaryRowSx จัดให้ */}
+              <Box sx={summaryRowSx(5)}>
+                <SummaryCard dense loading={!planReady} title="รายได้เต็มตามแผน" value={<Money satang={plan?.totals.planned_income_satang ?? 0} tone="income" />} />
+                <SummaryCard dense loading={!planReady} title="รายการหักจากรายได้" value={<Money satang={plan?.totals.planned_deduction_satang ?? 0} />} />
+                <SummaryCard dense loading={!planReady} title="ค่าใช้จ่ายตามแผน" value={<Money satang={plan?.totals.planned_expense_satang ?? 0} tone="expense" />} />
+                <SummaryCard
+                  dense
+                  loading={!planReady}
+                  title="เงินกันไว้"
+                  value={<Money satang={plan?.totals.planned_reserve_satang ?? 0} />}
+                  caption="กันงบไว้ ไม่ใช่รายจ่าย และไม่ลดยอดคงเหลือในบัญชี"
+                />
+                <SummaryCard
+                  dense
+                  loading={!planReady}
+                  title="เงินเหลือใช้ตามแผน"
+                  value={
+                    <Money
+                      satang={plan?.totals.planned_available_satang ?? 0}
+                      tone={(plan?.totals.planned_available_satang ?? 0) < 0 ? 'expense' : 'income'}
+                    />
+                  }
+                  caption="รายได้เต็ม − รายการหัก − รายจ่ายตามแผน − เงินกันไว้"
+                />
+              </Box>
             </Box>
-          )}
 
-          <IncomeSection
-            key={month}
-            ref={incomeRef}
-            month={month}
-            closed={closed}
-            items={items}
-            onChanged={() => {
-              setNotice({ message: 'บันทึกรายได้แล้ว', severity: 'success' });
-              return reload(true);
-            }}
-          />
-
-          <Box component="section" aria-labelledby="plan-items-heading">
-            <Typography variant="h2" id="plan-items-heading" sx={{ fontSize: '1.25rem', mb: 1.5 }}>
-              รายการของเดือนนี้
-            </Typography>
-            {/* อยู่นอกเงื่อนไขของตาราง ให้เห็นแม้ตัวกรองซ่อนทุกแถว — tabIndex -1 รับ focus หลังงานแบบกลุ่มจบ */}
-            {bulkFailures && (
-              <Alert severity="error" ref={failureAlertRef} tabIndex={-1} onClose={() => setBulkFailures(null)} closeText="ปิด" sx={{ mb: 1.5 }}>
-                <AlertTitle>
-                  {bulkFailures.verb}สำเร็จ {bulkFailures.total - bulkFailures.failed.length} จาก {bulkFailures.total} รายการ —
-                  ไม่สำเร็จ {bulkFailures.failed.length} รายการ
-                </AlertTitle>
-                <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
-                  {bulkFailures.failed.map(({ item, message }) => (
-                    <li key={item.id}>
-                      {item.name} — {message}
-                    </li>
-                  ))}
-                </Box>
-                <Typography variant="body2" sx={{ mt: 1 }}>
-                  รายการที่ไม่สำเร็จยังเลือกค้างไว้ แก้แล้วกดซ้ำได้
+            {(!planReady || chipCount('in_plan') > 0 || overdueCount > 0) && (
+              <Box component="section" aria-labelledby="plan-payment-heading">
+                <Typography variant="h2" id="plan-payment-heading" sx={{ fontSize: '1.25rem', mb: 1.5 }}>
+                  สถานะการจ่ายบิล
                 </Typography>
-              </Alert>
-            )}
-            {items.length === 0 ? (
-              <EmptyState
-                icon={<EventRepeatRounded sx={{ fontSize: 40 }} />}
-                title="ยังไม่มีรายการในแผนเดือนนี้"
-                description="เพิ่มรายการเฉพาะเดือน คัดลอกจากเดือนก่อน หรือสร้างรายการประจำเพื่อให้ระบบสร้างให้ทุกเดือน"
-                action={
-                  <Button variant="contained" startIcon={<AddRounded />} disabled={closed} onClick={openAddItem}>
-                    เพิ่มรายการแรก
-                  </Button>
-                }
-              />
-            ) : (
-              <>
-                <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1.5, mb: 1.5, alignItems: 'center' }}>
-                  <TextField select size="small" label="ประเภท" value={itemFilter.kind} onChange={setItemFilterField('kind')} sx={{ minWidth: 160, flexGrow: { xs: 1, sm: 0 } }}>
-                    <MenuItem value="">ทุกประเภท</MenuItem>
-                    {KINDS.map((k) => (
-                      <MenuItem key={k.value} value={k.value}>
-                        {k.label}
-                      </MenuItem>
-                    ))}
-                  </TextField>
-                  <TextField select size="small" label="หมวด" value={itemFilter.category} onChange={setItemFilterField('category')} sx={{ minWidth: 160, flexGrow: { xs: 1, sm: 0 } }}>
-                    <MenuItem value="">ทุกหมวด</MenuItem>
-                    {itemCategoryOptions.map(([id, name]) => (
-                      <MenuItem key={id} value={id}>
-                        {name}
-                      </MenuItem>
-                    ))}
-                    <MenuItem value={NO_CATEGORY}>ไม่ระบุ</MenuItem>
-                  </TextField>
-                  <TextField select size="small" label="สถานะ" value={itemFilter.status} onChange={setItemFilterField('status')} sx={{ minWidth: 200, flexGrow: { xs: 1, sm: 0 } }}>
-                    <MenuItem value="">ทุกสถานะ</MenuItem>
-                    <MenuItem value="in_plan">อยู่ในแผน (ไม่รวมข้าม/ยกเลิก)</MenuItem>
-                    {STATUS_ORDER.map((s) => (
-                      <MenuItem key={s} value={s}>
-                        {PAYMENT_STATE_LABEL[s]}
-                      </MenuItem>
-                    ))}
-                  </TextField>
-                  {itemFilterActive && (
-                    <Button color="inherit" onClick={() => setItemFilter(EMPTY_ITEM_FILTER)}>
-                      ล้างตัวกรอง
-                    </Button>
-                  )}
-                  <Typography variant="body2" color="text.secondary" role="status">
-                    แสดง {visibleItems.length} จาก {items.length} รายการ
-                  </Typography>
-                </Stack>
-                {visibleItems.length === 0 ? (
-                  <Paper variant="outlined" sx={{ p: 3, textAlign: 'center' }}>
-                    <Typography color="text.secondary" sx={descriptionSx}>
-                      ไม่มีรายการที่ตรงกับตัวกรอง
-                    </Typography>
-                    <Button sx={{ mt: 1.5 }} onClick={() => setItemFilter(EMPTY_ITEM_FILTER)}>
-                      ล้างตัวกรอง
-                    </Button>
-                  </Paper>
-                ) : (
-                  <TableContainer component={Paper} variant="outlined" tabIndex={0}>
-                    {/* คอลัมน์จัดการ padding 6px: ชดเชย 8px ที่ spacing 0.5 ระหว่างปุ่มเพิ่ม (4 ช่องว่าง × 2px)
-                        ให้ความกว้างเท่าเดิม ตารางยังพอดีที่ 1200px — selector ต้องเจาะจงกว่า COMPACT_CELLS */}
-                    <Table
-                      size="small"
-                      aria-label="รายการในแผนเดือนนี้"
-                      sx={{ minWidth: 880, ...COMPACT_CELLS, '& .MuiTableCell-root:not(.MuiTableCell-paddingCheckbox):last-child': { px: 0.75 } }}
-                    >
-                      <TableHead>
-                        <TableRow>
-                          <TableCell padding="checkbox" sx={{ py: 0.5, px: 1 }}>
-                            <Checkbox
-                              id="plan-select-all"
-                              checked={allVisibleSelected}
-                              indeterminate={selectedVisibleCount > 0 && !allVisibleSelected}
-                              onChange={toggleAllVisible}
-                              slotProps={{ input: { 'aria-label': 'เลือกทุกรายการที่แสดงอยู่' } }}
-                            />
-                          </TableCell>
-                          <SortCell sortKey="kind" sort={itemSort} onSort={(k) => setItemSort((s) => nextSort(s, k))}>ประเภท</SortCell>
-                          <SortCell sortKey="name" sort={itemSort} onSort={(k) => setItemSort((s) => nextSort(s, k))}>รายการ</SortCell>
-                          <SortCell sortKey="category" sort={itemSort} onSort={(k) => setItemSort((s) => nextSort(s, k))}>หมวด</SortCell>
-                          <SortCell sortKey="due_date" sort={itemSort} onSort={(k) => setItemSort((s) => nextSort(s, k))}>ครบกำหนด</SortCell>
-                          <SortCell sortKey="planned" sort={itemSort} onSort={(k) => setItemSort((s) => nextSort(s, k))} align="right">ตามแผน</SortCell>
-                          <SortCell sortKey="paid" sort={itemSort} onSort={(k) => setItemSort((s) => nextSort(s, k))} align="right">จ่ายแล้ว</SortCell>
-                          <SortCell sortKey="status" sort={itemSort} onSort={(k) => setItemSort((s) => nextSort(s, k))}>สถานะ</SortCell>
-                          <TableCell align="right">จัดการ</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {visibleItems.map((item) => {
-                          const inactive = item.explicit_status !== 'active';
-                          const isSelected = selected.has(item.id);
+                <Paper variant="outlined" sx={{ p: 2 }}>
+                  {summary == null ? (
+                    <Stack spacing={1.5} role="status" aria-label="กำลังโหลดสถานะการจ่าย">
+                      <Skeleton width="50%" />
+                      <Skeleton variant="rounded" height={10} />
+                      <Skeleton variant="rounded" height={40} />
+                    </Stack>
+                  ) : (
+                    <>
+                      {/* ความคืบหน้าของบิล (รายจ่าย) — ตัวเลขเป็นข้อความเสมอ แถบเป็นภาพประกอบ: เนื้อแถบ success บน card
+                          4.87 / 6.97, ขอบรางสี input 3.14 / 3.17 (สว่าง/มืด) — รางโปร่งใส เพราะสีรางค่าเริ่มต้นของ MUI
+                          คำนวณจาก palette ธีมสว่างแม้อยู่ธีมมืด */}
+                      <Typography id="plan-paid-progress" sx={{ ...dataTextSx }}>
+                        จ่ายแล้ว <Money satang={summary.paid_satang} sx={{ fontWeight: 600 }} /> จากยอดตามแผน{' '}
+                        <Money satang={summary.total_due_satang} /> ({paidPercent}%)
+                      </Typography>
+                      <LinearProgress
+                        variant="determinate"
+                        color="success"
+                        value={paidPercent}
+                        aria-labelledby="plan-paid-progress"
+                        sx={{ mt: 1, height: 10, borderRadius: `${radii.sm}px`, bgcolor: 'transparent', border: 1, borderColor: 'brand.input', maxWidth: 560 }}
+                      />
+                      {/* กดชิป = กรองตาราง "รายการของเดือนนี้" ด้านล่าง (The Toggle Chip Rule): เลือก = primary filled,
+                          ไม่เลือก = outlined สีปกติ ยกเว้น "เกินกำหนด" ที่เป็นตัวนับปัญหาด้วย: > 0 ใช้ warning + ไอคอน
+                          (The Issue Count Rule — บน card 5.28 / 7.22, hover 6.11 / 7.72) */}
+                      <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1, mt: 2 }}>
+                        {(
+                          [
+                            ['in_plan', 'ต้องจ่ายทั้งหมด'],
+                            ['unpaid', 'ยังไม่จ่าย'],
+                            ['overdue', 'เกินกำหนด'],
+                            ['partial', 'จ่ายบางส่วน'],
+                            ['paid', 'จ่ายแล้ว'],
+                          ] as const
+                        ).map(([status, label]) => {
+                          const on = chipOn(status);
+                          const issue = status === 'overdue' && overdueCount > 0 && !on;
                           return (
-                            <TableRow key={item.id} hover selected={isSelected}>
-                              {/* เลือกผ่าน checkbox เท่านั้น ไม่ใช่คลิกทั้งแถว — แถวมีปุ่มจัดการอยู่แล้ว คลิกพลาดจะเลือกแถวโดยไม่ตั้งใจ */}
-                              <TableCell padding="checkbox" sx={{ py: 0.5, px: 1 }}>
-                                <Checkbox
-                                  checked={isSelected}
-                                  onChange={() => toggleSelected(item.id)}
-                                  slotProps={{ input: { 'aria-label': `เลือก ${item.name}` } }}
-                                />
-                              </TableCell>
-                              <TableCell>{KIND_LABEL[item.kind]}</TableCell>
-                              <TableCell>
-                                {item.name}
-                                {item.recurring_rule_id != null && (
-                                  <Chip size="small" label="ประจำ" variant="outlined" sx={{ ml: 1 }} />
-                                )}
-                              </TableCell>
-                              <TableCell>{item.category_name ?? '—'}</TableCell>
-                              <TableCell sx={dataTextSx}>{item.due_date ? formatDate(item.due_date) : '—'}</TableCell>
-                              <TableCell align="right">
-                                <Money satang={item.planned_amount_satang} />
-                              </TableCell>
-                              <TableCell align="right">
-                                {item.paid_satang > 0 ? <Money satang={item.paid_satang} /> : '—'}
-                              </TableCell>
-                              <TableCell>
-                                <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
-                                  <PaymentStatusChip state={item.payment_state} />
-                                  {/* ยอดประมาณการไม่มีสถานะ partial แล้ว สถานะจึงไม่บอกว่ายอดจริงต่าง
-                                      จากที่เดาไว้เท่าไร ต้องโชว์ตรงนี้ — คิดสดจาก paid − planned ไม่มี
-                                      field ใหม่จาก API ไม่ใส่สี เพราะสูง/ต่ำกว่าประมาณไม่ใช่ดี/ร้าย
-                                      (เหตุผลเดียวกับ comment ใน PaymentStatusChip.tsx)
-
-                                      ข้าม item ที่ผูก income_record: `planned_amount_satang` ของมันคือ
-                                      ยอดเต็ม แต่ payment คือยอดสุทธิ ส่วนต่างจึงเป็นรายการหัก ไม่ใช่
-                                      การประมาณคลาด — ยอดเต็ม/หัก/สุทธิ ดูได้ในตาราง "รายได้และรายการหัก" */}
-                                  {item.amount_mode === 'estimated' &&
-                                    item.income_record_id == null &&
-                                    item.paid_satang > 0 &&
-                                    item.paid_satang !== item.planned_amount_satang && (
-                                      <Typography variant="caption" color="text.secondary">
-                                        {item.paid_satang < item.planned_amount_satang
-                                          ? 'ต่ำกว่าประมาณ '
-                                          : 'สูงกว่าประมาณ '}
-                                        <Money satang={Math.abs(item.paid_satang - item.planned_amount_satang)} />
-                                      </Typography>
-                                    )}
-                                </Stack>
-                              </TableCell>
-                              <TableCell align="right">
-                                <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end', alignItems: 'center' }}>
-                                  {/* "จ่ายแล้ว" เป็นปุ่มของรายจ่าย/เงินกันไว้เท่านั้น — เงินเข้าต้องบันทึกที่
-                                      "รายได้และรายการหัก" เพื่อแยกยอดเต็มออกจากยอดสุทธิ (ADR-0002 ข้อ 5)
-                                      เดิมปุ่มนี้กดบนรายการรายได้ได้ แล้วประกาศจ่ายยอดสุทธิที่เข้าบัญชีจริง
-                                      (26,125) ไปเทียบกับยอดเต็มตามแผน (27,000) → ค้าง "จ่ายบางส่วน"
-                                      รายการหักจากเงินเดือนไม่มีปุ่มอะไรเลย เงินไม่ได้ออกจากบัญชีเรา
-                                      มันขึ้น "หักจากรายได้" เองเมื่อถูกผูกจากฟอร์มรายได้
-
-                                      เงื่อนไข `paid_satang === 0`: แถวที่ยังมีประกาศจ่ายค้างอยู่ต้องเหลือ
-                                      ปุ่ม "จ่ายแล้ว" ไว้ เพราะปุ่มยกเลิกการประกาศจ่ายอยู่ใน modal นั้น
-                                      ที่เดียว ถ้าสลับเป็นปุ่มบันทึกรายได้ทั้งหมด จะยกเลิกของเก่าไม่ได้ และ
-                                      dropdown ในฟอร์มรายได้ซ่อนรายการที่ยังมี payment อยู่ = ตัน
-                                      ยกเลิกแล้ว paid_satang กลับเป็น 0 ปุ่มจะสลับเป็นปุ่มบันทึกรายได้ให้เอง
-                                      ปุ่มนั้นเปิดฟอร์มรายได้ที่เชื่อมแถวนี้ไว้แล้วทันที ไม่ต้องเลื่อนไปหาเอง
-
-                                      key แยกสองปุ่ม: ไม่มี key React จะใช้ <button> เดิมต่อแล้วแค่ disable
-                                      หลังบันทึกรายได้ focus จึงค้างบนปุ่ม disabled แทนที่จะตกไปที่ body
-                                      ให้ effect ของ incomeChangedRef ส่งต่อ */}
-                                  {item.kind === 'income' && item.income_record_id == null && item.paid_satang === 0 ? (
-                                    <Button key="income" size="small" startIcon={<PaidRounded />} onClick={() => {
-                                        incomeChangedRef.current = true;
-                                        incomeRef.current?.openNewFor(item.id);
-                                      }} disabled={closed || inactive || bulkRunning} sx={{ whiteSpace: 'nowrap' }}>
-                                      บันทึกรายได้เต็ม
-                                    </Button>
-                                  ) : item.kind === 'payroll_deduction' &&
-                                    item.income_record_id == null &&
-                                    item.paid_satang === 0 ? null : (
-                                    <Button
-                                      key="pay"
-                                      size="small"
-                                      startIcon={<PaidRounded />}
-                                      disabled={closed || inactive || item.income_record_id != null || item.installment_due_id != null || bulkRunning}
-                                      onClick={() => openPayment(item)}
-                                      sx={{ whiteSpace: 'nowrap' }}
-                                    >
-                                      จ่ายแล้ว
-                                    </Button>
-                                  )}
-                                  <RowIconButton
-                                    label="แก้ไข"
-                                    disabled={closed || item.income_record_id != null || item.installment_due_id != null || bulkRunning}
-                                    onClick={() => openEditItem(item)}
-                                  >
-                                    <EditRounded fontSize="small" />
-                                  </RowIconButton>
-                                  {inactive ? (
-                                    <RowIconButton
-                                      label="เอากลับเข้าแผน"
-                                      color="inherit"
-                                      disabled={closed || item.income_record_id != null || item.installment_due_id != null || bulkRunning}
-                                      onClick={() =>
-                                        void run(
-                                          () => patch(`/api/monthly-plan-items/${item.id}`, { explicit_status: 'active' }),
-                                          'เอารายการกลับเข้าแผนแล้ว',
-                                        )
-                                      }
-                                    >
-                                      <ReplayRounded fontSize="small" />
-                                    </RowIconButton>
-                                  ) : (
-                                    <RowIconButton
-                                      label="ข้าม"
-                                      color="inherit"
-                                      disabled={closed || item.income_record_id != null || item.installment_due_id != null || bulkRunning}
-                                      onClick={() =>
-                                        void run(
-                                          () => post(`/api/monthly-plan-items/${item.id}/skip`, {}),
-                                          'ข้ามรายการนี้แล้ว',
-                                        )
-                                      }
-                                    >
-                                      <SkipNextRounded fontSize="small" />
-                                    </RowIconButton>
-                                  )}
-                                  <RowIconButton
-                                    label="ลบ"
-                                    color="error"
-                                    disabled={closed || item.income_record_id != null || item.installment_due_id != null || bulkRunning}
-                                    onClick={() =>
-                                      void run(
-                                        () => del(`/api/monthly-plan-items/${item.id}`),
-                                        'ลบรายการแล้ว',
-                                      )
-                                    }
-                                  >
-                                    <DeleteOutlineRounded fontSize="small" />
-                                  </RowIconButton>
-                                  {item.income_record_id != null && <Typography variant="body2" color="text.secondary">จัดการในรายได้ด้านบน</Typography>}
-                                  {item.installment_due_id != null && <Button component={Link} to="/installments" sx={{ whiteSpace: 'nowrap' }}>ดูแผนผ่อน</Button>}
-                                </Stack>
-                              </TableCell>
-                            </TableRow>
+                            <Chip
+                              key={status}
+                              label={`${label} ${chipCount(status)}`}
+                              icon={status === 'overdue' && overdueCount > 0 ? <WarningAmberRounded /> : undefined}
+                              variant={on ? 'filled' : 'outlined'}
+                              color={on ? 'primary' : issue ? 'warning' : 'default'}
+                              aria-pressed={on}
+                              onClick={() => toggleChip(status)}
+                              sx={{ minHeight: 40, ...dataTextSx, fontWeight: 600 }}
+                            />
                           );
                         })}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                )}
-              </>
-            )}
-          </Box>
-
-          <Box component="section" aria-labelledby="plan-rules-heading">
-            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
-              <Typography variant="h2" id="plan-rules-heading" sx={{ fontSize: '1.25rem' }}>
-                รายการประจำ
-              </Typography>
-              <Button variant="outlined" size="small" startIcon={<AddRounded />} onClick={openAddRule}>
-                เพิ่มรายการประจำ
-              </Button>
-            </Stack>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, ...descriptionSx }}>
-              ระบบสร้างรายการให้ทุกเดือนที่เปิดดู การแก้กฎมีผลกับเดือนที่ยังไม่ได้สร้างรายการเท่านั้น
-              ไม่ย้อนแก้เดือนที่ตรวจหรือปิดไปแล้ว
-            </Typography>
-            {activeRules.length === 0 ? (
-              <EmptyState
-                icon={<EventRepeatRounded sx={{ fontSize: 40 }} />}
-                title="ยังไม่มีรายการประจำ"
-                description="เช่น ค่าเช่าบ้านทุกวันที่ 5 หรือเบี้ยประกันทุกปี — สร้างครั้งเดียวแล้วระบบสร้างรายการให้ทุกเดือน"
-              />
-            ) : (
-              <>
-                <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1.5, mb: 1.5, alignItems: 'center' }}>
-                  <TextField select size="small" label="ประเภท" value={ruleFilter.kind} onChange={setRuleFilterField('kind')} sx={{ minWidth: 160, flexGrow: { xs: 1, sm: 0 } }}>
-                    <MenuItem value="">ทุกประเภท</MenuItem>
-                    {KINDS.map((k) => (
-                      <MenuItem key={k.value} value={k.value}>
-                        {k.label}
-                      </MenuItem>
-                    ))}
-                  </TextField>
-                  <TextField select size="small" label="หมวด" value={ruleFilter.category} onChange={setRuleFilterField('category')} sx={{ minWidth: 160, flexGrow: { xs: 1, sm: 0 } }}>
-                    <MenuItem value="">ทุกหมวด</MenuItem>
-                    {ruleCategoryOptions.map(([id, name]) => (
-                      <MenuItem key={id} value={id}>
-                        {name}
-                      </MenuItem>
-                    ))}
-                    <MenuItem value={NO_CATEGORY}>ไม่ระบุ</MenuItem>
-                  </TextField>
-                  <TextField select size="small" label="ชนิดยอด" value={ruleFilter.amount_mode} onChange={setRuleFilterField('amount_mode')} sx={{ minWidth: 160, flexGrow: { xs: 1, sm: 0 } }}>
-                    <MenuItem value="">ทุกชนิด</MenuItem>
-                    <MenuItem value="fixed">ยอดคงที่</MenuItem>
-                    <MenuItem value="estimated">ยอดประมาณการ</MenuItem>
-                  </TextField>
-                  {ruleFilterActive && (
-                    <Button color="inherit" onClick={() => setRuleFilter(EMPTY_RULE_FILTER)}>
-                      ล้างตัวกรอง
-                    </Button>
+                      </Stack>
+                    </>
                   )}
-                  <Typography variant="body2" color="text.secondary" role="status">
-                    แสดง {visibleRules.length} จาก {activeRules.length} รายการ
-                  </Typography>
-                </Stack>
-                {visibleRules.length === 0 ? (
-                  <Paper variant="outlined" sx={{ p: 3, textAlign: 'center' }}>
-                    <Typography color="text.secondary" sx={descriptionSx}>
-                      ไม่มีรายการประจำที่ตรงกับตัวกรอง
-                    </Typography>
-                    <Button sx={{ mt: 1.5 }} onClick={() => setRuleFilter(EMPTY_RULE_FILTER)}>
-                      ล้างตัวกรอง
-                    </Button>
-                  </Paper>
-                ) : (
-                  <TableContainer component={Paper} variant="outlined" tabIndex={0}>
-                    <Table size="small" aria-label="รายการประจำ" sx={{ minWidth: 800, ...COMPACT_CELLS }}>
-                      <TableHead>
-                        <TableRow>
-                          <SortCell sortKey="kind" sort={ruleSort} onSort={(k) => setRuleSort((s) => nextSort(s, k))}>ประเภท</SortCell>
-                          <SortCell sortKey="name" sort={ruleSort} onSort={(k) => setRuleSort((s) => nextSort(s, k))}>ชื่อ</SortCell>
-                          <SortCell sortKey="category" sort={ruleSort} onSort={(k) => setRuleSort((s) => nextSort(s, k))}>หมวด</SortCell>
-                          <SortCell sortKey="frequency" sort={ruleSort} onSort={(k) => setRuleSort((s) => nextSort(s, k))}>ความถี่</SortCell>
-                          <SortCell sortKey="start_date" sort={ruleSort} onSort={(k) => setRuleSort((s) => nextSort(s, k))}>ช่วงที่ใช้</SortCell>
-                          <SortCell sortKey="amount" sort={ruleSort} onSort={(k) => setRuleSort((s) => nextSort(s, k))} align="right">ยอด</SortCell>
-                          <TableCell align="right">จัดการ</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {visibleRules.map((rule) => (
-                          <TableRow key={rule.id} hover>
-                            <TableCell>{KIND_LABEL[rule.kind]}</TableCell>
-                            <TableCell>{rule.name}</TableCell>
-                            <TableCell>{rule.category_name ?? '—'}</TableCell>
-                            <TableCell>
-                              ทุก {rule.frequency_interval} {UNITS.find((u) => u.value === rule.frequency_unit)?.label}
-                              {rule.anchor_day != null && ` (วันที่ ${rule.anchor_day})`}
-                            </TableCell>
-                            <TableCell sx={dataTextSx}>
-                              {formatDate(rule.start_date)} – {rule.end_date ? formatDate(rule.end_date) : 'ไม่กำหนด'}
-                            </TableCell>
-                            <TableCell align="right">
-                              <Money satang={rule.amount_satang} />
-                              {rule.amount_mode === 'estimated' && (
-                                <Chip size="small" label="ประมาณการ" variant="outlined" sx={{ ml: 1 }} />
-                              )}
-                            </TableCell>
-                            <TableCell align="right">
-                              <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end', alignItems: 'center' }}>
-                                <RowIconButton label="แก้ไข" onClick={() => openEditRule(rule)}>
-                                  <EditRounded fontSize="small" />
-                                </RowIconButton>
-                                {/* ไม่มี unarchive ใน API (ดู docs/status.md) ย้อนกลับจากหน้าจอไม่ได้ ต้องถามก่อน */}
-                                <RowIconButton label="เลิกใช้" color="error" onClick={() => setArchivingRule(rule)}>
-                                  <ArchiveOutlined fontSize="small" />
-                                </RowIconButton>
-                              </Stack>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                )}
-              </>
+                </Paper>
+              </Box>
             )}
-          </Box>
-        </Stack>
-      )}
+
+            <Box component="section" aria-labelledby="plan-items-heading">
+              <Typography variant="h2" id="plan-items-heading" sx={{ fontSize: '1.25rem', mb: 1.5 }}>
+                รายการของเดือนนี้
+              </Typography>
+              {/* อยู่นอกเงื่อนไขของตาราง ให้เห็นแม้ตัวกรองซ่อนทุกแถว */}
+              {bulkFailures && (
+                <Alert severity="error" onClose={() => setBulkFailures(null)} closeText="ปิด" sx={{ mb: 1.5 }}>
+                  <AlertTitle>
+                    {bulkFailures.verb}สำเร็จ {bulkFailures.total - bulkFailures.failed.length} จาก {bulkFailures.total} รายการ —
+                    ไม่สำเร็จ {bulkFailures.failed.length} รายการ
+                  </AlertTitle>
+                  <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
+                    {bulkFailures.failed.map(({ item, message }) => (
+                      <li key={item.id}>
+                        {item.name} — {message}
+                      </li>
+                    ))}
+                  </Box>
+                  <Typography variant="body2" sx={{ mt: 1 }}>
+                    รายการที่ไม่สำเร็จยังเลือกค้างไว้ แก้แล้วกดซ้ำได้
+                  </Typography>
+                </Alert>
+              )}
+              {!planReady ? (
+                <TableSkeleton rows={6} />
+              ) : items.length === 0 ? (
+                <EmptyState
+                  icon={<EventRepeatRounded sx={{ fontSize: 40 }} />}
+                  title="ยังไม่มีรายการในแผนเดือนนี้"
+                  description="เพิ่มรายการเฉพาะเดือน คัดลอกจากเดือนก่อน หรือสร้างรายการประจำเพื่อให้ระบบสร้างให้ทุกเดือน"
+                  action={
+                    <Button variant="contained" startIcon={<AddRounded />} disabled={closed} onClick={openAddItem}>
+                      เพิ่มรายการแรก
+                    </Button>
+                  }
+                />
+              ) : (
+                <>
+                  <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1.5, mb: 1.5, alignItems: 'center' }}>
+                    <TextField select size="small" label="ประเภท" value={itemFilter.kind} onChange={setItemFilterField('kind')} sx={{ minWidth: 160, flexGrow: { xs: 1, sm: 0 } }}>
+                      <MenuItem value="">ทุกประเภท</MenuItem>
+                      {KINDS.map((k) => (
+                        <MenuItem key={k.value} value={k.value}>
+                          {k.label}
+                        </MenuItem>
+                      ))}
+                    </TextField>
+                    <TextField select size="small" label="หมวด" value={itemFilter.category} onChange={setItemFilterField('category')} sx={{ minWidth: 160, flexGrow: { xs: 1, sm: 0 } }}>
+                      <MenuItem value="">ทุกหมวด</MenuItem>
+                      {itemCategoryOptions.map(([id, name]) => (
+                        <MenuItem key={id} value={id}>
+                          {name}
+                        </MenuItem>
+                      ))}
+                      <MenuItem value={NO_CATEGORY}>ไม่ระบุ</MenuItem>
+                    </TextField>
+                    <TextField select size="small" label="สถานะ" value={itemFilter.status} onChange={setItemFilterField('status')} sx={{ minWidth: 200, flexGrow: { xs: 1, sm: 0 } }}>
+                      <MenuItem value="">ทุกสถานะ</MenuItem>
+                      <MenuItem value="in_plan">อยู่ในแผน (ไม่รวมข้าม/ยกเลิก)</MenuItem>
+                      {STATUS_ORDER.map((s) => (
+                        <MenuItem key={s} value={s}>
+                          {PAYMENT_STATE_LABEL[s]}
+                        </MenuItem>
+                      ))}
+                    </TextField>
+                    {itemFilterActive && (
+                      <Button color="inherit" onClick={() => setItemFilter(EMPTY_ITEM_FILTER)}>
+                        ล้างตัวกรอง
+                      </Button>
+                    )}
+                    <Typography variant="body2" color="text.secondary" role="status">
+                      แสดง {visibleItems.length} จาก {items.length} รายการ
+                    </Typography>
+                  </Stack>
+                  {visibleItems.length === 0 ? (
+                    <Paper variant="outlined" sx={{ p: 3, textAlign: 'center' }}>
+                      <Typography color="text.secondary" sx={descriptionSx}>
+                        ไม่มีรายการที่ตรงกับตัวกรอง
+                      </Typography>
+                      <Button sx={{ mt: 1.5 }} onClick={() => setItemFilter(EMPTY_ITEM_FILTER)}>
+                        ล้างตัวกรอง
+                      </Button>
+                    </Paper>
+                  ) : (
+                    // < md เหลือ checkbox · รายการ · ตามแผน — ประเภท/หมวด/ครบกำหนด/จ่ายแล้วพับเป็นบรรทัดรอง สถานะและปุ่มอยู่ใต้ชื่อ
+                    // ที่ 320px: กล่อง 286 − checkbox 50 − ยอด ~94 ≈ ชื่อ 142px (375px ≈ 197px) ไม่ต้องเลื่อนแนวนอน
+                    // ≥ md คอลัมน์ครบ 9 ช่อง และคอลัมน์จัดการ padding 6px ชดเชย spacing ระหว่างปุ่ม ตารางยังพอดีที่ 1200px
+                    <TableContainer component={Paper} variant="outlined" tabIndex={0} role="region" aria-label="ตารางรายการของเดือนนี้">
+                      {/* แถวที่เลือกไม่ใส่ `selected`: พื้น sidebar-accent ทำชิป ปุ่ม และข้อความรองในแถวไม่ผ่าน (มืด 1.15–1.47)
+                          checkbox บอกสถานะแทน (เหมือนหน้าธุรกรรม) */}
+                      <Table
+                        size="small"
+                        aria-label="รายการในแผนเดือนนี้"
+                        sx={{ minWidth: { md: 880 }, ...COMPACT_CELLS, '& .MuiTableCell-root:not(.MuiTableCell-paddingCheckbox):last-child': { px: 0.75 } }}
+                      >
+                        <TableHead>
+                          <TableRow>
+                            <TableCell padding="checkbox" sx={{ py: 0.5, px: { xs: 0.5, md: 1 } }}>
+                              <Checkbox
+                                id="plan-select-all"
+                                checked={allVisibleSelected}
+                                indeterminate={selectedVisibleCount > 0 && !allVisibleSelected}
+                                onChange={toggleAllVisible}
+                                slotProps={{ input: { 'aria-label': 'เลือกทุกรายการที่แสดงอยู่' } }}
+                              />
+                            </TableCell>
+                            <SortCell sortKey="kind" sort={itemSort} onSort={(k) => setItemSort((s) => nextSort(s, k))} sx={MD_UP}>ประเภท</SortCell>
+                            <SortCell sortKey="name" sort={itemSort} onSort={(k) => setItemSort((s) => nextSort(s, k))}>รายการ</SortCell>
+                            <SortCell sortKey="category" sort={itemSort} onSort={(k) => setItemSort((s) => nextSort(s, k))} sx={MD_UP}>หมวด</SortCell>
+                            <SortCell sortKey="due_date" sort={itemSort} onSort={(k) => setItemSort((s) => nextSort(s, k))} sx={MD_UP}>ครบกำหนด</SortCell>
+                            <SortCell sortKey="planned" sort={itemSort} onSort={(k) => setItemSort((s) => nextSort(s, k))} align="right">ตามแผน</SortCell>
+                            <SortCell sortKey="paid" sort={itemSort} onSort={(k) => setItemSort((s) => nextSort(s, k))} align="right" sx={MD_UP}>จ่ายแล้ว</SortCell>
+                            <SortCell sortKey="status" sort={itemSort} onSort={(k) => setItemSort((s) => nextSort(s, k))} sx={MD_UP}>สถานะ</SortCell>
+                            <TableCell align="right" sx={MD_UP}>จัดการ</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {visibleItems.map((item) => {
+                            const isSelected = selected.has(item.id);
+                            // ยอดประมาณการไม่มีสถานะ partial สถานะจึงไม่บอกว่ายอดจริงต่างจากที่เดาไว้เท่าไร — คิดสดจาก
+                            // paid − planned ไม่ใส่สี เพราะสูง/ต่ำกว่าประมาณไม่ใช่ดี/ร้าย ข้ามแถวที่ผูก income_record:
+                            // planned คือยอดเต็ม แต่ payment คือยอดสุทธิ ส่วนต่างคือรายการหัก ไม่ใช่การประมาณคลาด
+                            const estimateNote =
+                              item.amount_mode === 'estimated' &&
+                              item.income_record_id == null &&
+                              item.paid_satang > 0 &&
+                              item.paid_satang !== item.planned_amount_satang ? (
+                                <>
+                                  {item.paid_satang < item.planned_amount_satang ? 'ต่ำกว่าประมาณ ' : 'สูงกว่าประมาณ '}
+                                  <Money satang={Math.abs(item.paid_satang - item.planned_amount_satang)} />
+                                </>
+                              ) : null;
+                            // ส่วนใหญ่ของแผนมาจากรายการประจำ — ป้ายข้อยกเว้น ("ครั้งเดียว") แทนป้าย "ประจำ" เกือบทุกแถว
+                            const oneOff = item.recurring_rule_id == null && item.installment_due_id == null;
+                            return (
+                              <TableRow key={item.id} hover>
+                                {/* เลือกผ่าน checkbox เท่านั้น ไม่ใช่คลิกทั้งแถว — แถวมีปุ่มจัดการอยู่แล้ว คลิกพลาดจะเลือกแถวโดยไม่ตั้งใจ */}
+                                <TableCell padding="checkbox" sx={{ py: 0.5, px: { xs: 0.5, md: 1 } }}>
+                                  <Checkbox
+                                    checked={isSelected}
+                                    onChange={() => toggleSelected(item.id)}
+                                    slotProps={{ input: { 'aria-label': `เลือก ${item.name}` } }}
+                                  />
+                                </TableCell>
+                                <TableCell sx={MD_UP}>{KIND_LABEL[item.kind]}</TableCell>
+                                <TableCell sx={NAME_CELL}>
+                                  <Box title={item.name} sx={CLAMP_2}>{item.name}</Box>
+                                  <SecondaryLine
+                                    parts={[
+                                      ...(oneOff ? [{ node: 'ครั้งเดียว', desktop: true }] : []),
+                                      { node: KIND_LABEL[item.kind] },
+                                      ...(item.category_name ? [{ node: item.category_name }] : []),
+                                      ...(item.due_date ? [{ node: <Box component="span" sx={dataTextSx}>ครบ {formatDayMonth(item.due_date)}</Box> }] : []),
+                                      ...(item.paid_satang > 0 ? [{ node: <>จ่ายแล้ว <Money satang={item.paid_satang} /></> }] : []),
+                                      ...(estimateNote ? [{ node: estimateNote }] : []),
+                                    ]}
+                                  />
+                                  <Stack direction="row" sx={{ ...BELOW_MD, flexWrap: 'wrap', gap: 0.5, mt: 0.75, alignItems: 'center' }}>
+                                    <PaymentStatusChip state={item.payment_state} kind={item.kind} />
+                                    {rowActions(item, true)}
+                                  </Stack>
+                                </TableCell>
+                                <TableCell sx={{ ...MD_UP, ...dataTextSx }}>{item.category_name}</TableCell>
+                                <TableCell sx={{ ...MD_UP, ...dataTextSx }}>{item.due_date && formatDate(item.due_date)}</TableCell>
+                                <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                                  <Money satang={item.planned_amount_satang} />
+                                </TableCell>
+                                {/* ช่องที่ไม่มีค่าเว้นว่าง ไม่ใส่ "—" — หัวคอลัมน์บอกความหมายอยู่แล้ว */}
+                                <TableCell align="right" sx={{ ...MD_UP, whiteSpace: 'nowrap' }}>
+                                  {item.paid_satang > 0 && <Money satang={item.paid_satang} />}
+                                </TableCell>
+                                <TableCell sx={MD_UP}>
+                                  <Stack spacing={0.5} sx={{ alignItems: 'flex-start' }}>
+                                    <PaymentStatusChip state={item.payment_state} kind={item.kind} />
+                                    {estimateNote && (
+                                      <Typography variant="caption" color="text.secondary">
+                                        {estimateNote}
+                                      </Typography>
+                                    )}
+                                  </Stack>
+                                </TableCell>
+                                <TableCell align="right" sx={MD_UP}>
+                                  <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end', alignItems: 'center' }}>
+                                    {rowActions(item, false)}
+                                  </Stack>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  )}
+                </>
+              )}
+            </Box>
+
+            {/* โหลดข้อมูลของตัวเอง (skeleton ของตัวเอง) — ระหว่างแผนยังไม่มาถือว่าแก้ไม่ได้ กันบันทึกรายได้ผูกกับรายการของเดือนผิด */}
+            <IncomeSection
+              key={month}
+              ref={incomeRef}
+              month={month}
+              closed={!planReady || closed}
+              items={items}
+              onChanged={() => {
+                setNotice({ message: 'บันทึกรายได้แล้ว', severity: 'success' });
+                return reload(true);
+              }}
+            />
+          </>
+        )}
+
+        {/* รายการประจำไม่ผูกกับเดือน ใช้ไม่บ่อย จึงพับไว้เป็นค่าเริ่มต้น จำต่อเครื่อง — หัวข้อเป็นปุ่ม disclosure
+            (aria-expanded) ส่วนปุ่มเพิ่มและความล้มเหลวอยู่นอกส่วนที่พับ ให้เห็นเสมอ */}
+        <Box component="section" aria-labelledby="plan-rules-heading">
+          <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, mb: 1.5 }}>
+            <Typography variant="h2" id="plan-rules-heading" sx={{ fontSize: '1.25rem' }}>
+              <Button
+                color="inherit"
+                aria-expanded={rulesOpen}
+                aria-controls="plan-rules-panel"
+                onClick={toggleRules}
+                endIcon={
+                  <ExpandMoreRounded
+                    sx={{
+                      transform: rulesOpen ? 'rotate(180deg)' : 'none',
+                      transition: (theme) => theme.transitions.create('transform'),
+                      '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
+                    }}
+                  />
+                }
+                sx={{ font: 'inherit', ml: -1, px: 1 }}
+              >
+                รายการประจำ{rulesError || rulesPending ? '' : ` (${activeRules.length})`}
+              </Button>
+            </Typography>
+            <Button variant="outlined" size="small" startIcon={<AddRounded />} onClick={openAddRule}>
+              เพิ่มรายการประจำ
+            </Button>
+          </Stack>
+          {rulesError && <LoadError message={rulesError} onRetry={() => void reload(true)} />}
+          <Collapse in={rulesOpen && !rulesError}>
+            <Box id="plan-rules-panel">
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, ...descriptionSx }}>
+                ระบบสร้างรายการให้ทุกเดือนที่เปิดดู การแก้กฎมีผลกับเดือนที่ยังไม่ได้สร้างรายการเท่านั้น
+                ไม่ย้อนแก้เดือนที่ตรวจหรือปิดไปแล้ว
+              </Typography>
+              {rulesPending ? (
+                <TableSkeleton rows={3} />
+              ) : activeRules.length === 0 ? (
+                <EmptyState
+                  icon={<EventRepeatRounded sx={{ fontSize: 40 }} />}
+                  title="ยังไม่มีรายการประจำ"
+                  description="เช่น ค่าเช่าบ้านทุกวันที่ 5 หรือเบี้ยประกันทุกปี — สร้างครั้งเดียวแล้วระบบสร้างรายการให้ทุกเดือน"
+                />
+              ) : (
+                <>
+                  <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1.5, mb: 1.5, alignItems: 'center' }}>
+                    <TextField select size="small" label="ประเภท" value={ruleFilter.kind} onChange={setRuleFilterField('kind')} sx={{ minWidth: 160, flexGrow: { xs: 1, sm: 0 } }}>
+                      <MenuItem value="">ทุกประเภท</MenuItem>
+                      {KINDS.map((k) => (
+                        <MenuItem key={k.value} value={k.value}>
+                          {k.label}
+                        </MenuItem>
+                      ))}
+                    </TextField>
+                    <TextField select size="small" label="หมวด" value={ruleFilter.category} onChange={setRuleFilterField('category')} sx={{ minWidth: 160, flexGrow: { xs: 1, sm: 0 } }}>
+                      <MenuItem value="">ทุกหมวด</MenuItem>
+                      {ruleCategoryOptions.map(([id, name]) => (
+                        <MenuItem key={id} value={id}>
+                          {name}
+                        </MenuItem>
+                      ))}
+                      <MenuItem value={NO_CATEGORY}>ไม่ระบุ</MenuItem>
+                    </TextField>
+                    <TextField select size="small" label="ชนิดยอด" value={ruleFilter.amount_mode} onChange={setRuleFilterField('amount_mode')} sx={{ minWidth: 160, flexGrow: { xs: 1, sm: 0 } }}>
+                      <MenuItem value="">ทุกชนิด</MenuItem>
+                      <MenuItem value="fixed">ยอดคงที่</MenuItem>
+                      <MenuItem value="estimated">ยอดประมาณการ</MenuItem>
+                    </TextField>
+                    {ruleFilterActive && (
+                      <Button color="inherit" onClick={() => setRuleFilter(EMPTY_RULE_FILTER)}>
+                        ล้างตัวกรอง
+                      </Button>
+                    )}
+                    <Typography variant="body2" color="text.secondary" role="status">
+                      แสดง {visibleRules.length} จาก {activeRules.length} รายการ
+                    </Typography>
+                  </Stack>
+                  {visibleRules.length === 0 ? (
+                    <Paper variant="outlined" sx={{ p: 3, textAlign: 'center' }}>
+                      <Typography color="text.secondary" sx={descriptionSx}>
+                        ไม่มีรายการประจำที่ตรงกับตัวกรอง
+                      </Typography>
+                      <Button sx={{ mt: 1.5 }} onClick={() => setRuleFilter(EMPTY_RULE_FILTER)}>
+                        ล้างตัวกรอง
+                      </Button>
+                    </Paper>
+                  ) : (
+                    // < md เหลือ ชื่อ · ยอด · จัดการ — ประเภท/หมวด/ความถี่/ช่วงที่ใช้พับเป็นบรรทัดรอง
+                    // ที่ 320px: กล่อง 286 − ยอด ~94 − ปุ่ม 2 × 40 + ช่องไฟ ~96 ≈ ชื่อ 96px (375px ≈ 151px)
+                    <TableContainer component={Paper} variant="outlined" tabIndex={0} role="region" aria-label="ตารางรายการประจำ">
+                      <Table size="small" aria-label="รายการประจำ" sx={{ minWidth: { md: 800 }, ...COMPACT_CELLS }}>
+                        <TableHead>
+                          <TableRow>
+                            <SortCell sortKey="kind" sort={ruleSort} onSort={(k) => setRuleSort((s) => nextSort(s, k))} sx={MD_UP}>ประเภท</SortCell>
+                            <SortCell sortKey="name" sort={ruleSort} onSort={(k) => setRuleSort((s) => nextSort(s, k))}>ชื่อ</SortCell>
+                            <SortCell sortKey="category" sort={ruleSort} onSort={(k) => setRuleSort((s) => nextSort(s, k))} sx={MD_UP}>หมวด</SortCell>
+                            <SortCell sortKey="frequency" sort={ruleSort} onSort={(k) => setRuleSort((s) => nextSort(s, k))} sx={MD_UP}>ความถี่</SortCell>
+                            <SortCell sortKey="start_date" sort={ruleSort} onSort={(k) => setRuleSort((s) => nextSort(s, k))} sx={MD_UP}>ช่วงที่ใช้</SortCell>
+                            <SortCell sortKey="amount" sort={ruleSort} onSort={(k) => setRuleSort((s) => nextSort(s, k))} align="right">ยอด</SortCell>
+                            <TableCell align="right">จัดการ</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {visibleRules.map((rule) => {
+                            const range = `${formatDate(rule.start_date)} – ${rule.end_date ? formatDate(rule.end_date) : 'ไม่กำหนด'}`;
+                            return (
+                              <TableRow key={rule.id} hover>
+                                <TableCell sx={MD_UP}>{KIND_LABEL[rule.kind]}</TableCell>
+                                <TableCell sx={NAME_CELL}>
+                                  <Box title={rule.name} sx={CLAMP_2}>{rule.name}</Box>
+                                  <SecondaryLine
+                                    parts={[
+                                      { node: KIND_LABEL[rule.kind] },
+                                      ...(rule.category_name ? [{ node: rule.category_name }] : []),
+                                      { node: frequencyLabel(rule) },
+                                      { node: <Box component="span" sx={dataTextSx}>{range}</Box> },
+                                    ]}
+                                  />
+                                </TableCell>
+                                <TableCell sx={MD_UP}>{rule.category_name}</TableCell>
+                                <TableCell sx={MD_UP}>{frequencyLabel(rule)}</TableCell>
+                                <TableCell sx={{ ...MD_UP, ...dataTextSx }}>{range}</TableCell>
+                                <TableCell align="right">
+                                  <Stack spacing={0.5} sx={{ alignItems: 'flex-end' }}>
+                                    <Money satang={rule.amount_satang} sx={{ whiteSpace: 'nowrap' }} />
+                                    {rule.amount_mode === 'estimated' && <Chip size="small" label="ประมาณการ" variant="outlined" />}
+                                  </Stack>
+                                </TableCell>
+                                <TableCell align="right" sx={{ py: 0.5 }}>
+                                  <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end', alignItems: 'center' }}>
+                                    <RowIconButton label={`แก้ไข ${rule.name}`} tooltip="แก้ไข" onClick={() => openEditRule(rule)}>
+                                      <EditRounded fontSize="small" />
+                                    </RowIconButton>
+                                    {/* ไม่มี unarchive ใน API (ดู docs/status.md) ย้อนกลับจากหน้าจอไม่ได้ ต้องถามก่อน */}
+                                    <RowIconButton label={`เลิกใช้ ${rule.name}`} tooltip="เลิกใช้" color="error" onClick={() => setArchivingRule(rule)}>
+                                      <ArchiveOutlined fontSize="small" />
+                                    </RowIconButton>
+                                  </Stack>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  )}
+                </>
+              )}
+            </Box>
+          </Collapse>
+        </Box>
+      </Stack>
 
       <Modal
         open={itemModalOpen}
         title={editingItemId == null ? 'เพิ่มรายการในแผน' : 'แก้ไขรายการในแผน'}
         onClose={() => setItemModalOpen(false)}
         busy={submitting}
+        dirty={JSON.stringify(itemForm) !== JSON.stringify(itemInitial)}
+        footer={{ formId: 'plan-item-form', submitLabel: 'บันทึก' }}
       >
         <Box
           component="form"
+          id="plan-item-form"
           onSubmit={(event) => {
             event.preventDefault();
             submitItem();
           }}
         >
           <Stack spacing={2.5}>
+            {refsAlert}
             <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 16rem), 1fr))' }}>
               <TextField
                 select
@@ -1283,8 +1421,7 @@ export default function MonthlyPlan() {
                 value={itemForm.amount_baht}
                 onChange={setItemField('amount_baht')}
                 required
-                error={itemForm.amount_baht !== '' && parseBahtToSatang(itemForm.amount_baht) == null}
-                helperText={itemForm.amount_baht !== '' && parseBahtToSatang(itemForm.amount_baht) == null ? 'กรอกเป็นตัวเลข ทศนิยมไม่เกิน 2 ตำแหน่ง' : ' '}
+                {...amountFieldHelp(itemForm.amount_baht)}
                 slotProps={{ htmlInput: { inputMode: 'decimal', sx: dataTextSx } }}
               />
               <TextField
@@ -1308,14 +1445,6 @@ export default function MonthlyPlan() {
               <TextField label="บันทึกเพิ่มเติม" value={itemForm.note} onChange={setItemField('note')} slotProps={{ htmlInput: { maxLength: 500 } }} />
             </Box>
             {formError && <Alert severity="error">{formError}</Alert>}
-            <Stack direction={{ xs: 'column-reverse', sm: 'row' }} spacing={1} sx={{ justifyContent: 'flex-end' }}>
-              <Button type="button" color="inherit" onClick={() => setItemModalOpen(false)} disabled={submitting}>
-                ยกเลิก
-              </Button>
-              <Button type="submit" variant="contained" disabled={submitting} aria-busy={submitting}>
-                {submitting ? 'กำลังบันทึก…' : 'บันทึก'}
-              </Button>
-            </Stack>
           </Stack>
         </Box>
       </Modal>
@@ -1325,15 +1454,19 @@ export default function MonthlyPlan() {
         title={editingRuleId == null ? 'เพิ่มรายการประจำ' : 'แก้ไขรายการประจำ'}
         onClose={() => setRuleModalOpen(false)}
         busy={submitting}
+        dirty={JSON.stringify(ruleForm) !== JSON.stringify(ruleInitial)}
+        footer={{ formId: 'plan-rule-form', submitLabel: 'บันทึก' }}
       >
         <Box
           component="form"
+          id="plan-rule-form"
           onSubmit={(event) => {
             event.preventDefault();
             submitRule();
           }}
         >
           <Stack spacing={2.5}>
+            {refsAlert}
             <Box component="fieldset" sx={{ m: 0, p: 0, minWidth: 0, border: 0 }}>
               <FormLabel component="legend" sx={{ mb: 1.5, color: 'text.primary', fontWeight: 600 }}>
                 รายการและยอด
@@ -1352,7 +1485,7 @@ export default function MonthlyPlan() {
                   value={ruleForm.amount_baht}
                   onChange={setRuleField('amount_baht')}
                   required
-                  error={ruleForm.amount_baht !== '' && parseBahtToSatang(ruleForm.amount_baht) == null}
+                  {...amountFieldHelp(ruleForm.amount_baht)}
                   slotProps={{ htmlInput: { inputMode: 'decimal', sx: dataTextSx } }}
                 />
                 <TextField select label="ชนิดยอด" value={ruleForm.amount_mode} onChange={setRuleField('amount_mode')}>
@@ -1367,14 +1500,15 @@ export default function MonthlyPlan() {
                 ความถี่
               </FormLabel>
               <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 16rem), 1fr))' }}>
+                {/* คำเดียวกับฟอร์มแผนผ่อน ("ทุกกี่รอบ" + "หน่วยรอบ") */}
                 <TextField
-                  label="ทุกกี่ครั้ง"
+                  label="ทุกกี่รอบ"
                   value={ruleForm.frequency_interval}
                   onChange={setRuleField('frequency_interval')}
                   required
                   slotProps={{ htmlInput: { inputMode: 'numeric', sx: dataTextSx } }}
                 />
-                <TextField select label="หน่วย" value={ruleForm.frequency_unit} onChange={setRuleField('frequency_unit')} required>
+                <TextField select label="หน่วยรอบ" value={ruleForm.frequency_unit} onChange={setRuleField('frequency_unit')} required>
                   {UNITS.map((u) => (
                     <MenuItem key={u.value} value={u.value}>
                       {u.label}
@@ -1431,14 +1565,6 @@ export default function MonthlyPlan() {
             </Box>
 
             {formError && <Alert severity="error">{formError}</Alert>}
-            <Stack direction={{ xs: 'column-reverse', sm: 'row' }} spacing={1} sx={{ justifyContent: 'flex-end' }}>
-              <Button type="button" color="inherit" onClick={() => setRuleModalOpen(false)} disabled={submitting}>
-                ยกเลิก
-              </Button>
-              <Button type="submit" variant="contained" disabled={submitting} aria-busy={submitting}>
-                {submitting ? 'กำลังบันทึก…' : 'บันทึก'}
-              </Button>
-            </Stack>
           </Stack>
         </Box>
       </Modal>
@@ -1448,19 +1574,22 @@ export default function MonthlyPlan() {
         title={`บันทึกการจ่าย — ${payingItemLive?.name ?? ''}`}
         onClose={() => setPayingItem(null)}
         busy={submitting}
+        dirty={JSON.stringify(paymentForm) !== JSON.stringify(paymentInitial)}
+        footer={{ formId: 'plan-payment-form', submitLabel: 'บันทึกการจ่าย' }}
       >
         <Box
           component="form"
+          id="plan-payment-form"
           onSubmit={(event) => {
             event.preventDefault();
             submitPayment();
           }}
         >
           <Stack spacing={2.5}>
-            <Alert severity="info" sx={descriptionSx}>
-              {/* ADR-0004: การประกาศจ่ายนับเป็นยอดจ่ายทันที ไม่มีขั้นรอจับคู่กับ statement */}
-              การบันทึกนี้เป็นการประกาศว่าจ่ายแล้ว ระบบ<strong>ไม่สร้างรายการธุรกรรมปลอม</strong> นับเป็นยอดจ่ายทันที
-              ไม่ผูกกับ statement จ่ายบางส่วนบันทึกหลายครั้งได้
+            {refsAlert}
+            {/* ADR-0004: การประกาศจ่ายนับเป็นยอดจ่ายทันที ไม่มีขั้นรอจับคู่กับ statement */}
+            <Alert severity="info" role="status" sx={descriptionSx}>
+              {PLAN_NOT_MATCHED_NOTE} · การบันทึกนี้ไม่สร้างรายการธุรกรรม จ่ายบางส่วนบันทึกหลายครั้งได้
             </Alert>
             <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 16rem), 1fr))' }}>
               <TextField
@@ -1468,7 +1597,7 @@ export default function MonthlyPlan() {
                 value={paymentForm.amount_baht}
                 onChange={setPaymentField('amount_baht')}
                 required
-                error={paymentForm.amount_baht !== '' && parseBahtToSatang(paymentForm.amount_baht) == null}
+                {...amountFieldHelp(paymentForm.amount_baht)}
                 slotProps={{ htmlInput: { inputMode: 'decimal', sx: dataTextSx } }}
               />
               <TextField
@@ -1514,20 +1643,22 @@ export default function MonthlyPlan() {
                             {p.status === 'cancelled' ? 'ยกเลิกแล้ว' : 'บันทึกไว้แล้ว'}
                           </Typography>
                         </Box>
+                        {/* ชื่อเต็ม ไม่ใช่ "ยกเลิก" ซ้ำกับปุ่มปิดฟอร์มด้านล่าง */}
                         {p.status !== 'cancelled' && (
                           <Button
                             size="small"
                             color="error"
                             startIcon={<DeleteOutlineRounded />}
-                            disabled={submitting}
-                            onClick={() =>
+                            aria-disabled={submitting}
+                            onClick={() => {
+                              if (submitting) return;
                               void run(
                                 () => patch(`/api/monthly-item-payments/${p.id}`, { status: 'cancelled' }),
                                 'ยกเลิกการประกาศจ่ายแล้ว',
-                              )
-                            }
+                              );
+                            }}
                           >
-                            ยกเลิก
+                            ยกเลิกการประกาศจ่าย
                           </Button>
                         )}
                       </Stack>
@@ -1538,14 +1669,6 @@ export default function MonthlyPlan() {
             )}
 
             {formError && <Alert severity="error">{formError}</Alert>}
-            <Stack direction={{ xs: 'column-reverse', sm: 'row' }} spacing={1} sx={{ justifyContent: 'flex-end' }}>
-              <Button type="button" color="inherit" onClick={() => setPayingItem(null)} disabled={submitting}>
-                ยกเลิก
-              </Button>
-              <Button type="submit" variant="contained" disabled={submitting} aria-busy={submitting}>
-                {submitting ? 'กำลังบันทึก…' : 'บันทึกการจ่าย'}
-              </Button>
-            </Stack>
           </Stack>
         </Box>
       </Modal>
@@ -1553,18 +1676,12 @@ export default function MonthlyPlan() {
       <ConfirmDialog
         open={closing}
         title="ปิดเดือนนี้"
-        description="ปิดเดือนแล้วจะแก้รายการไม่ได้จนกดเปิดอีกครั้ง ระบบจะเก็บภาพสรุปตอนปิดไว้ตรวจย้อนหลัง — statement ที่มาถึงภายหลังยังจับคู่กับการจ่ายที่ประกาศไว้ได้ตามปกติ"
+        description={`ปิดเดือนแล้วแก้รายการไม่ได้จนกดเปิดอีกครั้ง ระบบเก็บภาพสรุปตอนปิดไว้ตรวจย้อนหลัง · ${PLAN_NOT_MATCHED_NOTE}`}
         confirmLabel="ปิดเดือน"
         confirmColor="warning"
         busy={submitting}
         onClose={() => setClosing(false)}
-        onConfirm={() =>
-          void run(() => post(`/api/monthly-plans/${month}/close`, {}), 'ปิดเดือนแล้ว', () => {
-            setClosing(false);
-            // ปุ่ม "ปิดเดือนนี้" ถูกแทนด้วยปุ่มเปิดเดือนแล้ว element ต้นทางไม่มีอยู่ให้คืน focus
-            addItemButtonRef.current?.focus();
-          })
-        }
+        onConfirm={() => void run(() => post(`/api/monthly-plans/${month}/close`, {}), 'ปิดเดือนแล้ว', () => setClosing(false))}
       />
 
       <ConfirmDialog
@@ -1583,6 +1700,25 @@ export default function MonthlyPlan() {
             () => setArchivingRule(null),
           );
         }}
+        // แถวของกฎหายไปพร้อมปุ่มต้นทาง — MUI คืน focus ไม่ได้
+        onExited={rescueFocus}
+      />
+
+      {/* ลบทีละแถวต้องถามก่อนเสมอ (กู้คืนไม่ได้) — แถวหายไปพร้อมปุ่มต้นทาง จึงส่ง focus ต่อหลัง dialog ปิดสนิท */}
+      <ConfirmDialog
+        open={deletingItem != null}
+        title={`ลบ "${deletingItem?.name ?? ''}"`}
+        description="ลบแล้วกู้คืนไม่ได้ ต้องเพิ่มรายการใหม่เอง ถ้าแค่เดือนนี้ไม่ต้องจ่าย ใช้ ข้าม แทน"
+        confirmLabel="ลบรายการ"
+        confirmColor="error"
+        busy={submitting}
+        onClose={() => setDeletingItem(null)}
+        onConfirm={() => {
+          if (!deletingItem) return;
+          const target = deletingItem;
+          void run(() => del(`/api/monthly-plan-items/${target.id}`), 'ลบรายการแล้ว', () => setDeletingItem(null));
+        }}
+        onExited={rescueFocus}
       />
 
       <Modal
@@ -1590,18 +1726,21 @@ export default function MonthlyPlan() {
         title={`บันทึกการจ่าย ${payPlan.ok.length} รายการ`}
         onClose={() => setBulkAction(null)}
         busy={bulkRunning}
+        dirty={JSON.stringify([bulkPayForm, bulkAmounts]) !== bulkInitial}
+        footer={{ formId: 'plan-bulk-pay-form', submitLabel: `บันทึกการจ่าย ${payPlan.ok.length} รายการ` }}
       >
         <Box
           component="form"
+          id="plan-bulk-pay-form"
           onSubmit={(event) => {
             event.preventDefault();
             submitBulkPay();
           }}
         >
           <Stack spacing={2.5}>
-            <Alert severity="info" sx={descriptionSx}>
-              การบันทึกนี้เป็นการประกาศว่าจ่ายแล้ว ระบบ<strong>ไม่สร้างรายการธุรกรรมปลอม</strong> นับเป็นยอดจ่ายทันที
-              ไม่ผูกกับ statement
+            {refsAlert}
+            <Alert severity="info" role="status" sx={descriptionSx}>
+              {PLAN_NOT_MATCHED_NOTE} · การบันทึกนี้ไม่สร้างรายการธุรกรรม
             </Alert>
             <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 16rem), 1fr))' }}>
               <TextField
@@ -1627,7 +1766,6 @@ export default function MonthlyPlan() {
             <Stack spacing={2} component="ul" sx={{ m: 0, p: 0, listStyle: 'none' }}>
               {payPlan.ok.map((i) => {
                 const value = bulkAmounts[i.id] ?? '';
-                const invalid = value !== '' && parseBahtToSatang(value) == null;
                 return (
                   <Box
                     component="li"
@@ -1646,7 +1784,7 @@ export default function MonthlyPlan() {
                       value={value}
                       onChange={(e) => setBulkAmounts((prev) => ({ ...prev, [i.id]: e.target.value }))}
                       required
-                      error={invalid}
+                      {...amountFieldHelp(value)}
                       slotProps={{ htmlInput: { inputMode: 'decimal', 'aria-label': `ยอดที่จ่าย (บาท) — ${i.name}`, sx: dataTextSx } }}
                     />
                   </Box>
@@ -1670,20 +1808,12 @@ export default function MonthlyPlan() {
             )}
 
             {formError && <Alert severity="error">{formError}</Alert>}
-            <Stack direction={{ xs: 'column-reverse', sm: 'row' }} spacing={1} sx={{ justifyContent: 'flex-end' }}>
-              <Button type="button" color="inherit" onClick={() => setBulkAction(null)} disabled={bulkRunning}>
-                ยกเลิก
-              </Button>
-              <Button type="submit" variant="contained" disabled={bulkRunning || payPlan.ok.length === 0} aria-busy={bulkRunning}>
-                {bulkRunning ? 'กำลังบันทึก…' : `บันทึกการจ่าย ${payPlan.ok.length} รายการ`}
-              </Button>
-            </Stack>
           </Stack>
         </Box>
       </Modal>
 
-      {/* dialog แบบกลุ่มปิดตัวเองก่อนเริ่มยิง (ต่างจาก ConfirmDialog ตัวอื่นที่รอ busy) — ถ้ารอจนเสร็จ
-          แถบลอยที่เป็นต้นทางของ dialog อาจหายไปแล้ว MUI จะคืน focus ไม่ได้ ระหว่างรอแถบบอก "กำลังดำเนินการ…" */}
+      {/* dialog แบบกลุ่มปิดตัวเองก่อนเริ่มยิง (ต่างจาก ConfirmDialog ตัวอื่นที่รอ busy) — ปุ่มบนแถบเป็น aria-disabled
+          ระหว่างทำ MUI จึงคืน focus ให้ปุ่มต้นทางได้ และแถบบอก "กำลังดำเนินการ…" */}
       <ConfirmDialog
         open={bulkAction === 'skip'}
         title={`ข้าม ${skipPlan.ok.length} รายการในเดือนนี้`}
