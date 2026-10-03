@@ -41,6 +41,10 @@ export type Bank = {
 // reauth_required_at มีค่า = Google ปฏิเสธ refresh token (invalid_grant) ต้องเชื่อม Gmail ใหม่ผ่าน /auth/google?reconnect=<id>
 export type EmailAccount = { id: number; email: string; last_synced_at: string | null; reauth_required_at: string | null };
 
+// POST /api/email-accounts/:id/sync — รอจนซิงก์จบแล้วตอบสรุป · 409 = ต้องเชื่อม Gmail ใหม่ · 502 = Gmail ขัดข้องชั่วคราว
+// กล่องนี้กำลังซิงก์อยู่แล้ว (เช่น worker รอบชั่วโมง) server ตอบ 0 ทุกช่องทันที — แยกจาก "ไม่มีเมลใหม่" ไม่ได้
+export type SyncSummary = { messages_scanned: number; statements_inserted: number; skipped: number };
+
 export type Account = {
   id: number;
   nickname: string;

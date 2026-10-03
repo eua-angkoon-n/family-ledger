@@ -284,7 +284,7 @@ export default function Dashboard() {
           // role="status" ไม่ใช่ alert (ค่าเริ่มต้นของ Alert): เป็นสถานะของหน้า ไม่ใช่เหตุด่วนที่ต้องขัดจังหวะ screen reader
           // ปุ่มเป็น primary เพราะเป็นทางออกเดียวของสถานะนี้
           <Alert severity="info" variant="outlined" role="status">
-            ยังไม่มีรายการจาก statement ในระบบ — เพิ่มบัญชีหรือสั่งดึงอีเมลที่หน้าบัญชีของฉัน
+            ยังไม่มีรายการจาก statement ในระบบ — เพิ่มบัญชี หรือกด "ดึงอีเมลใหม่" ที่หน้าบัญชีของฉัน
             <Box sx={{ mt: 1 }}>
               <Button component={Link} to="/accounts" variant="contained" size="small">ไปที่บัญชีของฉัน</Button>
             </Box>

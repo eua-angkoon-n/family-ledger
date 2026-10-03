@@ -70,7 +70,7 @@ export default function DataFreshness({ accounts }: { accounts: AccountCoverage[
                 )}
                 <Typography variant="body2" color="text.secondary" sx={dataTextSx}>
                   {a.latest_txn_date ? `รายการล่าสุด ${formatDate(a.latest_txn_date)}${calm ? '' : ` (${ago(a.latest_txn_date)})`}` : 'ยังไม่มีรายการ'}
-                  {a.last_synced_at && ` · ซิงก์ล่าสุด ${formatDateTime(a.last_synced_at)}`}
+                  {a.last_synced_at && ` · ดึงอีเมลล่าสุด ${formatDateTime(a.last_synced_at)}`}
                 </Typography>
                 {a.statement_behind && !a.reauth_required_at && (
                   <Typography variant="body2" sx={{ ...dataTextSx, color: 'warning.main' }}>{behindText(a)}</Typography>
