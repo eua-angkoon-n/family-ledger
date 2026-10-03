@@ -93,19 +93,34 @@ export function createAuthRouter({
   fetch,
 }: AuthDependencies = defaultAuthDependencies): Router {
   const authRouter = Router();
-  // ponytail: rate limit ในหน่วยความจำ พอสำหรับ instance เดียว ถ้าสเกลค่อยย้ายไปตาราง/redis
+  // ponytail: rate limit ในหน่วยความจำ (fixed window 15 นาที/IP) พอสำหรับ instance เดียว ถ้าสเกลค่อยย้ายไปตาราง/redis
   // อยู่ในตัว router (prod มีตัวเดียว) — เทสต์ที่สร้าง router ใหม่ต่อเคสจึงไม่ชนเพดานของกันและกัน
-  const attempts = new Map<string, { n: number; resetAt: number }>();
-  function tooManyAttempts(ip: string): boolean {
+  // สองถัง: ล็อกอินสำเร็จไม่กินโควตาความล้มเหลว คนในบ้านที่ออก Wi-Fi เดียวกัน (IP เดียว) จึงไม่ล็อกกันเอง
+  // - fails: callback ที่ล้มก่อนได้ token (state ไม่ตรง, Google ตอบ error/ผู้ใช้ปฏิเสธ, ไม่มี code) ครบ 10 → ปิดการเริ่มใหม่
+  //   แลก token/userinfo ล้มไม่นับ — ไปถึงได้ด้วย state ที่ใช้ได้ครั้งเดียวเท่านั้น (ถัง starts คุมอยู่แล้ว)
+  //   และ Google ล่มต้องไม่ล็อกทั้งบ้าน
+  // - starts: ทุกการเริ่ม /auth/google เพดาน 60 — แต่ละครั้งเขียนแถว session ใหม่ลง DB (oauthState) ถังนี้กันสคริปต์ยิงรัว
+  //   คนจริง session อยู่ 30 วัน ทั้งบ้านไม่น่าเริ่มเกินหลักหน่วยต่อ 15 นาที
+  const fails = new Map<string, { n: number; resetAt: number }>();
+  const starts = new Map<string, { n: number; resetAt: number }>();
+  function hit(bucket: typeof fails, ip: string): number {
     const now = Date.now();
-    const e = attempts.get(ip);
-    if (!e || now > e.resetAt) {
-      attempts.set(ip, { n: 1, resetAt: now + 15 * 60_000 });
-      return false;
-    }
-    e.n += 1;
-    return e.n > 10;
+    let e = bucket.get(ip);
+    if (!e || now > e.resetAt) bucket.set(ip, (e = { n: 0, resetAt: now + 15 * 60_000 }));
+    return ++e.n;
   }
+  function failCount(ip: string): number {
+    const e = fails.get(ip);
+    return e && Date.now() <= e.resetAt ? e.n : 0;
+  }
+  function callbackFailed(reason: string, req: Request): void {
+    logAuthFailure(reason, req);
+    hit(fails, req.ip ?? 'unknown');
+  }
+  // ห้ามทิ้งผู้ใช้ไว้ที่หน้าข้อความดิบ — กลับเข้าแอปพร้อม code ให้เว็บแสดงข้อความ
+  // เชื่อมกล่องเมล (ล็อกอินอยู่แล้ว) กลับหน้าบัญชี นอกนั้นกลับหน้าเข้าสู่ระบบ
+  const backToApp = (res: Response, mailbox: boolean, code: 'rate_limited' | 'expired' | 'failed') =>
+    res.redirect(mailbox ? `/accounts?gmail=${code}` : `/?auth_error=${code}`);
   // audit ใช้ `query` ตัวที่ฉีดเข้ามา ไม่ใช่ pool ตรง ๆ — เทสต์ที่ปลอม query อยู่แล้วจะไม่แตะ DB จริง
   const auditable = { query: (text: string, params?: unknown[]) => query(text, params ?? []) };
   const saveEmailAccount = (userId: number, email: string, refreshTokenEnc: string) => query(
@@ -114,26 +129,28 @@ export function createAuthRouter({
     [userId, email, refreshTokenEnc],
   );
 
-authRouter.get('/google', async (req, res, next) => {
+authRouter.get('/google', async (req, res) => {
+  const mailbox = req.session.userId != null && (req.query.add === '1' || req.query.reconnect !== undefined);
   try {
-    if (tooManyAttempts(req.ip ?? 'unknown')) {
-      logAuthFailure('ยิงถี่เกินเพดาน 10 ครั้ง/15 นาที', req);
-      return void res.status(429).send('ลองใหม่อีก 15 นาที');
+    const ip = req.ip ?? 'unknown';
+    if (failCount(ip) >= 10 || hit(starts, ip) > 60) {
+      logAuthFailure('ยิงถี่เกินเพดาน (ล้มเหลว 10 หรือเริ่ม 60 ครั้ง/15 นาที)', req);
+      return void backToApp(res, mailbox, 'rate_limited');
     }
     // ?reconnect=<email_account_id> = เชื่อม Gmail ใหม่ให้กล่องเดิมของผู้ใช้ที่ล็อกอินอยู่ (Google ปฏิเสธ refresh token เดิม)
-    // ตอบเป็นข้อความตรง ๆ ไม่ redirect — ลิงก์ผิด/กล่องของคนอื่นต้องไม่ตกไปทางล็อกอินปกติแบบเงียบ ๆ
+    // ลิงก์ผิด/กล่องของคนอื่นกลับแอปพร้อม code — ต้องไม่ตกไปทางล็อกอินปกติแบบเงียบ ๆ
     let reconnectMailboxId: number | undefined;
     let loginHint: string | undefined;
     if (req.query.reconnect !== undefined) {
       const mailboxId = Number(req.query.reconnect);
-      if (!Number.isInteger(mailboxId) || mailboxId <= 0) return void res.status(400).send('reconnect ไม่ถูกต้อง');
-      if (!req.session.userId) return void res.status(401).send('ยังไม่ได้เข้าสู่ระบบ');
-      const mailbox = await query<{ email: string }>(
+      if (!Number.isInteger(mailboxId) || mailboxId <= 0) return void backToApp(res, mailbox, 'failed');
+      if (!req.session.userId) return void backToApp(res, false, 'expired');
+      const found = await query<{ email: string }>(
         'select email from email_account where id = $1 and user_id = $2',
         [mailboxId, req.session.userId],
       );
-      loginHint = mailbox.rows[0]?.email;
-      if (!loginHint) return void res.status(403).send('กล่องอีเมลนี้ไม่ใช่ของคุณ');
+      loginHint = found.rows[0]?.email;
+      if (!loginHint) return void backToApp(res, true, 'failed');
       reconnectMailboxId = mailboxId;
     }
     req.session.oauthState = randomBytes(16).toString('hex');
@@ -147,38 +164,41 @@ authRouter.get('/google', async (req, res, next) => {
       response_type: 'code',
       scope: SCOPES.join(' '),
       access_type: 'offline',
-      prompt: 'consent', // บังคับให้ได้ refresh_token ทุกครั้ง ไม่ใช่เฉพาะครั้งแรก
+      // consent = ได้ refresh_token ทุกครั้ง ไม่ใช่เฉพาะครั้งแรก · select_account = ให้เลือก/สลับบัญชี Google ได้ทุกครั้ง
+      prompt: 'consent select_account',
       state: req.session.oauthState,
       ...(loginHint ? { login_hint: loginHint } : {}),
     }).toString();
     res.redirect(url.toString());
   } catch (e) {
-    next(e);
+    console.error('เริ่ม OAuth ไม่สำเร็จ', e);
+    backToApp(res, mailbox, 'failed');
   }
 });
 
-authRouter.get('/google/callback', async (req, res, next) => {
+authRouter.get('/google/callback', async (req, res) => {
+  // ต่อกล่องเพิ่ม/เชื่อมกล่องเดิมใหม่ได้เฉพาะตอนล็อกอินอยู่แล้ว — ไม่งั้นตกไปทางสมัครปกติ
+  // อ่านก่อนเช็ค state เพื่อให้การเชื่อมกล่องที่ล้มกลับหน้าบัญชี ไม่ใช่หน้าเข้าสู่ระบบ
+  const reconnectMailboxId = req.session.reconnectMailboxId;
+  const mailboxUserId = req.session.addMailbox === true || reconnectMailboxId != null ? req.session.userId : undefined;
   try {
     const { code, state, error } = req.query;
     if (!req.session.oauthState || state !== req.session.oauthState) {
-      logAuthFailure('state ไม่ตรงกับที่ออกให้', req);
-      return void res.status(400).send('state ไม่ตรง — เริ่มเข้าสู่ระบบใหม่');
+      callbackFailed('state ไม่ตรงกับที่ออกให้', req);
+      return void backToApp(res, mailboxUserId != null, 'expired');
     }
-    // ต่อกล่องเพิ่ม/เชื่อมกล่องเดิมใหม่ได้เฉพาะตอนล็อกอินอยู่แล้ว — ไม่งั้นตกไปทางสมัครปกติ
-    const reconnectMailboxId = req.session.reconnectMailboxId;
-    const mailboxUserId = req.session.addMailbox === true || reconnectMailboxId != null ? req.session.userId : undefined;
     req.session.oauthState = undefined;
     req.session.addMailbox = undefined;
     req.session.reconnectMailboxId = undefined;
     // ผู้ใช้กดยกเลิก/ไม่อนุญาตในหน้าของ Google — Google ส่ง ?error= กลับมาแทน code
     if (error !== undefined) {
-      logAuthFailure(`Google ตอบ error=${JSON.stringify(error).slice(0, 100)}`, req);
+      callbackFailed(`Google ตอบ error=${JSON.stringify(error).slice(0, 100)}`, req);
       if (mailboxUserId != null) return void res.redirect('/accounts?gmail=denied');
       return void res.redirect(error === 'access_denied' ? '/?auth_error=access_denied' : '/?auth_error=failed');
     }
     if (typeof code !== 'string') {
-      logAuthFailure('callback ไม่มี code', req);
-      return void res.status(400).send('ไม่มี code');
+      callbackFailed('callback ไม่มี code', req);
+      return void backToApp(res, mailboxUserId != null, 'failed');
     }
 
     const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
@@ -192,11 +212,11 @@ authRouter.get('/google/callback', async (req, res, next) => {
         grant_type: 'authorization_code',
       }),
     });
-    // ต้อง log body ของ Google ด้วย — ข้อความ 502 ที่ผู้ใช้เห็นไม่บอกว่า invalid_client,
+    // ต้อง log body ของ Google ด้วย — code failed ที่ผู้ใช้เห็นไม่บอกว่า invalid_client,
     // redirect_uri_mismatch หรือ code หมดอายุ ซึ่งเป็นสามอย่างที่ต้องรู้เพื่อแก้ (body ไม่มี secret)
     if (!tokenRes.ok) {
       console.error('token exchange ล้มเหลว', tokenRes.status, await tokenRes.text());
-      return void res.status(502).send('แลก token กับ Google ไม่สำเร็จ');
+      return void backToApp(res, mailboxUserId != null, 'failed');
     }
     const token = (await tokenRes.json()) as { access_token: string; refresh_token?: string; scope?: string };
     // หน้า consent ให้เอาติ๊กอ่านอีเมลออกได้ — Google ยังออก token ให้ แต่ scope ไม่มี gmail.readonly
@@ -208,7 +228,7 @@ authRouter.get('/google/callback', async (req, res, next) => {
     });
     if (!infoRes.ok) {
       console.error('userinfo ล้มเหลว', infoRes.status, await infoRes.text());
-      return void res.status(502).send('อ่านข้อมูลผู้ใช้จาก Google ไม่สำเร็จ');
+      return void backToApp(res, mailboxUserId != null, 'failed');
     }
     const info = (await infoRes.json()) as { sub: string; email: string; name?: string };
     // ผู้ใช้ที่ถูกปฏิเสธล็อกอินซ้ำได้ token สด (แอดมิน revoke ไปแล้วแค่ชุดเก่า) — ห้ามเก็บ และถอนที่ Google ทิ้ง
@@ -295,10 +315,14 @@ authRouter.get('/google/callback', async (req, res, next) => {
       ip: req.ip ?? null,
     });
 
+    // session id ใหม่ทุกครั้งที่ล็อกอิน (store ลบแถวเดิม) — กัน session fixation: sid ที่ถูกฝังไว้ก่อนล็อกอินใช้ต่อไม่ได้
+    // ไม่มีค่าอื่นต้องพกข้าม — oauthState/addMailbox/reconnectMailboxId ล้างไปแล้วข้างบน
+    await new Promise<void>((resolve, reject) => req.session.regenerate((err) => (err ? reject(err) : resolve())));
     req.session.userId = userId;
     res.redirect(hasGmail ? '/' : '/?gmail=not_granted');
   } catch (e) {
-    next(e);
+    console.error('OAuth callback ล้มเหลว', e);
+    backToApp(res, mailboxUserId != null, 'failed');
   }
 });
 

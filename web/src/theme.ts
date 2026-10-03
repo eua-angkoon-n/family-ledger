@@ -1,4 +1,4 @@
-import { alpha, createTheme, type Shadows, type Theme } from '@mui/material/styles';
+import { alpha, createTheme, lighten, type Shadows, type Theme } from '@mui/material/styles';
 
 // ธีมทั้งชุด (สี ฟอนต์ รัศมีมุม เงา) มาจาก tweakcn "Bubblegum" (https://tweakcn.com/r/themes/bubblegum.json)
 // ค่า oklch ในไฟล์ต้นทางแปลงเป็น hex (sRGB, gamut-mapped) เพราะ MUI palette อ่าน oklch() ไม่ได้
@@ -220,7 +220,15 @@ const shadows = Array.from({ length: 25 }, (_, i) => (i === 0 ? 'none' : SHADOW(
 const theme = createTheme({
   cssVariables: { colorSchemeSelector: 'data-mui-color-scheme' },
   colorSchemes: {
-    light: { palette: paletteFor(tokens.light) },
+    light: {
+      palette: {
+        ...paletteFor(tokens.light),
+        // Alert info แบบ standard: MUI ทำพื้นจาก info (= muted-foreground เทา) ได้ #f2f2f2 บนการ์ดครีมดูเป็นกล่อง disabled
+        // ใช้ muted (Sky Wash) อ่อนลงครึ่งหนึ่ง (#d8f0f5) แบบที่ MUI อ่อนสีพื้นของ severity อื่น — ตัวอักษร 10.29, ไอคอน 4.76,
+        // ปุ่ม primary ใน Alert 4.73, ring 3.08 · ธีมมืดคงค่าที่ MUI คำนวณ (พื้น #171113 ตัวอักษร 15.02 ไอคอน 9.02)
+        Alert: { infoStandardBg: lighten(tokens.light.muted, 0.5) },
+      },
+    },
     dark: {
       palette: {
         ...paletteFor(tokens.dark),
@@ -282,7 +290,8 @@ const theme = createTheme({
           letterSpacing: 0,
           WebkitFontSmoothing: 'antialiased',
         },
-        '#root': { minHeight: '100vh' },
+        // dvh ตรงกับ AuthPanel — iOS Safari 100vh สูงกว่าจอที่เห็น หน้าเข้าสู่ระบบจึงเลื่อนได้ทั้งที่เนื้อหาพอดีจอ · 100vh = fallback
+        '#root': { minHeight: '100vh', '@supports (min-height: 100dvh)': { minHeight: '100dvh' } },
         // สำรองให้ element ที่ไม่ใช่ ButtonBase (ลิงก์ในข้อความ ฯลฯ) — control ของ MUI ใช้ theme.focusVisible ด้านบน
         ':focus-visible': { outline: `2px solid ${theme.vars.palette.brand.ring}`, outlineOffset: 2 },
         'strong, b': { fontWeight: 600 },

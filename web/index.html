@@ -3,6 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- สีแถบเบราว์เซอร์บนมือถือ = background ของธีม (tokens.light/dark.background ใน theme.ts) ตามโหมดของเครื่อง -->
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f6e6ee" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#12242e" />
     <!-- ตั้งธีมก่อน paint แรก: อ่าน localStorage คีย์เดียวกับ MUI ThemeProvider (main.tsx) ไม่งั้นคนที่ใช้ธีมมืด
          จะเห็นหน้าสว่างแวบหนึ่งระหว่างรอ JS (InitColorSchemeScript ของ MUI ใช้ไม่ได้ เพราะมันออกสคริปต์เฉพาะตอน server render) -->
     <script>

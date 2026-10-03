@@ -217,7 +217,7 @@ Hyacinthia Ledger คือสมุดบัญชีครอบครัว�
 - **Paper White** / **Harbor Card** (`popover`): menu, popover, tooltip และ dialog
 - **Graphite** / **Petal Mist** (`foreground`): ข้อความหลัก
 - **Soft Graphite (AA)** / **Dusty Rose** (`muted-foreground`): metadata, helper text, ข้อความรอง และ `info`
-- **Sky Wash** / **Charcoal Wash** (`muted`): skeleton
+- **Sky Wash** / **Charcoal Wash** (`muted`): skeleton · ธีมสว่าง: พื้น Alert info แบบ standard ใช้ `muted` อ่อนลง 50% (#d8f0f5, `palette.Alert.infoStandardBg` ใน `theme.ts`) แทนพื้นเทาที่ MUI คำนวณจาก `info` (#f2f2f2 บนการ์ดครีมดูเหมือน disabled) — ตัวอักษร 10.29, ไอคอน 4.76, ปุ่ม `primary` ใน Alert 4.73, ring 3.08 · ธีมมืดคงค่าที่ MUI คำนวณ (พื้น #171113 ตัวอักษร 15.02 ไอคอน 9.02) ซึ่งใกล้พื้น Alert error (#170d12) และไอคอน info/error เป็นชมพูทั้งคู่ — แยกกันด้วยไอคอนและข้อความ (The Semantic Color Rule)
 - **Lemon Cream** / **Mauve** (`accent`, ตัวอักษรบนพื้นนี้ `accent-foreground` สว่าง #333333 / มืด #12242e (AA)): พื้นตอน hover ของ tab, รายการใน drawer/เมนู และ toggle button (`action.hover`) ซึ่งเปลี่ยนสีตัวอักษรเป็น `accent-foreground` ด้วย — แถวตารางไม่ใช้ (ดู The Table Hover Rule)
 - **Candy Pink** (`sidebar-accent`, ทั้งสองโหมด): พื้นของสิ่งที่ถูกเลือก (tab, รายการใน drawer/เมนู, toggle button, text selection) ตัวอักษรใช้ `sidebar-accent-foreground` — แถวตารางที่เลือกไม่ใช้ (ดู Tables)
 - **Petal Sidebar** / **Night Sidebar** (`sidebar`): พื้นของ drawer เมนูบนมือถือเท่านั้น (ตั้งใน `App.tsx`) drawer เนื้อหาใช้ `popover` ตาม The Content Drawer Rule
@@ -373,6 +373,15 @@ Component vocabulary คือ **คุ้นเคย มั่นใจ แล
 - กราฟเส้นเปิด `showMark` เสมอ: x-charts 9 ไม่วาดจุดเป็นค่าเริ่มต้น และไม่มีจุดก็ไม่มี `onMarkClick` จุดเป็นวงสีของอนุกรมพร้อมขอบ `muted-foreground` ทุกอนุกรม (`shape: 'circle'` — ค่าเริ่มต้นวนรูปสี่เหลี่ยม/ข้าวหลามตัดตามลำดับอนุกรม) ตรงกับช่องสีวงกลมใน legend/tooltip (`labelMarkType: 'circle'`)
 - ←/→ บนกราฟที่ focus อยู่เป็นของกราฟ คีย์ลัดเปลี่ยนเดือนของ MonthPicker ข้ามทุกอย่างใน `role="figure"` (x-charts ไม่ preventDefault ที่จุดแรก/สุดท้าย)
 - ว่างเพราะ statement ยังไม่มา ใช้ข้อความเดียวกับบรรทัดสถานะ ("statement ต.ค. 2569 ยังไม่มา") ในกล่องที่เตี้ยกว่ากราฟ และ grid ของกราฟจัดชิดบน (`alignItems: start`) การ์ดที่ว่างจึงไม่ถูกยืดสูงตามใบข้าง ๆ · กราฟของเดือนที่เลือกว่างทั้งสองใบเพราะ statement ยังไม่มา: ≥ md grid เป็น 2 คอลัมน์ กราฟ 6 เดือนกินเต็มแถว (`gridColumn: span 2`) กล่องว่างสองใบอยู่คู่กันด้านล่าง (auto-fit เป็น 3 คอลัมน์ตั้งแต่ ~1040px ซึ่ง span 2 จะทิ้งกล่องว่างใบที่สองไว้แถวล่างใบเดียว)
+
+### หน้าก่อนเข้าแอป (เข้าสู่ระบบ / รออนุมัติ / ถูกปฏิเสธ)
+
+- การ์ดเดียว (`AuthPanel` ใน `App.tsx`) จัดกึ่งกลางทั้งสามหน้า: โลโก้/ไอคอนสถานะ → h1 → อีเมลบรรทัดของตัวเอง (`dataTextSx`, `overflowWrap: anywhere` — อยู่กลางประโยคแล้วดันคำไทยให้ตัดกลางคำ) → คำอธิบาย → Alert (ข้อความชิดซ้าย) → ปุ่มเต็มความกว้าง · ชื่อแท็บ "เข้าสู่ระบบ" / "รอการอนุมัติ" / "บัญชีนี้ไม่ได้รับอนุมัติ" · คำประสมที่ตัวตัดคำไทยแยกกลางคำ ("ผู้|ดูแล", "ภาพ|รวม") ห่อ `NoBreak` เฉพาะคำที่เห็นว่าตัดผิด ไม่ใช่ทุกคำ
+- **ปุ่มไป Google:** `<a href="/auth/google">` เสมอ (โหลดทั้งหน้าไป OAuth ไม่ใช่ปุ่มที่ตั้ง `location.href`) ไอคอนคือโลโก้ "G" สีของ Google บนวงกลมขาว (guideline ของ Google ให้ G อยู่บนพื้นขาว — สีของโลโก้ไม่ใช่ token) กดแล้ว `aria-disabled` + `aria-busy` "กำลังไปที่ Google…" กันกดซ้ำ (ทุกครั้งสร้าง oauthState ใหม่ ครั้งก่อนจะไม่ผ่าน) ยกเว้น Ctrl/⌘/Shift-คลิกที่เปิดแท็บใหม่ · กด Back กลับมาจาก bfcache ปุ่มปลดเอง
+- **`?auth_error=`:** Alert ในการ์ดเข้าสู่ระบบ (`role="alert"`) — `access_denied` info, `expired` / `rate_limited` warning, `failed` และโค้ดที่ไม่รู้จัก error · ผู้ใช้ที่ล็อกอินอยู่แล้วได้ข้อความเดียวกันใน snackbar · ไม่มีคำอธิบายสิทธิ์ Gmail/ลิงก์นโยบายบนหน้าเข้าสู่ระบบ (ผู้ใช้ตัดสินแล้ว)
+- **เบราว์เซอร์ในแอป** (user agent มี `Line/`, `FBAN`/`FBAV` หรือ `Instagram`): Google ไม่ให้ล็อกอินใน WebView (`disallowed_useragent`) จึงขึ้น Alert warning (`role="status"`) บอกให้เปิดใน Chrome/Safari ปุ่มหลักเป็นทางออกจากแอป — LINE: "เปิดในเบราว์เซอร์" (URL เดิม + `openExternalBrowser=1`), ทุกแอป: "คัดลอกลิงก์" (ผลใน snackbar, คัดลอกไม่ได้บอกให้ใช้เมนู ⋯ ของแอป) ปุ่ม Google ลดเป็น outlined แต่ยังอยู่ (บางแอปยังผ่าน)
+- **รออนุมัติ:** บอกตามจริงว่าระบบยังไม่อ่านอีเมลจนกว่าจะอนุมัติ และหน้านี้พาเข้าแอปเอง — อ่าน `/api/me` ซ้ำทุก 30 วินาทีเฉพาะตอนแท็บมองเห็น (และทันทีที่กลับมาที่แท็บ) สถานะที่เปลี่ยนประกาศใน snackbar · ปุ่ม "ตรวจสอบอีกครั้ง" (outlined), "ใช้บัญชี Google อื่น" (text — ออกจากระบบแล้วไป `/auth/google` ซึ่ง Google ถามเลือกบัญชี) และ "ออกจากระบบ" (text) ระหว่างรอเป็น `aria-disabled` + `aria-busy` + spinner · ล็อกอินโดยไม่ให้สิทธิ์ Gmail (`?gmail=not_granted`) เป็น Alert info บอกให้เชื่อม Gmail หลังอนุมัติ ไม่ใช่ error
+- **ถูกปฏิเสธ:** ไอคอน error + h1 "บัญชีนี้ไม่ได้รับอนุมัติ" บอกตามจริงว่าระบบไม่อ่านอีเมลของบัญชีนี้และขอ Google ยกเลิกสิทธิ์แล้ว ไม่แสดงช่องทางติดต่อ (ผู้ใช้ตัดสินแล้ว) และไม่แสดงผลของ `?gmail=` · ปุ่ม "ใช้บัญชี Google อื่น" (outlined) และ "ออกจากระบบ" (text)
 
 ### Popovers / Menus / Tooltips / Dialogs
 

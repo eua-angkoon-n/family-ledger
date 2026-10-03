@@ -9,6 +9,7 @@ process.env.DATABASE_URL ??= 'postgres://unused:unused@127.0.0.1:5432/unused';
 const { createAuthRouter } = await import('../src/auth.js');
 const { api } = await import('../src/api.js');
 const { APP_VERSION } = await import('../src/version.js');
+const { useSecurityHeaders } = await import('../src/http.js');
 
 const authEnv = {
   googleClientId: 'client-id',
@@ -60,6 +61,8 @@ async function openTestApp(existingUserId?: number, googleEmail = 'member@exampl
   };
 
   const app = express();
+  app.set('trust proxy', 1); // เหมือน server.ts — req.secure อ่าน X-Forwarded-Proto
+  useSecurityHeaders(app);
   app.use(express.json());
   app.use(session({ secret: 'test-secret-test-secret-test-secret', resave: false, saveUninitialized: false }));
   // /api/me อ่าน app_user จาก DB จริง (loadUser ไม่ได้ใช้ query ที่ฉีดเข้ามา) — ดูผู้ใช้ใน session ตรง ๆ แทน
@@ -71,6 +74,7 @@ async function openTestApp(existingUserId?: number, googleEmail = 'member@exampl
     fetch: fakeFetch,
   }));
   app.use('/api', api);
+  app.use(express.static(import.meta.dirname)); // แทน web/dist — GET /auth.test.ts เป็นไฟล์ static ที่มีแน่นอน
 
   const server = app.listen(0);
   await once(server, 'listening');
@@ -80,7 +84,7 @@ async function openTestApp(existingUserId?: number, googleEmail = 'member@exampl
   let cookie = '';
   const request = async (path: string, init: RequestInit = {}) => {
     const headers = new Headers(init.headers);
-    if (cookie) headers.set('cookie', cookie);
+    if (cookie && !headers.has('cookie')) headers.set('cookie', cookie);
     const response = await fetch(`http://127.0.0.1:${address.port}${path}`, {
       ...init,
       headers,
@@ -93,13 +97,15 @@ async function openTestApp(existingUserId?: number, googleEmail = 'member@exampl
 
   const sessionUserId = async () => ((await (await request('/test/session')).json()) as { userId: number | null }).userId;
 
-  return { calls, google, revoked, request, sessionUserId, close: () => server.close() };
+  return { calls, google, revoked, request, sessionUserId, cookie: () => cookie, close: () => server.close() };
 }
 
 async function completeGoogleLogin(request: (path: string, init?: RequestInit) => Promise<Response>, startPath = '/auth/google') {
   const start = await request(startPath);
   assert.equal(start.status, 302);
   const googleUrl = new URL(start.headers.get('location')!);
+  // ล็อกอิน/ต่อกล่องเพิ่ม/เชื่อมใหม่ ต้องให้ Google ถามเลือกบัญชีทุกครั้ง ("ใช้บัญชี Google อื่น")
+  assert.equal(googleUrl.searchParams.get('prompt'), 'consent select_account');
   const state = googleUrl.searchParams.get('state');
   assert.ok(state);
   return request(`/auth/google/callback?code=oauth-code&state=${state}`);
@@ -185,14 +191,19 @@ test('ล็อกอินโดยไม่ติ๊ก gmail.readonly ยั�
   assert.equal(JSON.parse(String(loginAudit.params[5])).gmail_connected, false);
 });
 
-test('Google ส่ง ?error= กลับมา: state ผิดยังได้ 400, state ถูกได้ redirect ไม่แลก token', async (t) => {
+test('Google ส่ง ?error= กลับมา: state ผิดกลับแอปด้วย expired, state ถูกได้ redirect ไม่แลก token', async (t) => {
   const app = await openTestApp();
   t.after(app.close);
+
+  // ไม่มี session เลย (ลิงก์เก่า/cookie หาย) ก็ต้องกลับแอป ไม่ใช่หน้าข้อความดิบ
+  const noSession = await app.request('/auth/google/callback?code=oauth-code&state=x');
+  assert.equal(noSession.headers.get('location'), '/?auth_error=expired');
 
   const start = await app.request('/auth/google');
   const state = new URL(start.headers.get('location')!).searchParams.get('state');
   const wrongState = await app.request('/auth/google/callback?error=access_denied&state=wrong');
-  assert.equal(wrongState.status, 400);
+  assert.equal(wrongState.status, 302);
+  assert.equal(wrongState.headers.get('location'), '/?auth_error=expired');
 
   const denied = await app.request(`/auth/google/callback?error=access_denied&state=${state}`);
   assert.equal(denied.status, 302);
@@ -231,10 +242,72 @@ test('?reconnect= ต้องล็อกอินและเป็นเจ�
   const app = await openTestApp(7);
   t.after(app.close);
 
-  assert.equal((await app.request('/auth/google?reconnect=5')).status, 401);
+  // กลับแอปพร้อม code ไม่ตกไปทางล็อกอินปกติ (location ไม่ใช่ Google)
+  assert.equal((await app.request('/auth/google?reconnect=5')).headers.get('location'), '/?auth_error=expired');
   await completeGoogleLogin(app.request);
-  assert.equal((await app.request('/auth/google?reconnect=abc')).status, 400);
-  assert.equal((await app.request('/auth/google?reconnect=6')).status, 403);
+  assert.equal((await app.request('/auth/google?reconnect=abc')).headers.get('location'), '/accounts?gmail=failed');
+  assert.equal((await app.request('/auth/google?reconnect=6')).headers.get('location'), '/accounts?gmail=failed');
+
+  // เชื่อมกล่อง (ล็อกอินอยู่) แล้ว state ไม่ตรง → กลับหน้าบัญชี ไม่ใช่หน้าเข้าสู่ระบบ
+  await app.request('/auth/google?add=1');
+  const wrongState = await app.request('/auth/google/callback?code=oauth-code&state=wrong');
+  assert.equal(wrongState.headers.get('location'), '/accounts?gmail=expired');
+});
+
+test('ล็อกอินได้ session id ใหม่ — cookie ก่อนล็อกอินใช้ต่อไม่ได้ (กัน session fixation)', async (t) => {
+  const app = await openTestApp(7);
+  t.after(app.close);
+
+  const start = await app.request('/auth/google');
+  const preLogin = app.cookie();
+  assert.ok(preLogin);
+  const state = new URL(start.headers.get('location')!).searchParams.get('state');
+  await app.request(`/auth/google/callback?code=oauth-code&state=${state}`);
+  assert.notEqual(app.cookie(), preLogin);
+  assert.equal(await app.sessionUserId(), 7);
+  const stale = await app.request('/test/session', { headers: { cookie: preLogin } });
+  assert.equal(((await stale.json()) as { userId: number | null }).userId, null, 'sid เดิมต้องถูกลบจาก store');
+});
+
+test('rate limit นับเฉพาะความล้มเหลว: ล็อกอินสำเร็จเกิน 10 ครั้งยังผ่าน, ล้ม 10 ครั้งแล้วเริ่มใหม่ไม่ได้', async (t) => {
+  const app = await openTestApp(7);
+  t.after(app.close);
+
+  for (let i = 0; i < 12; i++) assert.equal((await completeGoogleLogin(app.request)).headers.get('location'), '/');
+  for (let i = 0; i < 9; i++) await app.request('/auth/google/callback?error=access_denied&state=wrong');
+  assert.match((await app.request('/auth/google')).headers.get('location')!, /^https:\/\/accounts\.google\.com\//, 'ล้ม 9 ครั้งยังเริ่มได้');
+  await app.request('/auth/google/callback?state=wrong');
+  assert.equal((await app.request('/auth/google')).headers.get('location'), '/?auth_error=rate_limited');
+  // เชื่อมกล่องตอนโดนจำกัด → กลับหน้าบัญชี
+  assert.equal((await app.request('/auth/google?add=1')).headers.get('location'), '/accounts?gmail=rate_limited');
+});
+
+test('rate limit ยังกันการเริ่ม OAuth รัว ๆ ที่เพดาน 60 ครั้ง/15 นาที', async (t) => {
+  const app = await openTestApp();
+  t.after(app.close);
+
+  for (let i = 0; i < 60; i++) {
+    assert.match((await app.request('/auth/google')).headers.get('location')!, /^https:\/\/accounts\.google\.com\//);
+  }
+  assert.equal((await app.request('/auth/google')).headers.get('location'), '/?auth_error=rate_limited');
+});
+
+test('ทุก response มี security headers — HSTS เฉพาะ https ที่มาผ่าน proxy', async (t) => {
+  const app = await openTestApp();
+  t.after(app.close);
+
+  for (const path of ['/api/me', '/auth.test.ts', '/auth/google']) {
+    const res = await app.request(path);
+    assert.ok(res.status === 200 || res.status === 302, path);
+    assert.equal(res.headers.get('x-content-type-options'), 'nosniff', path);
+    assert.equal(res.headers.get('x-frame-options'), 'DENY', path);
+    assert.equal(res.headers.get('content-security-policy'), "frame-ancestors 'none'", path);
+    assert.equal(res.headers.get('referrer-policy'), 'strict-origin-when-cross-origin', path);
+    assert.equal(res.headers.get('x-powered-by'), null, path);
+    assert.equal(res.headers.get('strict-transport-security'), null, path);
+  }
+  const https = await app.request('/api/me', { headers: { 'x-forwarded-proto': 'https' } });
+  assert.equal(https.headers.get('strict-transport-security'), 'max-age=31536000');
 });
 
 test('เชื่อม Gmail ใหม่แต่เลือกบัญชี Google อื่น: ไม่บันทึกอะไร ผู้ใช้ใน session ไม่เปลี่ยน', async (t) => {
