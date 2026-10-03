@@ -1,3 +1,5 @@
+import type { Express } from 'express';
+
 export class HttpError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -75,4 +77,24 @@ export function enumStr<T extends string>(body: Body, field: string, values: rea
     throw new HttpError(400, `${field} ต้องเป็นหนึ่งใน ${values.join(', ')}`);
   }
   return v as T;
+}
+
+/**
+ * header ความปลอดภัยของทุก response (API, ไฟล์ static, SPA fallback) — ต้องเรียกก่อน middleware ตัวอื่น
+ * CSP มีแค่ frame-ancestors (กัน clickjacking): ห้ามเติม script-src/style-src — index.html มีสคริปต์ inline
+ * ตั้งธีมก่อน paint และโหลด Google Fonts · HSTS เฉพาะ request ที่มาทาง https ผ่าน Caddy (ต้องตั้ง trust proxy)
+ * ไม่งั้น dev ที่ localhost จะถูก browser จำให้ใช้ https
+ */
+export function useSecurityHeaders(app: Express): void {
+  app.disable('x-powered-by');
+  app.use((req, res, next) => {
+    res.set({
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY',
+      'Content-Security-Policy': "frame-ancestors 'none'",
+      'Referrer-Policy': 'strict-origin-when-cross-origin',
+    });
+    if (req.secure) res.set('Strict-Transport-Security', 'max-age=31536000');
+    next();
+  });
 }

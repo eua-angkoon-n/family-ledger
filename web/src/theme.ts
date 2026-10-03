@@ -1,4 +1,4 @@
-import { alpha, createTheme, type Shadows, type Theme } from '@mui/material/styles';
+import { alpha, createTheme, lighten, type Shadows, type Theme } from '@mui/material/styles';
 
 // ธีมทั้งชุด (สี ฟอนต์ รัศมีมุม เงา) มาจาก tweakcn "Bubblegum" (https://tweakcn.com/r/themes/bubblegum.json)
 // ค่า oklch ในไฟล์ต้นทางแปลงเป็น hex (sRGB, gamut-mapped) เพราะ MUI palette อ่าน oklch() ไม่ได้
@@ -220,14 +220,26 @@ const shadows = Array.from({ length: 25 }, (_, i) => (i === 0 ? 'none' : SHADOW(
 const theme = createTheme({
   cssVariables: { colorSchemeSelector: 'data-mui-color-scheme' },
   colorSchemes: {
-    light: { palette: paletteFor(tokens.light) },
+    light: {
+      palette: {
+        ...paletteFor(tokens.light),
+        // Alert info แบบ standard: MUI ทำพื้นจาก info (= muted-foreground เทา) ได้ #f2f2f2 บนการ์ดครีมดูเป็นกล่อง disabled
+        // ใช้ muted (Sky Wash) อ่อนลงครึ่งหนึ่ง (#d8f0f5) แบบที่ MUI อ่อนสีพื้นของ severity อื่น — ตัวอักษร 10.29, ไอคอน 4.76,
+        // ปุ่ม primary ใน Alert 4.73, ring 3.08 · ธีมมืดดู infoStandardBg ด้านล่าง
+        Alert: { infoStandardBg: lighten(tokens.light.muted, 0.5) },
+      },
+    },
     dark: {
       palette: {
         ...paletteFor(tokens.dark),
         // snackbar แบบ filled ของธีมมืด MUI ใช้พื้น *.dark (= main เข้มลง 30%) ตัวอักษรขาว: success 3.94, info 4.08,
         // warning 3.83 ไม่ผ่าน 4.5 — ใช้พื้น main + ตัวอักษรดำ 87% แทน (8.88 / 8.60 / 9.16) error เดิมผ่านอยู่แล้ว (5.58)
         // ตั้งที่ Alert ไม่ใช่ *.dark = main เพราะปุ่ม contained สี warning (ConfirmDialog) ใช้ *.dark เป็นพื้นตอน hover
+        // Alert info แบบ standard: MUI ทำพื้นจาก info (Dusty Rose) เข้มลง 90% ได้ #171113 แทบเท่าพื้น error (#170d12) ข้อความ
+        // ปลอบใจดูเป็นคำเตือน — ใช้ muted (Charcoal Wash) สว่างขึ้น 10% (#393c40): ตัวอักษร 8.85, ไอคอน 5.32, ปุ่ม primary 8.71,
+        // ring 4.28 · เทียบพื้น error 1.73, card 1.27, background 1.44 (เห็นเป็นกล่อง ไม่กลืนกับการ์ด)
         Alert: {
+          infoStandardBg: lighten(tokens.dark.muted, 0.1),
           successFilledBg: tokens.dark.income,
           successFilledColor: 'rgba(0, 0, 0, 0.87)',
           infoFilledBg: tokens.dark.mutedForeground,
@@ -282,7 +294,8 @@ const theme = createTheme({
           letterSpacing: 0,
           WebkitFontSmoothing: 'antialiased',
         },
-        '#root': { minHeight: '100vh' },
+        // dvh ตรงกับ AuthPanel — iOS Safari 100vh สูงกว่าจอที่เห็น หน้าเข้าสู่ระบบจึงเลื่อนได้ทั้งที่เนื้อหาพอดีจอ · 100vh = fallback
+        '#root': { minHeight: '100vh', '@supports (min-height: 100dvh)': { minHeight: '100dvh' } },
         // สำรองให้ element ที่ไม่ใช่ ButtonBase (ลิงก์ในข้อความ ฯลฯ) — control ของ MUI ใช้ theme.focusVisible ด้านบน
         ':focus-visible': { outline: `2px solid ${theme.vars.palette.brand.ring}`, outlineOffset: 2 },
         'strong, b': { fontWeight: 600 },

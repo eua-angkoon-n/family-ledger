@@ -3,15 +3,27 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- สีแถบเบราว์เซอร์บนมือถือ = background ของธีมที่ใช้อยู่ — hex ซ้ำกับ tokens.light.background / tokens.dark.background
+         ใน web/src/theme.ts (แก้ที่หนึ่งต้องแก้อีกที่) สคริปต์ด้านล่างตั้งค่าตามโหมด -->
+    <meta name="theme-color" content="#f6e6ee" />
     <!-- ตั้งธีมก่อน paint แรก: อ่าน localStorage คีย์เดียวกับ MUI ThemeProvider (main.tsx) ไม่งั้นคนที่ใช้ธีมมืด
-         จะเห็นหน้าสว่างแวบหนึ่งระหว่างรอ JS (InitColorSchemeScript ของ MUI ใช้ไม่ได้ เพราะมันออกสคริปต์เฉพาะตอน server render) -->
+         จะเห็นหน้าสว่างแวบหนึ่งระหว่างรอ JS (InitColorSchemeScript ของ MUI ใช้ไม่ได้ เพราะมันออกสคริปต์เฉพาะตอน server render)
+         theme-color ตาม data-mui-color-scheme ทุกครั้งที่เปลี่ยน (MUI ตั้ง attribute นี้เองตอนกดปุ่มธีม และตอนเครื่องสลับโหมดขณะเลือก
+         "ตามเครื่อง") จึงไม่ต้องแก้ ThemeModeToggle -->
     <script>
       (function () {
+        var root = document.documentElement;
+        var meta = document.querySelector('meta[name="theme-color"]');
+        function syncThemeColor() {
+          meta.setAttribute('content', root.getAttribute('data-mui-color-scheme') === 'dark' ? '#12242e' : '#f6e6ee');
+        }
         try {
           var mode = localStorage.getItem('mui-mode') || 'system';
           var dark = mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-          document.documentElement.setAttribute('data-mui-color-scheme', dark ? 'dark' : 'light');
+          root.setAttribute('data-mui-color-scheme', dark ? 'dark' : 'light');
         } catch (e) {}
+        syncThemeColor();
+        new MutationObserver(syncThemeColor).observe(root, { attributes: true, attributeFilter: ['data-mui-color-scheme'] });
       })();
     </script>
     <!-- ฟอนต์ของธีม Bubblegum: Poppins (UI ทั้งหมด ตัวเลข/ละติน), Noto Sans Thai (อักษรไทย — Poppins ไม่มี), Fira Code (code)

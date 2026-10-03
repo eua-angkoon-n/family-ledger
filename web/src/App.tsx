@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type ReactElement, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type FocusEvent, type MouseEvent, type ReactElement, type ReactNode } from 'react';
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import {
   Alert,
@@ -6,6 +6,7 @@ import {
   Badge,
   Box,
   Button,
+  CircularProgress,
   Container,
   Divider,
   Drawer,
@@ -31,22 +32,24 @@ import AssessmentRounded from '@mui/icons-material/AssessmentRounded';
 import CalculateRounded from '@mui/icons-material/CalculateRounded';
 import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded';
 import BlockRounded from '@mui/icons-material/BlockRounded';
+import ContentCopyRounded from '@mui/icons-material/ContentCopyRounded';
 import HistoryRounded from '@mui/icons-material/HistoryRounded';
 import HourglassTopRounded from '@mui/icons-material/HourglassTopRounded';
-import LoginRounded from '@mui/icons-material/LoginRounded';
 import LogoutRounded from '@mui/icons-material/LogoutRounded';
 import MenuRounded from '@mui/icons-material/MenuRounded';
 import MenuBookRounded from '@mui/icons-material/MenuBookRounded';
+import OpenInBrowserRounded from '@mui/icons-material/OpenInBrowserRounded';
 import ReceiptLongRounded from '@mui/icons-material/ReceiptLongRounded';
 import ReceiptRounded from '@mui/icons-material/ReceiptRounded';
+import RefreshRounded from '@mui/icons-material/RefreshRounded';
 import SchoolRounded from '@mui/icons-material/SchoolRounded';
 import SettingsRounded from '@mui/icons-material/SettingsRounded';
+import SwitchAccountRounded from '@mui/icons-material/SwitchAccountRounded';
 import { req, type EmailAccount, type MeResponse, type User } from './api.js';
-import Accounts from './Accounts.js';
 import ThemeModeToggle from './components/ThemeModeToggle.js';
 import { isPageEnabled } from './features.js';
-import { brandCopySx, dataTextSx, descriptionSx } from './theme.js';
-import { APP_NAME, FeedbackSnackbar, TableSkeleton, VersionBadge, visuallyHiddenSx, type Notice } from './ui.js';
+import { brandCopySx, dataTextSx, descriptionSx, radii } from './theme.js';
+import { APP_NAME, emailText, FeedbackSnackbar, TableSkeleton, VersionBadge, visuallyHiddenSx, type Notice } from './ui.js';
 
 // แยก chunk เฉพาะ Dashboard — เป็นหน้าเดียวที่ดึง @mui/x-charts (~600KB) เข้ามา หน้าอื่นไม่ต้องรอโหลดมันด้วย
 const Dashboard = lazy(() => import('./pages/Dashboard.js'));
@@ -58,17 +61,99 @@ const TaxDocuments = lazy(() => import('./pages/TaxDocuments.js'));
 const TaxSummary = lazy(() => import('./pages/TaxSummary.js'));
 const AuditLog = lazy(() => import('./pages/AuditLog.js'));
 const Help = lazy(() => import('./pages/Help.js'));
+const Accounts = lazy(() => import('./Accounts.js'));
 // แอดมินเท่านั้น — ผู้ใช้ทั่วไปไม่ต้องโหลดโค้ดหน้าตั้งค่า
 const SettingsPage = lazy(() => import('./Admin.js'));
 
+// ?auth_error=<code> ที่ OAuth callback ส่งกลับมาเมื่อเข้าสู่ระบบไม่สำเร็จ — โค้ดที่ไม่รู้จักใช้ข้อความของ failed
+const AUTH_ERROR_NOTICE: Record<string, Notice> = {
+  access_denied: { message: 'คุณยกเลิกการเข้าสู่ระบบกับ Google', severity: 'info' },
+  expired: { message: 'ลิงก์เข้าสู่ระบบหมดอายุ กดเข้าสู่ระบบอีกครั้ง', severity: 'warning' },
+  // ล็อก 15 นาทีนับทั้งเครือข่าย (rate limit ฝั่ง server) — "รอสักครู่" ทำให้ลองซ้ำแล้วติดต่อ
+  rate_limited: { message: 'ลองเข้าสู่ระบบหลายครั้งเกินไปจากเครือข่ายนี้ รอประมาณ 15 นาทีแล้วลองใหม่', severity: 'warning' },
+  failed: { message: 'เข้าสู่ระบบกับ Google ไม่สำเร็จ ลองใหม่อีกครั้ง', severity: 'error' },
+};
+const authErrorNotice = (code: string | null) => (code === null ? null : AUTH_ERROR_NOTICE[code] ?? AUTH_ERROR_NOTICE.failed);
+
+// Google ไม่ให้เข้าสู่ระบบในเบราว์เซอร์ของแอป (403 disallowed_useragent) — เตือนก่อนกด ไม่ใช่ปล่อยไปเจอหน้า error ของ Google
+const userAgent = navigator.userAgent;
+const IN_APP_BROWSER = /Line\//.test(userAgent) ? 'LINE' : /Instagram/.test(userAgent) ? 'Instagram' : /FBAN|FBAV/.test(userAgent) ? 'Facebook' : null;
+
+// URL ของหน้านี้โดยไม่มีผลของ OAuth และ openExternalBrowser (refresh/แชร์/เปิดในเบราว์เซอร์อื่นแล้วข้อความเดิมไม่ขึ้นซ้ำ)
+// openExternal: LINE เปิด URL ที่มี openExternalBrowser=1 ในเบราว์เซอร์ภายนอกให้เอง
+const TRANSIENT_PARAMS = ['auth_error', 'gmail', 'openExternalBrowser'];
+function pageUrl(openExternal = false) {
+  const url = new URL(window.location.href);
+  for (const key of TRANSIENT_PARAMS) url.searchParams.delete(key);
+  if (openExternal) url.searchParams.set('openExternalBrowser', '1');
+  return url.toString();
+}
+
+// สำรองของ navigator.clipboard (บาง WebView ไม่มี/ไม่ให้สิทธิ์) — textarea ชั่วคราว + execCommand แล้วคืน focus ให้ปุ่มเดิม
+// font-size 16px กัน iOS ซูมตอน select · คืน false = คัดลอกไม่ได้
+function copyWithTextarea(text: string) {
+  const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const area = document.createElement('textarea');
+  area.value = text;
+  area.setAttribute('readonly', '');
+  area.style.cssText = 'position:fixed;top:0;left:0;opacity:0;font-size:16px';
+  document.body.append(area);
+  area.focus(); // execCommand คัดลอก selection ของ element ที่ focus อยู่
+  area.select();
+  area.setSelectionRange(0, text.length);
+  let copied = false;
+  try {
+    copied = document.execCommand('copy');
+  } catch {
+    // บางเบราว์เซอร์ throw แทนคืน false
+  }
+  area.remove();
+  active?.focus();
+  return copied;
+}
+
+// โลโก้ "G" ของ Google สีตาม brand guideline — guideline ให้ G อยู่บนพื้นขาว แต่ปุ่มหลักเป็นชมพู (สว่าง) / เหลือง (มืด)
+// จึงมีวงกลมขาวรองไว้ในตัวโลโก้ (สีของ Google ไม่ใช่ token ของธีม)
+function GoogleMark() {
+  return (
+    <svg viewBox="0 0 48 48" width="20" height="20" aria-hidden="true" focusable="false">
+      <circle cx="24" cy="24" r="24" fill="#fff" />
+      <g transform="translate(9 9) scale(0.625)">
+        <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+        <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+        <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+        <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+      </g>
+    </svg>
+  );
+}
+
+// คำประสมที่ตัวตัดคำไทยของเบราว์เซอร์แยกกลางคำ ("ผู้|ดูแล", "ภาพ|รวม") — ใช้เฉพาะคำที่เห็นว่าตัดผิดจริง ไม่ใช่ทุกคำ
+function NoBreak({ children }: { children: string }) {
+  return <Box component="span" sx={{ whiteSpace: 'nowrap' }}>{children}</Box>;
+}
+
+// สถานะเปลี่ยนระหว่างรออนุมัติ — การ์ด/แอปเปลี่ยนเองโดย screen reader ไม่รู้ จึงประกาศผ่าน snackbar ด้วย
+const STATUS_CHANGE_NOTICE: Partial<Record<User['status'], Notice>> = {
+  approved: { message: 'ได้รับอนุมัติแล้ว เริ่มใช้งานได้เลย', severity: 'success' },
+  rejected: { message: 'ผู้ดูแลไม่ได้อนุมัติบัญชีนี้', severity: 'info' },
+};
+
 // ?gmail=<code> ที่ OAuth callback ส่งกลับมาหลังเชื่อม/เชื่อม Gmail ใหม่ — โค้ดที่ไม่รู้จักไม่แสดงอะไร
+// แสดงเฉพาะเมื่อโหลดแรกเข้าแอปได้เลย (approved) — หน้ารออนุมัติบอก not_granted ในการ์ดเอง หน้าถูกปฏิเสธไม่บอก
 const GMAIL_NOTICE: Record<string, Notice> = {
   connected: { message: 'เชื่อม Gmail สำเร็จ', severity: 'success' },
   not_granted: { message: 'ยังไม่ได้เชื่อม Gmail: ต้องติ๊กอนุญาตให้อ่านอีเมลในหน้าของ Google ระบบจึงนำเข้า statement ได้', severity: 'error' },
   denied: { message: 'ยกเลิกการเชื่อม Gmail แล้ว ไม่มีอะไรเปลี่ยน', severity: 'info' },
   wrong_account: { message: 'บัญชี Google ที่เลือกไม่ตรงกับกล่องอีเมลที่จะเชื่อมใหม่ ลองอีกครั้งแล้วเลือกบัญชีให้ถูก', severity: 'error' },
   no_refresh_token: { message: 'Google ไม่ได้ส่งสิทธิ์ระยะยาวกลับมา ลองเชื่อม Gmail ใหม่อีกครั้ง', severity: 'error' },
+  expired: { message: 'ลิงก์เชื่อม Gmail หมดอายุ ลองเชื่อมใหม่อีกครั้ง', severity: 'warning' },
+  failed: { message: 'เชื่อม Gmail ไม่สำเร็จ ลองใหม่อีกครั้ง', severity: 'error' },
+  rate_limited: { message: 'ลองเชื่อม Gmail หลายครั้งเกินไปจากเครือข่ายนี้ รอประมาณ 15 นาทีแล้วลองใหม่', severity: 'warning' },
 };
+
+// /api/me ตอบ user null ระหว่างรออนุมัติ = session หมด/ถูกล้าง — หน้ากลายเป็นเข้าสู่ระบบ ต้องบอกว่าทำไม
+const SESSION_EXPIRED_NOTICE: Notice = { message: 'เซสชันหมดอายุ เข้าสู่ระบบอีกครั้ง', severity: 'warning' };
 
 // แถบเตือนทุกหน้า: กล่องอีเมลที่ Google ปฏิเสธสิทธิ์ (invalid_grant) หรือยังไม่มีกล่องอีเมลเลย — ทั้งสองกรณีนำเข้า statement ไม่ได้
 // ปุ่มไป /auth/google ต้องเป็น <a href> (โหลดทั้งหน้าไป OAuth) ไม่ใช่ Link ของ router; ปุ่มอยู่ใต้ข้อความ ไม่ใช้ action
@@ -189,11 +274,16 @@ export default function App() {
   const [version, setVersion] = useState<string | null>(null);
   // จำนวนผู้ใช้รออนุมัติ (มีค่าเฉพาะแอดมิน) — ตัวนับบนเมนูตั้งค่าและแท็บผู้ใช้
   const [pendingUserCount, setPendingUserCount] = useState(0);
-  const [loggingOut, setLoggingOut] = useState(false);
+  // ออกจากระบบเฉย ๆ หรือออกเพื่อไปเลือกบัญชี Google อื่น — ระหว่างรอ ปุ่มทั้งสองเป็น aria-disabled
+  const [leaving, setLeaving] = useState<'logout' | 'switch' | null>(null);
+  const [goingToGoogle, setGoingToGoogle] = useState(false);
+  const [checkingStatus, setCheckingStatus] = useState(false);
+  // คัดลอกลิงก์ไม่ได้ทั้งสองทาง → แสดงลิงก์ในช่อง readOnly ให้คัดลอกเอง
+  const [showLinkField, setShowLinkField] = useState(false);
   // OAuth callback ส่งผลกลับมาเป็น ?auth_error= / ?gmail= — อ่านตอน render แรก (ก่อน `/` ถูก Navigate ไป /dashboard จน query หาย)
   const [oauthParams] = useState(() => new URLSearchParams(window.location.search));
   const authError = oauthParams.get('auth_error');
-  const [notice, setNotice] = useState<Notice | null>(() => GMAIL_NOTICE[oauthParams.get('gmail') ?? ''] ?? null);
+  const [notice, setNotice] = useState<Notice | null>(null);
   // null = ยังโหลดไม่เสร็จ/โหลดไม่ได้ → ไม่แสดงแถบ (กันแถบ "ยังไม่ได้เชื่อม Gmail" แวบขึ้นก่อนข้อมูลมา)
   const [mailboxes, setMailboxes] = useState<EmailAccount[] | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -207,11 +297,8 @@ export default function App() {
 
   // ลบ query ของ OAuth ออกจาก URL หลังอ่านแล้ว ไม่ให้ refresh/แชร์ลิงก์แล้วข้อความขึ้นซ้ำ
   useEffect(() => {
-    if (!oauthParams.has('auth_error') && !oauthParams.has('gmail')) return;
-    const url = new URL(window.location.href);
-    url.searchParams.delete('auth_error');
-    url.searchParams.delete('gmail');
-    window.history.replaceState(window.history.state, '', url);
+    if (!TRANSIENT_PARAMS.some((key) => oauthParams.has(key))) return;
+    window.history.replaceState(window.history.state, '', pageUrl());
   }, [oauthParams]);
 
   useEffect(() => {
@@ -219,15 +306,85 @@ export default function App() {
     req<EmailAccount[]>('/api/email-accounts').then(setMailboxes).catch(() => {}); // แถบเสริม — โหลดไม่ได้ก็ไม่แสดง
   }, [user?.status]);
 
-  useEffect(() => {
-    req<MeResponse>('/api/me')
+  // ทางเดียวที่อ่าน /api/me: โหลดแรก, หน้ารออนุมัติเช็คซ้ำ, ปุ่ม "ตรวจสอบอีกครั้ง" และตอนกลับจาก bfcache
+  // คำขอที่ยังค้างอยู่ใช้ร่วมกัน — ไม่ยิงซ้อน และคำตอบเก่าไม่มาทับคำตอบใหม่
+  const meRequest = useRef<Promise<MeResponse> | null>(null);
+  const loadMe = () =>
+    (meRequest.current ??= req<MeResponse>('/api/me')
       .then((response) => {
         setUser(response.user);
         setVersion(response.version);
         setPendingUserCount(response.pending_user_count ?? 0);
+        return response;
+      })
+      .finally(() => {
+        meRequest.current = null;
+      }));
+
+  useEffect(() => {
+    loadMe()
+      .then((response) => {
+        // ยังไม่ล็อกอิน = Alert ในการ์ดเข้าสู่ระบบ · ล็อกอินอยู่แล้วก็ได้ ?auth_error= ได้ (เช่นเริ่ม /auth/google ซ้ำจนติด rate limit) → snackbar
+        if (!response.user) return;
+        const gmailNotice = response.user.status === 'approved' ? GMAIL_NOTICE[oauthParams.get('gmail') ?? ''] : undefined;
+        setNotice(authErrorNotice(authError) ?? gmailNotice ?? null);
       })
       .catch(() => setUser(null));
   }, []);
+
+  // รออนุมัติ: เช็คสถานะซ้ำทุก 30 วินาทีเฉพาะตอนแท็บมองเห็น และทันทีที่กลับมาที่แท็บ — อนุมัติแล้วเข้าแอปเอง ถูกปฏิเสธก็เปลี่ยนหน้าเอง
+  // หยุดเมื่อสถานะไม่ใช่ pending แล้ว (cleanup ของ effect)
+  const awaitingApproval = user?.status === 'pending';
+  useEffect(() => {
+    if (!awaitingApproval) return;
+    const check = () => {
+      // รอบก่อน (หรือปุ่มตรวจสอบ) ยังไม่จบ = ข้ามรอบนี้
+      if (document.visibilityState !== 'visible' || meRequest.current) return;
+      loadMe()
+        .then((response) => {
+          const changed = response.user ? STATUS_CHANGE_NOTICE[response.user.status] : SESSION_EXPIRED_NOTICE;
+          if (changed) setNotice(changed);
+        })
+        .catch(() => {}); // เช็คเบื้องหลัง — พลาดรอบนี้ก็รอรอบหน้า
+    };
+    const timer = window.setInterval(check, 30_000);
+    document.addEventListener('visibilitychange', check);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', check);
+    };
+  }, [awaitingApproval]);
+
+  // กด Back กลับจาก Google แล้วเบราว์เซอร์คืนหน้านี้จาก bfcache: ปุ่มยังค้าง "กำลัง…" และ session อาจเปลี่ยนไปแล้ว
+  // (เช่นกด "ใช้บัญชี Google อื่น" = ออกจากระบบก่อนไป Google) — ปลดปุ่มแล้วอ่านสถานะใหม่
+  useEffect(() => {
+    const restore = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      setGoingToGoogle(false);
+      setLeaving(null);
+      loadMe().catch(() => {});
+    };
+    window.addEventListener('pageshow', restore);
+    return () => window.removeEventListener('pageshow', restore);
+  }, []);
+
+  // การไป Google ถูกยกเลิก (กด Stop, เน็ตหลุด) หน้านี้ไม่ได้ไปไหน — ปลดปุ่มเองหลัง 10 วินาที
+  // ponytail: เน็ตช้ากว่า 10 วินาทีกดซ้ำได้ (oauthState ใหม่ทับของเดิม ครั้งแรกกลับมาเป็น expired) — ยอมรับ
+  useEffect(() => {
+    if (!goingToGoogle) return;
+    const timer = window.setTimeout(() => setGoingToGoogle(false), 10_000);
+    return () => window.clearTimeout(timer);
+  }, [goingToGoogle]);
+
+  // ออกจากหน้ารออนุมัติ (อนุมัติ → แอป, ปฏิเสธ, session หมด → เข้าสู่ระบบ) ปุ่มที่ถือ focus อาจหายไปกับหน้าเดิม focus ตกไป <body>
+  // ย้ายไป h1 ของหน้าใหม่ — เข้าแอปใช้ <main> เพราะ h1 ของหน้าแรกยังอยู่ใน chunk ที่กำลังโหลด
+  const lastStatus = useRef<User['status'] | undefined>(undefined);
+  useEffect(() => {
+    const was = lastStatus.current;
+    lastStatus.current = user?.status;
+    if (was !== 'pending' || user?.status === 'pending') return;
+    document.getElementById(user?.status === 'approved' ? 'app-main' : 'auth-heading')?.focus();
+  }, [user?.status]);
   // หลังแอดมินเปลี่ยนสถานะผู้ใช้ในหน้าตั้งค่า — อ่านเฉพาะตัวนับใหม่ (ตัวนับเป็นของเสริม โหลดไม่ได้คงค่าเดิม)
   const refreshPendingUserCount = () => {
     req<MeResponse>('/api/me').then((response) => setPendingUserCount(response.pending_user_count ?? 0)).catch(() => {});
@@ -236,79 +393,243 @@ export default function App() {
   // หน้าก่อนเข้าระบบไม่มี PageHeader (ที่ตั้ง document.title ให้หน้าอื่น) — ตั้งชื่อแท็บที่นี่
   useEffect(() => {
     if (user === undefined || user?.status === 'approved') return;
-    const page = !user ? 'เข้าสู่ระบบ' : user.status === 'pending' ? 'รอการอนุมัติ' : 'ไม่สามารถเข้าใช้งานได้';
+    const page = !user ? 'เข้าสู่ระบบ' : user.status === 'pending' ? 'รอการอนุมัติ' : 'บัญชีนี้ไม่ได้รับอนุมัติ';
     document.title = `${page} · ${APP_NAME}`;
   }, [user]);
 
-  const logout = async () => {
-    setLoggingOut(true);
+  // 'logout' โหลดหน้าใหม่ (→ หน้าเข้าสู่ระบบ) · 'switch' ไป /auth/google ต่อ ซึ่ง Google ถามเลือกบัญชีทุกครั้ง
+  // กันกดซ้ำที่นี่ที่เดียว ทุกปุ่มที่เรียกเป็น aria-disabled ระหว่างรอ (disabled ทำ focus หลุดไป <body> ถ้าล้มเหลว)
+  const leave = async (next: 'logout' | 'switch') => {
+    if (leaving) return;
+    setLeaving(next);
     try {
       await req('/auth/logout', { method: 'POST' });
-      location.reload();
+      if (next === 'switch') location.assign('/auth/google');
+      else location.reload();
     } catch (error) {
-      setLoggingOut(false);
+      setLeaving(null);
       setMenuOpen(false); // Modal ของ drawer ตั้ง aria-hidden ให้ #root — ต้องปิดก่อน screen reader จึงจะอ่าน snackbar ได้
       setNotice({ message: error instanceof Error ? error.message : 'ออกจากระบบไม่สำเร็จ', severity: 'error' });
     }
+  };
+  const logout = () => void leave('logout');
+
+  const checkStatus = async () => {
+    if (checkingStatus) return;
+    setCheckingStatus(true);
+    try {
+      const response = await loadMe();
+      setNotice(response.user
+        ? STATUS_CHANGE_NOTICE[response.user.status] ?? { message: 'ยังรอผู้ดูแลอนุมัติอยู่', severity: 'info' }
+        : SESSION_EXPIRED_NOTICE);
+    } catch {
+      setNotice({ message: 'ตรวจสอบสถานะไม่สำเร็จ ลองใหม่อีกครั้ง', severity: 'error' });
+    } finally {
+      setCheckingStatus(false);
+    }
+  };
+
+  // <a href> ไม่ใช่ปุ่มที่ตั้ง location.href (โหลดทั้งหน้าไป OAuth) · กดแล้วกันกดซ้ำ เพราะทุกครั้งสร้าง oauthState ใหม่
+  // ทับของเดิม — callback ของครั้งแรกจะไม่ผ่าน · Ctrl/⌘/Shift-คลิกเปิดแท็บใหม่ แท็บนี้ไม่ได้ไปไหนจึงไม่ล็อกปุ่ม
+  const goToGoogle = (event: MouseEvent) => {
+    if (goingToGoogle) return event.preventDefault();
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    setGoingToGoogle(true);
+  };
+
+  // ไม่มี navigator.clipboard = ใช้ textarea ทันที (ก่อน await ยังอยู่ในจังหวะคลิก) · writeText ถูกปฏิเสธ = ลอง textarea อีกครั้ง
+  // ไม่ได้ทั้งคู่ = แสดงลิงก์ในช่องให้คัดลอกเอง
+  const copyLink = async () => {
+    const url = pageUrl();
+    let copied = false;
+    try {
+      if (!navigator.clipboard) copied = copyWithTextarea(url);
+      else {
+        await navigator.clipboard.writeText(url);
+        copied = true;
+      }
+    } catch {
+      copied = copyWithTextarea(url);
+    }
+    if (copied) setNotice({ message: 'คัดลอกลิงก์แล้ว วางในแถบที่อยู่ของ Chrome หรือ Safari', severity: 'success' });
+    else setShowLinkField(true);
   };
 
   if (user === undefined) {
     return (
       <AuthPanel version={version}>
-        <Stack spacing={2} role="status" aria-label="กำลังโหลดข้อมูลผู้ใช้">
+        {/* ข้อความซ่อนแทน aria-label — aria-label บน role=status (div) screen reader ไม่อ่าน */}
+        <Stack spacing={2} role="status">
           <Skeleton variant="circular" width={72} height={72} />
           <Skeleton width="55%" height={38} />
           <Skeleton width="90%" height={24} />
           <Skeleton variant="rounded" height={40} sx={{ mt: 1 }} />
+          <Box component="span" sx={visuallyHiddenSx}>กำลังโหลดข้อมูลผู้ใช้</Box>
         </Stack>
       </AuthPanel>
     );
   }
 
+  // การ์ดหน้าก่อนเข้าแอปจัดกึ่งกลางทั้งสามหน้า (เข้าสู่ระบบ / รออนุมัติ / ถูกปฏิเสธ) · Alert ในการ์ดข้อความชิดซ้าย
+  const authAlertSx = { width: '100%', textAlign: 'left', ...descriptionSx } as const;
+
   if (!user) {
+    const authNotice = authErrorNotice(authError);
     return (
-      <AuthPanel version={version}>
-        <Stack spacing={3} sx={{ alignItems: 'center', textAlign: 'center' }}>
-          <Box component="img" src="/logo-192.png" alt="" width={72} height={72} sx={{ display: 'block' }} />
-          <Box>
-            <Typography variant="h1">Hyacinthia Ledger</Typography>
-            <Typography color="text.secondary" sx={{ mt: 1, ...descriptionSx }}>
-              เปลี่ยน statement จากธนาคารให้เป็นภาพรวมการเงินที่ถูกต้องและดูแลง่าย
-            </Typography>
-          </Box>
-          {authError && (
-            <Alert severity={authError === 'access_denied' ? 'info' : 'error'} sx={{ width: '100%', textAlign: 'left', ...descriptionSx }}>
-              {authError === 'access_denied' ? 'คุณยกเลิกการเข้าสู่ระบบกับ Google' : 'เข้าสู่ระบบกับ Google ไม่สำเร็จ ลองใหม่อีกครั้ง'}
-            </Alert>
-          )}
-          <Button fullWidth variant="contained" startIcon={<LoginRounded />} onClick={() => { location.href = '/auth/google'; }}>
-            เข้าสู่ระบบด้วย Google
-          </Button>
-        </Stack>
-      </AuthPanel>
+      <>
+        <AuthPanel version={version}>
+          <Stack spacing={3} sx={{ alignItems: 'center', textAlign: 'center' }}>
+            <Box component="img" src="/logo-144.webp" alt="" width={72} height={72} sx={{ display: 'block' }} />
+            <Box>
+              <Typography variant="h1" id="auth-heading" tabIndex={-1}>Hyacinthia Ledger</Typography>
+              <Typography color="text.secondary" sx={{ mt: 1, ...descriptionSx }}>
+                เปลี่ยน statement จากธนาคารให้เป็น<NoBreak>ภาพรวม</NoBreak>การเงินที่ถูกต้องและดูแลง่าย
+              </Typography>
+            </Box>
+            {/* role=alert (ค่าเริ่มต้น) — mount หลัง skeleton จึงถูกประกาศ */}
+            {authNotice && <Alert severity={authNotice.severity} sx={authAlertSx}>{authNotice.message}</Alert>}
+            {/* ประกาศที่คงอยู่ในหน้า → role=status (The Quiet Notice Rule) */}
+            {IN_APP_BROWSER && (
+              <Alert severity="warning" role="status" sx={authAlertSx}>
+                หน้านี้เปิดอยู่ในแอป {IN_APP_BROWSER} ซึ่ง Google มักไม่ให้เข้าสู่ระบบ{' '}
+                {IN_APP_BROWSER === 'LINE' ? 'กด "เปิดในเบราว์เซอร์"' : 'แตะเมนู ⋯ ของแอปแล้วเลือกเปิดในเบราว์เซอร์'}
+                {' '}หรือคัดลอกลิงก์ไปเปิดใน Chrome หรือ Safari
+              </Alert>
+            )}
+            {/* ในแอป: ทางออกจากแอปเป็นปุ่มหลัก ปุ่ม Google ลดเป็นรอง (บางแอปยังผ่าน) */}
+            <Stack spacing={1.5} sx={{ width: '100%' }}>
+              {IN_APP_BROWSER === 'LINE' && (
+                <Button fullWidth variant="contained" href={pageUrl(true)} startIcon={<OpenInBrowserRounded />}>
+                  เปิดในเบราว์เซอร์
+                </Button>
+              )}
+              {IN_APP_BROWSER && (
+                <Button fullWidth variant={IN_APP_BROWSER === 'LINE' ? 'outlined' : 'contained'} startIcon={<ContentCopyRounded />} onClick={copyLink}>
+                  คัดลอกลิงก์
+                </Button>
+              )}
+              {/* autoFocus → onFocus เลือกทั้งหมด screen reader อ่านชื่อ + คำแนะนำทันที · input ธรรมดาหน้าตาเดียวกับช่องกรอก
+                  ไม่ใช่ TextField (ลาก Select/Menu เข้า chunk หลัก +56 kB เพื่อทางสำรองที่แทบไม่มีใครเห็น) · 16px กัน iOS ซูม */}
+              {showLinkField && (
+                <Box sx={{ textAlign: 'left' }}>
+                  <Box
+                    component="input"
+                    readOnly
+                    autoFocus
+                    value={pageUrl()}
+                    aria-label="ลิงก์ของหน้านี้"
+                    aria-describedby="copy-link-help"
+                    onFocus={(event: FocusEvent<HTMLInputElement>) => event.currentTarget.select()}
+                    sx={{
+                      ...dataTextSx,
+                      width: '100%',
+                      minHeight: 40,
+                      px: 1.5,
+                      fontSize: '1rem',
+                      color: 'text.primary',
+                      bgcolor: 'brand.inputBg',
+                      border: 1,
+                      borderColor: 'brand.input',
+                      borderRadius: `${radii.md}px`,
+                    }}
+                  />
+                  <Typography id="copy-link-help" variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                    คัดลอกให้อัตโนมัติไม่ได้ กดค้างที่ลิงก์แล้วเลือกคัดลอก
+                  </Typography>
+                </Box>
+              )}
+              <Button
+                fullWidth
+                variant={IN_APP_BROWSER ? 'outlined' : 'contained'}
+                href="/auth/google"
+                onClick={goToGoogle}
+                aria-disabled={goingToGoogle}
+                aria-busy={goingToGoogle}
+                startIcon={goingToGoogle ? <CircularProgress size={16} color="inherit" /> : <GoogleMark />}
+              >
+                {goingToGoogle ? 'กำลังไปที่ Google…' : 'เข้าสู่ระบบด้วย Google'}
+              </Button>
+              {/* ป้ายของปุ่มที่ focus อยู่เปลี่ยนแล้ว screen reader ไม่อ่าน — live region อยู่นอกปุ่ม (aria-busy บนปุ่มกดการประกาศของลูก) */}
+              <Box component="span" role="status" sx={visuallyHiddenSx}>{goingToGoogle ? 'กำลังไปที่ Google…' : ''}</Box>
+            </Stack>
+          </Stack>
+        </AuthPanel>
+        <FeedbackSnackbar notice={notice} onClose={() => setNotice(null)} />
+      </>
     );
   }
 
   if (user.status !== 'approved') {
     const isPending = user.status === 'pending';
+    const busy = leaving !== null;
     return (
       <>
         <AuthPanel version={version}>
-          <Stack spacing={3} sx={{ alignItems: 'flex-start' }}>
+          <Stack spacing={3} sx={{ alignItems: 'center', textAlign: 'center' }}>
             {isPending
               ? <HourglassTopRounded sx={{ color: 'text.secondary', fontSize: 40 }} />
               : <BlockRounded color="error" sx={{ fontSize: 40 }} />}
             <Box>
-              <Typography variant="h1">{isPending ? 'รอการอนุมัติ' : 'ไม่สามารถเข้าใช้งานได้'}</Typography>
-              <Typography color="text.secondary" sx={{ mt: 1, ...descriptionSx }}>
-                บัญชี <Box component="span" sx={dataTextSx}>{user.email}</Box> {isPending
-                  ? 'อยู่ระหว่างรอผู้ดูแลอนุมัติ เมื่อได้รับอนุมัติแล้วจึงจะเริ่มใช้งานได้'
-                  : 'ไม่ได้รับอนุมัติให้เข้าใช้งาน กรุณาติดต่อผู้ดูแลระบบหากต้องการตรวจสอบสถานะ'}
-              </Typography>
+              <Typography variant="h1" id="auth-heading" tabIndex={-1}>{isPending ? 'รอการอนุมัติ' : 'บัญชีนี้ไม่ได้รับอนุมัติ'}</Typography>
+              {/* อีเมลอยู่บรรทัดของตัวเอง — อยู่กลางประโยคแล้วดันคำไทยให้ตัดกลางคำ · ตัดหลัง @ ก่อนกลางโดเมน */}
+              <Typography sx={{ mt: 1 }}>{emailText(user.email)}</Typography>
+              {isPending ? (
+                <>
+                  {/* worker ดึงอีเมลเฉพาะผู้ใช้ที่ approved (src/worker.ts) */}
+                  <Typography color="text.secondary" sx={{ mt: 2, ...descriptionSx }}>
+                    บัญชีนี้รอ<NoBreak>ผู้ดูแล</NoBreak>อนุมัติ ระหว่างนี้ระบบยังไม่อ่านอีเมลหรือนำเข้า statement ของคุณ
+                  </Typography>
+                  <Typography color="text.secondary" sx={{ mt: 1, ...descriptionSx }}>
+                    เปิดหน้านี้ทิ้งไว้ได้ เมื่อได้รับอนุมัติ หน้านี้จะพาเข้าแอปให้เอง
+                  </Typography>
+                </>
+              ) : (
+                // ปฏิเสธ = แอดมิน revoke token ทุกกล่องที่ Google (routes/admin.ts) และล็อกอินซ้ำก็ไม่เก็บ token ใหม่ (auth.ts)
+                <Typography color="text.secondary" sx={{ mt: 2, ...descriptionSx }}>
+                  ระบบไม่อ่านอีเมลของบัญชีนี้ และได้ขอ Google ยกเลิกสิทธิ์อ่านอีเมลที่บัญชีนี้เคยให้ไว้แล้ว
+                </Typography>
+              )}
             </Box>
-            <Button variant="outlined" startIcon={<LogoutRounded />} onClick={logout} disabled={loggingOut} aria-busy={loggingOut}>
-              {loggingOut ? 'กำลังออกจากระบบ…' : 'ออกจากระบบ'}
-            </Button>
+            {/* ล็อกอินโดยไม่ติ๊กอ่านอีเมล — บอกสิ่งที่ทำได้หลังอนุมัติ (GmailBanner มีปุ่ม "เชื่อม Gmail" ทุกหน้า) */}
+            {isPending && oauthParams.get('gmail') === 'not_granted' && (
+              <Alert severity="info" role="status" sx={authAlertSx}>
+                ยังไม่ได้ให้สิทธิ์อ่าน Gmail — ให้ทีหลังได้ เมื่อได้รับอนุมัติแล้ว กด <NoBreak>"เชื่อม Gmail"</NoBreak> ที่แถบด้านบนของแอป ระบบจึงจะนำเข้า statement ได้
+              </Alert>
+            )}
+            <Stack spacing={1} sx={{ width: '100%' }}>
+              {isPending && (
+                <Button
+                  fullWidth
+                  variant="outlined"
+                  onClick={checkStatus}
+                  aria-disabled={checkingStatus}
+                  aria-busy={checkingStatus}
+                  startIcon={checkingStatus ? <CircularProgress size={16} color="inherit" /> : <RefreshRounded />}
+                >
+                  {checkingStatus ? 'กำลังตรวจสอบ…' : 'ตรวจสอบอีกครั้ง'}
+                </Button>
+              )}
+              <Button
+                fullWidth
+                variant={isPending ? 'text' : 'outlined'}
+                onClick={() => void leave('switch')}
+                aria-disabled={busy}
+                aria-busy={leaving === 'switch'}
+                startIcon={leaving === 'switch' ? <CircularProgress size={16} color="inherit" /> : <SwitchAccountRounded />}
+              >
+                {leaving === 'switch' ? 'กำลังไปที่ Google…' : 'ใช้บัญชี Google อื่น'}
+              </Button>
+              <Button
+                fullWidth
+                variant="text"
+                onClick={logout}
+                aria-disabled={busy}
+                aria-busy={leaving === 'logout'}
+                startIcon={leaving === 'logout' ? <CircularProgress size={16} color="inherit" /> : <LogoutRounded />}
+              >
+                {leaving === 'logout' ? 'กำลังออกจากระบบ…' : 'ออกจากระบบ'}
+              </Button>
+            </Stack>
           </Stack>
         </AuthPanel>
         <FeedbackSnackbar notice={notice} onClose={() => setNotice(null)} />
@@ -330,7 +651,7 @@ export default function App() {
         <Container maxWidth="lg">
           <Toolbar disableGutters sx={{ minHeight: { xs: 56, sm: 64 }, gap: { xs: 0.5, sm: 2 } }}>
             <Stack direction="row" spacing={1} sx={{ mr: 'auto', alignItems: 'center' }}>
-              <Box component="img" src="/logo-192.png" alt="" width={32} height={32} sx={{ display: 'block' }} />
+              <Box component="img" src="/logo-144.webp" alt="" width={32} height={32} sx={{ display: 'block' }} />
               <Typography sx={{ whiteSpace: 'nowrap', ...brandCopySx }}>
                 Hyacinthia Ledger
               </Typography>
@@ -394,9 +715,9 @@ export default function App() {
                   </IconButton>
                 </Tooltip>
                 <Tooltip title="ออกจากระบบ">
-                  <span>
-                    <IconButton color="inherit" aria-label="ออกจากระบบ" onClick={logout} disabled={loggingOut}><LogoutRounded /></IconButton>
-                  </span>
+                  <IconButton color="inherit" aria-label="ออกจากระบบ" onClick={logout} aria-disabled={leaving !== null} aria-busy={leaving !== null}>
+                    <LogoutRounded />
+                  </IconButton>
                 </Tooltip>
               </>
             )}
@@ -460,16 +781,17 @@ export default function App() {
           </ListItem>
           {/* ไม่ปิด drawer ตอนกด ให้เห็นสถานะกำลังออก — ถ้าล้มเหลว logout() ปิดให้เองแล้วแจ้งใน snackbar */}
           <ListItem disablePadding>
-            <ListItemButton onClick={logout} disabled={loggingOut} aria-busy={loggingOut}>
+            <ListItemButton onClick={logout} aria-disabled={leaving !== null} aria-busy={leaving !== null}>
               <ListItemIcon><LogoutRounded /></ListItemIcon>
-              <ListItemText primary={loggingOut ? 'กำลังออกจากระบบ…' : 'ออกจากระบบ'} />
+              <ListItemText primary={leaving ? 'กำลังออกจากระบบ…' : 'ออกจากระบบ'} />
             </ListItemButton>
           </ListItem>
         </List>
       </Drawer>
 
       {/* < sm เลขเวอร์ชันต่อท้ายหน้า (ไม่ลอย) ระยะล่างรวมกับบรรทัดเวอร์ชันจึงใกล้เดิม */}
-      <Container component="main" maxWidth="lg" sx={{ py: { xs: 3, sm: 4 }, pb: { xs: 4, sm: 8 } }}>
+      {/* tabIndex -1: ปลายทาง focus ตอนเพิ่งได้รับอนุมัติ — landmark ไม่ใช่ control จึงไม่วาด ring รอบทั้งหน้า */}
+      <Container component="main" id="app-main" tabIndex={-1} maxWidth="lg" sx={{ py: { xs: 3, sm: 4 }, pb: { xs: 4, sm: 8 }, '&:focus-visible': { outline: 'none' } }}>
         <GmailBanner mailboxes={mailboxes} />
         <Suspense fallback={<TableSkeleton rows={6} />}>
           <Routes>

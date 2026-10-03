@@ -39,6 +39,17 @@ export const visuallyHiddenSx = {
   border: 0,
 } as const;
 
+// อีเมล: ตัดบรรทัดหลัง @ ก่อน (ไม่ใช่กลางชื่อโดเมน "kasikornba / nk.com") — break-word ยังตัดส่วนที่ยาวเกินบรรทัดได้
+// ใช้ทุกที่ที่อีเมลอยู่บรรทัดของตัวเอง (อีเมลผู้ส่งในหน้าตั้งค่า, หน้ารออนุมัติ/ถูกปฏิเสธ)
+export const emailText = (email: string) => {
+  const at = email.indexOf('@') + 1;
+  return (
+    <Box component="span" sx={{ ...dataTextSx, overflowWrap: 'break-word' }}>
+      {at > 0 ? <>{email.slice(0, at)}<wbr />{email.slice(at)}</> : email}
+    </Box>
+  );
+};
+
 /** props ของ TextField ช่องยอดเงิน: ค่าที่อ่านไม่ได้เป็น error พร้อมรูปแบบที่ถูกใต้ช่อง (ช่องว่างไม่ใช่ error — required ดูแลเอง) */
 export const amountFieldHelp = (value: string) =>
   value !== '' && parseBahtToSatang(value) == null ? { error: true, helperText: AMOUNT_FORMAT_HINT } : {};
