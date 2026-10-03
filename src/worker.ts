@@ -53,19 +53,20 @@ export function countStatements(statuses: StatementStatus[]): { inserted: number
   return { inserted: statuses.length - failed, failed };
 }
 
-/** ไฟล์ที่ผูกกับบัญชีไม่ได้ (รหัสของทุกบัญชีเปิดไม่ได้ / เปิดได้แต่แยกบัญชีไม่ออก) ต้องลง parse_failed ไม่ใช่หายเงียบ
- *  ชื่อไฟล์ชี้บัญชีเดียวได้ก็ลงบัญชีนั้น ไม่งั้นลงทุกบัญชีในกล่อง (แต่ละแถวมีปุ่มตั้งรหัสของบัญชีนั้น) */
+/** ไฟล์ที่พังก่อนรู้เลขบัญชี (รหัสของทุกบัญชีเปิดไม่ได้ / pdftotext พัง / parse throw) ต้องลง parse_failed ไม่ใช่หายเงียบ
+ *  ชื่อไฟล์ชี้บัญชีเดียวได้ก็ลงบัญชีนั้น ไม่งั้นลงทุกบัญชีในกล่อง (แต่ละแถวมีปุ่มตั้งรหัสของบัญชีนั้น)
+ *  ส่วนไฟล์ที่เปิดได้แต่เลขบัญชีไม่ตรงบัญชีใดในกล่อง = statement ของบัญชีที่ผู้ใช้ไม่ได้เพิ่มไว้ → ข้าม ไม่ลงแถว */
 export function failedAccountTargets<T extends { account_number: string }>(candidates: readonly T[], filename: string): T[] {
   if (candidates.length === 1) return [...candidates];
   const byName = resolveAccount(candidates, filename);
   return byName ? [byName] : [...candidates];
 }
 
-// ไฟล์เดียวกันที่เคยค้าง parse_failed ใต้บัญชีอื่นในกล่องนี้ (ตอนรหัสผิด/แยกบัญชีไม่ออก) — อ่านสำเร็จแล้วต้องล้าง
-// ไม่งั้นแดชบอร์ดเตือนค้างตลอด รันใน tx เดียวกับแถวที่สำเร็จ แถวของบัญชีตัวเองถูก on conflict ทับไปแล้ว
+// ไฟล์เดียวกันที่เคยค้าง parse_failed ใต้บัญชีอื่นในกล่องนี้ (ตอนรหัสผิด) — อ่านสำเร็จ/พังใต้บัญชีชุดใหม่/ข้ามไฟล์ ต้องล้าง
+// ไม่งั้นแดชบอร์ดเตือนค้างตลอด $3 = บัญชีที่เพิ่งเขียน (on conflict ทับไปแล้ว) ว่าง = ล้างทุกบัญชีในกล่อง
 const CLEAR_STALE_FAILED_SQL = `delete from statement s using bank_account a
   where a.id = s.bank_account_id and a.email_account_id = $1 and s.pdf_sha256 = $2
-    and s.status = 'parse_failed' and s.bank_account_id <> $3`;
+    and s.status = 'parse_failed' and s.bank_account_id <> all($3::bigint[])`;
 
 /** ขอ access token ไม่สำเร็จแบบชั่วคราว (5xx/เน็ตหลุด) — แยกจาก error ของ DB/โค้ด ให้ route ตอบ 502 ได้ถูกตัว */
 export class GmailUnavailableError extends Error {}
@@ -221,27 +222,37 @@ function extractText(pdfPath: string, password: string): Promise<ExtractResult> 
   });
 }
 
-async function writeParseFailed(
-  bankAccountId: number,
+/** ไฟล์เดียวลง parse_failed ใต้บัญชีเป้า แล้วล้างแถวพังของไฟล์เดียวกันใต้บัญชีอื่นในกล่อง (tx เดียว)
+ *  เช่นรอบก่อนพังใต้ [A,B] รอบนี้ชื่อไฟล์ชี้ [A] — แถวของ B ต้องไม่ค้าง คืน true ถ้าเขียนได้อย่างน้อยหนึ่งแถว */
+export async function writeParseFailed(
+  emailAccountId: number,
+  bankAccountIds: number[],
   messageId: string,
   attachmentId: string,
   pdfSha256: string,
   rawPdfPath: string,
   reason: string,
 ): Promise<boolean> {
-  const result = await query(
-    `insert into statement (bank_account_id, gmail_message_id, gmail_attachment_id, pdf_sha256, period_start, period_end, raw_pdf_path, status, error_detail)
-     values ($1, $2, $3, $4, null, null, $5, 'parse_failed', $6)
-     on conflict (bank_account_id, pdf_sha256) where pdf_sha256 is not null do update
-       set gmail_message_id = excluded.gmail_message_id,
-           gmail_attachment_id = excluded.gmail_attachment_id,
-           raw_pdf_path = excluded.raw_pdf_path,
-           error_detail = excluded.error_detail
-       where statement.status = 'parse_failed'
-     returning id`,
-    [bankAccountId, messageId, attachmentId, pdfSha256, rawPdfPath, JSON.stringify({ reason })],
-  );
-  return result.rowCount === 1;
+  return tx(async (client) => {
+    let written = false;
+    for (const bankAccountId of bankAccountIds) {
+      const result = await client.query(
+        `insert into statement (bank_account_id, gmail_message_id, gmail_attachment_id, pdf_sha256, period_start, period_end, raw_pdf_path, status, error_detail)
+         values ($1, $2, $3, $4, null, null, $5, 'parse_failed', $6)
+         on conflict (bank_account_id, pdf_sha256) where pdf_sha256 is not null do update
+           set gmail_message_id = excluded.gmail_message_id,
+               gmail_attachment_id = excluded.gmail_attachment_id,
+               raw_pdf_path = excluded.raw_pdf_path,
+               error_detail = excluded.error_detail
+           where statement.status = 'parse_failed'
+         returning id`,
+        [bankAccountId, messageId, attachmentId, pdfSha256, rawPdfPath, JSON.stringify({ reason })],
+      );
+      if (result.rowCount === 1) written = true;
+    }
+    await client.query(CLEAR_STALE_FAILED_SQL, [emailAccountId, pdfSha256, bankAccountIds]);
+    return written;
+  });
 }
 
 export async function writePending(
@@ -277,7 +288,7 @@ export async function writePending(
       [bankAccountId, messageId, attachmentId, pdfSha256, rawPdfPath, JSON.stringify(errorDetail)],
     );
     if (result.rowCount !== 1) return false;
-    await client.query(CLEAR_STALE_FAILED_SQL, [emailAccountId, pdfSha256, bankAccountId]);
+    await client.query(CLEAR_STALE_FAILED_SQL, [emailAccountId, pdfSha256, [bankAccountId]]);
     return true;
   });
 }
@@ -327,7 +338,7 @@ export async function writeParsedStatement(
     );
     const statementId = insertedStatement.rows[0]?.id;
     if (!statementId) return false;
-    await client.query(CLEAR_STALE_FAILED_SQL, [emailAccountId, pdfSha256, bankAccountId]);
+    await client.query(CLEAR_STALE_FAILED_SQL, [emailAccountId, pdfSha256, [bankAccountId]]);
     if (!parsed.checksumValid) return true;
 
     let rowsInserted = 0;
@@ -428,12 +439,11 @@ async function processMessage(
 
     // ไฟล์เดียวนับ failed ครั้งเดียว แม้เขียนแถวลงหลายบัญชี
     const failFile = async (accounts: BankAccountCandidate[], reason: string): Promise<void> => {
-      let written = false;
-      for (const a of accounts) {
-        if (await writeParseFailed(a.id, messageId, attachment.attachmentId, pdfSha256, pdfPath, reason)) written = true;
-      }
-      if (written) statuses.push('parse_failed');
+      const ids = accounts.map((a) => a.id);
+      if (await writeParseFailed(emailAccountId, ids, messageId, attachment.attachmentId, pdfSha256, pdfPath, reason)) statuses.push('parse_failed');
     };
+    // ข้ามไฟล์ = ไม่ทิ้งร่องรอย: แถวพังที่เคยค้างจากรอบก่อน (เช่นตอนรหัสผิด) ต้องหายด้วย ไม่งั้นค้างถาวร
+    const skipFile = () => query(CLEAR_STALE_FAILED_SQL, [emailAccountId, pdfSha256, []]);
 
     let opened = false;
     for (const account of candidates) {
@@ -459,9 +469,10 @@ async function processMessage(
         }
         const resolved = resolveAccount(candidates, parsed.accountNumber);
         if (!resolved) {
-          console.warn(`[worker] เลขบัญชีใน statement ไม่ตรงหรือกำกวม mailbox=${emailAccountId} message=${messageId}`);
-          // บัญชีเดียวคงพฤติกรรมเดิม (ข้าม) — statement ของบัญชีที่ผู้ใช้ไม่ได้เพิ่มไว้ก็มาเข้ากล่องนี้ได้
-          if (candidates.length > 1) await failFile(failedAccountTargets(candidates, attachment.filename), 'account_unresolved');
+          // statement ของบัญชีที่ผู้ใช้ไม่ได้เพิ่มไว้ก็มาเข้ากล่องนี้ได้ — ข้ามทั้งบัญชีเดียวและหลายบัญชี
+          // ถ้าบันทึกจะเป็นแถวพังค้างถาวรใต้บัญชีที่ไม่ใช่เจ้าของ
+          console.warn(`[worker] เลขบัญชีใน statement ไม่ตรงหรือกำกวม ข้ามไฟล์ mailbox=${emailAccountId} message=${messageId}`);
+          await skipFile();
           break;
         }
         if (await writeParsedStatement(emailAccountId, resolved.id, messageId, attachment.attachmentId, pdfSha256, pdfPath, parsed)) statuses.push(parsed.checksumValid ? 'parsed' : 'checksum_failed');
@@ -477,10 +488,11 @@ async function processMessage(
         if (await writePending(emailAccountId, resolved.id, messageId, attachment.attachmentId, pdfSha256, pdfPath, extracted.text)) statuses.push('pending');
         break;
       }
+      // นโยบายเดียวกับ parser หาเลขบัญชีไม่เจอข้างบน
       console.warn(
-        `[worker] ถอดรหัสผ่านด้วยรหัสของบัญชี ${account.id} แต่แยกไม่ออกว่าเป็นบัญชีไหน mailbox=${emailAccountId} message=${messageId}`,
+        `[worker] ถอดรหัสผ่านด้วยรหัสของบัญชี ${account.id} แต่แยกไม่ออกว่าเป็นบัญชีไหน ข้ามไฟล์ mailbox=${emailAccountId} message=${messageId}`,
       );
-      await failFile(failedAccountTargets(candidates, attachment.filename), 'account_unresolved');
+      await skipFile();
       break;
     }
     // รหัสของทุกบัญชีเปิดไม่ได้ — reason เดียวกับกรณีบัญชีเดียวรหัสผิด แดชบอร์ดใช้ค่านี้โชว์ปุ่ม "ตั้งรหัสผ่าน PDF ใหม่"

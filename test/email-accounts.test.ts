@@ -24,7 +24,7 @@ test('email accounts: sync กับ token ที่ใช้ไม่ได้ 
   const { HttpError } = await import('../src/http.js');
   const { encrypt } = await import('../src/crypto.js');
   const { emailAccountsRouter } = await import('../src/routes/email-accounts.js');
-  const { countStatements, failedAccountTargets, syncEmailAccount, writeParsedStatement, writePending } = await import('../src/worker.js');
+  const { countStatements, failedAccountTargets, syncEmailAccount, writeParseFailed, writeParsedStatement, writePending } = await import('../src/worker.js');
 
   // Google ปลอมเฉพาะ token endpoint กับ messages.list — คำขออื่น (เรียก test server เอง) ส่งต่อ fetch จริง
   const realFetch = globalThis.fetch;
@@ -204,7 +204,7 @@ test('email accounts: sync กับ token ที่ใช้ไม่ได้ 
     assert.deepEqual(failedAccountTargets([a, b], 'statement.pdf'), [a, b]);
   });
 
-  await t.test('อ่านไฟล์สำเร็จใต้บัญชีหนึ่ง → ล้าง parse_failed ของไฟล์เดียวกันใต้บัญชีอื่นในกล่องเดียวกันเท่านั้น', async () => {
+  await t.test('อ่านสำเร็จ/พังซ้ำใต้บัญชีชุดใหม่/ข้ามไฟล์ → ล้าง parse_failed ของไฟล์เดียวกันใต้บัญชีอื่นในกล่องเดียวกันเท่านั้น', async () => {
     const bankId = (await db.pool.query<{ id: number }>(`select id from bank where lower(name) = 'scb'`)).rows[0]!.id;
     const otherMailbox = (
       await db.pool.query<{ id: number }>(
@@ -224,7 +224,7 @@ test('email accounts: sync กับ token ที่ใช้ไม่ได้ 
       await account(mailboxId, '333-3-33333-3'),
       await account(otherMailbox, '444-4-44444-4'),
     ];
-    // แบบที่ worker เขียนเมื่อแยกบัญชีไม่ได้: gmail id เดียวกันหลายบัญชี (unique ผูก bank_account_id จึงเขียนได้)
+    // แบบที่ worker เขียนเมื่อรหัสของทุกบัญชีเปิดไม่ได้: gmail id เดียวกันหลายบัญชี (unique ผูก bank_account_id จึงเขียนได้)
     const failUnder = (accountId: number, sha: string) =>
       db.pool.query(
         `insert into statement (bank_account_id, gmail_message_id, gmail_attachment_id, pdf_sha256, status, error_detail)
@@ -252,5 +252,23 @@ test('email accounts: sync กับ token ที่ใช้ไม่ได้ 
     for (const id of [a, b]) await failUnder(id, 'sha-pending');
     assert.equal(await writePending(mailboxId, c, 'msg', 'att', 'sha-pending', '/tmp/x.pdf', 'text'), true);
     assert.deepEqual(await rows('sha-pending'), [{ bank_account_id: c, status: 'pending' }]);
+
+    // พังซ้ำแต่เป้าแคบลง (ชื่อไฟล์ชี้ a) → แถวของ b หาย, a ได้ reason ใหม่, กล่องอื่นไม่ถูกแตะ
+    for (const id of [a, b, other]) await failUnder(id, 'sha-refail');
+    assert.equal(await writeParseFailed(mailboxId, [a], 'msg', 'att', 'sha-refail', '/tmp/x.pdf', 'pdftotext_failed'), true);
+    assert.deepEqual(await rows('sha-refail'), [
+      { bank_account_id: a, status: 'parse_failed' },
+      { bank_account_id: other, status: 'parse_failed' },
+    ]);
+    const reason = (await db.pool.query<{ reason: string }>(
+      `select error_detail->>'reason' as reason from statement where pdf_sha256 = 'sha-refail' and bank_account_id = $1`,
+      [a],
+    )).rows[0]!.reason;
+    assert.equal(reason, 'pdftotext_failed');
+
+    // เป้าว่าง (SQL เดียวกับตอน worker ข้ามไฟล์ที่เลขบัญชีไม่ตรง) → ล้างทุกแถวในกล่องนี้ ไม่นับเป็น failed
+    for (const id of [a, b, other]) await failUnder(id, 'sha-skip');
+    assert.equal(await writeParseFailed(mailboxId, [], 'msg', 'att', 'sha-skip', '/tmp/x.pdf', 'decrypt_failed'), false);
+    assert.deepEqual(await rows('sha-skip'), [{ bank_account_id: other, status: 'parse_failed' }]);
   });
 });

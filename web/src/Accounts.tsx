@@ -66,6 +66,9 @@ const SEP = <Box component="span" aria-hidden>{' · '}</Box>;
 // ตอนเพิ่งขึ้น · ฟังก์ชันระดับไฟล์ (ref คงที่) React จึงเรียกเฉพาะตอน mount ไม่ใช่ทุก render ระหว่างพิมพ์
 const revealOnMount = (el: HTMLElement | null) => el?.scrollIntoView({ block: 'nearest' });
 const accountEditId = (id: number) => `account-edit-${id}`;
+// ช่องข้อความที่บังคับกรอก — ช่องว่างล้วนผ่าน `required` ของ HTML ฟอร์มจึงเช็คเองหลัง trim (เรียงตามลำดับในฟอร์ม: ช่องแรกที่ว่างรับ focus)
+const FIELD_ID = { account_number: 'account-number', nickname: 'account-nickname' } as const;
+const BLANK_MESSAGE: Record<keyof typeof FIELD_ID, string> = { account_number: 'กรอกเลขที่บัญชี', nickname: 'กรอกชื่อเล่น' };
 
 /**
  * The Section Failure Rule: ยังไม่เคยโหลดได้ = skeleton หรือ LoadError แทนที่ส่วนนั้น (ไม่ใช่ EmptyState)
@@ -92,6 +95,8 @@ export default function Accounts() {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
+  // กดบันทึกแล้วอย่างน้อยครั้งหนึ่ง — ช่องบังคับที่ว่างหลัง trim ขึ้น error ของช่องนั้นตั้งแต่ตอนนี้
+  const [attempted, setAttempted] = useState(false);
   // บัญชีที่ถามค้างไว้จน dialog ปิดสนิท — ไม่งั้นชื่อในคำถามว่างเป็น “” ระหว่าง fade ออก
   const [archiving, setArchiving] = useState<Account | null>(null);
   const [archiveOpen, setArchiveOpen] = useState(false);
@@ -174,6 +179,7 @@ export default function Accounts() {
     setFormInitial(values);
     setShowPassword(false);
     setFormError('');
+    setAttempted(false);
     setFocusPassword(focusPdf);
     dialogOpenRef.current = true;
     setModalOpen(true);
@@ -219,10 +225,20 @@ export default function Accounts() {
   const sectionsSettled = (accounts != null || loadErrors.accounts != null) && (mailboxes != null || loadErrors.mailboxes != null);
   useHashTarget('#mailboxes-heading', sectionsSettled, mailboxesSectionRef, 'mailboxes-heading');
 
+  const blankError = (key: keyof typeof FIELD_ID) => (attempted && form[key].trim() === '' ? BLANK_MESSAGE[key] : undefined);
+
   const saveAccount = async () => {
     setFormError('');
+    // รหัสผ่าน PDF ไม่ trim — ช่องว่างหัวท้ายก็เป็นส่วนของรหัสได้
+    const trimmed = { ...form, nickname: form.nickname.trim(), account_number: form.account_number.trim(), promptpay_id: form.promptpay_id.trim() };
+    const blank = (Object.keys(FIELD_ID) as (keyof typeof FIELD_ID)[]).find((key) => trimmed[key] === '');
+    if (blank) {
+      setAttempted(true);
+      document.getElementById(FIELD_ID[blank])?.focus();
+      return;
+    }
     setSubmitting(true);
-    const { default_tax_entity_id: taxEntityId, ...fields } = form;
+    const { default_tax_entity_id: taxEntityId, ...fields } = trimmed;
     // หน้าภาษีปิด = ไม่ส่ง key นี้เลย: PATCH คงค่าเดิม (server เช็ค hasOwnProperty) POST ได้ null
     // ห้ามส่ง '' — server อ่านเป็นเลข 0 แล้วตอบ 400
     const body = TAX_PAGES_ENABLED ? { ...fields, default_tax_entity_id: taxEntityId ? Number(taxEntityId) : null } : fields;
@@ -289,13 +305,13 @@ export default function Accounts() {
       announce(
         summary.already_running
           ? { message: `${mailbox.email}: ระบบกำลังดึงอีเมลของกล่องนี้อยู่แล้ว statement ที่พบจะเข้ามาเอง`, severity: 'info' }
-          // นับรวมไฟล์เดิมที่ยังพังอยู่ (เปิดไม่ได้ และเปิดได้แต่ยอดไม่ตรง) — คำเดียวกับแถบ "ต้องจัดการ" ของแดชบอร์ด ปุ่มพาไปรายการที่บอก
-          // สาเหตุและทางแก้ทีละไฟล์ (มี action = snackbar ไม่หายเอง)
+          // statements_failed นับเฉพาะไฟล์ที่ล้มเหลวในรอบดึงนี้ (src/worker.ts) แต่รายการปลายทางบนแดชบอร์ดคือทุกไฟล์ทุกเดือนทุกกล่อง
+          // ข้อความจึงบอก "รอบนี้" ปุ่มบอก "ทั้งหมด" — รายการนั้นบอกสาเหตุและทางแก้ทีละไฟล์ (มี action = snackbar ไม่หายเอง)
           : failed > 0
             ? {
-                message: `${mailbox.email}: ${read > 0 ? `${readText} · ` : ''}statement ที่มีปัญหา ${failed.toLocaleString('th-TH')} ไฟล์`,
+                message: `${mailbox.email}: ${read > 0 ? `${readText} · ` : ''}รอบนี้พบ statement ที่มีปัญหา ${failed.toLocaleString('th-TH')} ไฟล์`,
                 severity: 'warning',
-                action: { label: 'ดูไฟล์ที่มีปัญหา', onClick: () => navigate('/dashboard#statement-failures') },
+                action: { label: 'ดูไฟล์ที่มีปัญหาทั้งหมด', onClick: () => navigate('/dashboard#statement-failures') },
               }
             : read > 0
               ? { message: `${mailbox.email}: ${readText}`, severity: 'success' }
@@ -452,7 +468,10 @@ export default function Accounts() {
       <Modal
         open={modalOpen}
         // ชื่อจากค่าตอนเปิด ไม่เปลี่ยนตามช่องชื่อเล่นที่กำลังพิมพ์
-        title={editingId ? `แก้ไขบัญชี “${formInitial.nickname}”` : 'เพิ่มบัญชีธนาคาร'}
+        // มาจากปุ่ม "ตั้งรหัสผ่าน PDF ใหม่" บนแดชบอร์ด = หัวตรงกับปุ่มที่พามา
+        title={!editingId ? 'เพิ่มบัญชีธนาคาร'
+          : focusPassword ? `ตั้งรหัสผ่าน PDF ใหม่ — “${formInitial.nickname}”`
+          : `แก้ไขบัญชี “${formInitial.nickname}”`}
         onClose={() => setModalOpen(false)}
         busy={submitting}
         dirty={JSON.stringify(form) !== JSON.stringify(formInitial)}
@@ -471,13 +490,7 @@ export default function Accounts() {
             {formError && <Alert ref={revealOnMount} severity="error">{formError}</Alert>}
             {!editingId && (
               <Typography color="text.secondary" sx={descriptionSx}>
-                ก่อนเพิ่มบัญชี ให้ขอ statement ย้อนหลังจากธนาคารส่งเข้ากล่องอีเมลของคุณ ระบบจะใช้เป็นข้อมูลตั้งต้น
-              </Typography>
-            )}
-            {/* มาจาก "ตั้งรหัสผ่าน PDF ใหม่" บนแดชบอร์ด — PATCH ที่มีรหัสใหม่สั่งอ่านทั้งกล่องใหม่ ไฟล์ที่ค้าง parse_failed ถูกเปิดอีกรอบ */}
-            {focusPassword && (
-              <Typography color="text.secondary" sx={descriptionSx}>
-                มี statement ที่เปิดด้วยรหัสผ่าน PDF ของบัญชีนี้ไม่ได้ ใส่รหัสใหม่แล้วระบบจะลองเปิดไฟล์เดิมอีกครั้ง
+                ถ้าอยากได้ข้อมูลย้อนหลัง ขอ statement ย้อนหลังจากธนาคารให้ส่งเข้ากล่องอีเมลของบัญชีนี้ได้ ระบบจะอ่านและใช้เป็นข้อมูลตั้งต้นให้เอง
               </Typography>
             )}
             {formLoadError && <LoadError message={formLoadError} onRetry={retry} />}
@@ -505,16 +518,30 @@ export default function Accounts() {
                   ))}
                 </TextField>
                 {/* เลขบัญชีคือสิ่งที่ระบบใช้จับคู่ statement กับบัญชี — เปลี่ยนแล้วอ่านใหม่ทั้งกล่องเหมือนช่องอื่นในชุดนี้ */}
-                <TextField label="เลขที่บัญชี" helperText="กรอกตามที่แสดงใน statement" value={form.account_number} onChange={setFormField('account_number')} required slotProps={{ htmlInput: { maxLength: 40 } }} />
+                {/* statement ปิดบางหลัก (`xxx-x-x6231-x`) ระบบเทียบเฉพาะตัวเลขกับหลักที่เห็น (src/account-match.ts) จึงต้องเป็นเลขเต็ม */}
+                <TextField
+                  id={FIELD_ID.account_number}
+                  label="เลขที่บัญชี"
+                  error={blankError('account_number') != null}
+                  helperText={blankError('account_number') ?? 'เลขเต็มจากแอปธนาคารหรือสมุดบัญชี (statement ปิดบางหลักไว้) มีขีดหรือไม่ก็ได้'}
+                  value={form.account_number}
+                  onChange={setFormField('account_number')}
+                  required
+                  slotProps={{ htmlInput: { maxLength: 40 } }}
+                />
                 {/* รหัสเปิดไฟล์คือข้อมูลการเชื่อมต่อ — ไฟล์ที่เปิดไม่ได้บนแดชบอร์ดลิงก์มาที่ช่องนี้ (`?edit=` → autoFocus) */}
                 <TextField
                   type={showPassword ? 'text' : 'password'}
                   label="รหัสผ่านเปิดไฟล์ statement"
                   // PATCH ที่ช่องนี้ว่าง server คงรหัสเดิมไว้ (src/routes/accounts.ts) · คำใบ้ตามคู่มือ (guides.ts)
-                  // มาจากลิงก์ซ่อม = มาเพื่อใส่รหัสใหม่ จึงบังคับกรอกและไม่บอกว่าเว้นว่างได้
-                  helperText={editingId && !focusPassword
-                    ? 'เว้นว่างไว้ = ใช้รหัสเดิม · ธนาคารตั้งให้ มักเป็นเลขบัตรประชาชนหรือวันเกิด · ระบบเก็บแบบเข้ารหัสและไม่แสดงกลับอีก'
-                    : 'รหัสเปิดไฟล์ PDF ที่ธนาคารตั้งให้ มักเป็นเลขบัตรประชาชนหรือวันเกิด · ระบบเก็บแบบเข้ารหัสและไม่แสดงกลับอีก'}
+                  // มาจากลิงก์ซ่อม = มาเพื่อใส่รหัสใหม่ จึงบังคับกรอกและไม่บอกว่าเว้นว่างได้ · บริบท "ทำไมถึงมา" อยู่ต้น helper ไม่ใช่ย่อหน้าแยก
+                  // เพราะ focus ลงช่องนี้ตรง ๆ helper ผูก aria-describedby screen reader จึงอ่านพร้อมช่อง · PATCH ที่มีรหัสใหม่สั่งอ่านทั้งกล่องใหม่
+                  // ไฟล์ที่ค้าง parse_failed ถูกเปิดอีกรอบ
+                  helperText={focusPassword
+                    ? 'มี statement ที่เปิดด้วยรหัสเดิมไม่ได้ ใส่รหัสใหม่แล้วระบบจะลองเปิดไฟล์เดิมอีกครั้ง · ธนาคารตั้งให้ มักเป็นเลขบัตรประชาชนหรือวันเกิด · ระบบเก็บแบบเข้ารหัสและไม่แสดงกลับอีก'
+                    : editingId
+                      ? 'เว้นว่างไว้ = ใช้รหัสเดิม · ธนาคารตั้งให้ มักเป็นเลขบัตรประชาชนหรือวันเกิด · ระบบเก็บแบบเข้ารหัสและไม่แสดงกลับอีก'
+                      : 'รหัสเปิดไฟล์ PDF ที่ธนาคารตั้งให้ มักเป็นเลขบัตรประชาชนหรือวันเกิด · ระบบเก็บแบบเข้ารหัสและไม่แสดงกลับอีก'}
                   value={form.pdf_password}
                   onChange={setFormField('pdf_password')}
                   required={!editingId || focusPassword}
@@ -538,7 +565,16 @@ export default function Accounts() {
             <Box component="fieldset" sx={{ m: 0, p: 0, minWidth: 0, border: 0 }}>
               <FormLabel component="legend" sx={{ mb: 1.5, color: 'text.primary', fontWeight: 600 }}>รายละเอียดบัญชี</FormLabel>
               <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 16rem), 1fr))' }}>
-                <TextField label="ชื่อเล่น" helperText="ชื่อที่ช่วยให้จำบัญชีนี้ได้ง่าย" value={form.nickname} onChange={setFormField('nickname')} required slotProps={{ htmlInput: { maxLength: 60 } }} />
+                <TextField
+                  id={FIELD_ID.nickname}
+                  label="ชื่อเล่น"
+                  error={blankError('nickname') != null}
+                  helperText={blankError('nickname') ?? 'ชื่อที่ช่วยให้จำบัญชีนี้ได้ง่าย'}
+                  value={form.nickname}
+                  onChange={setFormField('nickname')}
+                  required
+                  slotProps={{ htmlInput: { maxLength: 60 } }}
+                />
                 <TextField label="พร้อมเพย์ (ไม่บังคับ)" helperText="ใช้ช่วยจับคู่รายการโอนภายในครอบครัว" value={form.promptpay_id} onChange={setFormField('promptpay_id')} slotProps={{ htmlInput: { maxLength: 40 } }} />
                 {TAX_PAGES_ENABLED && (
                   <TextField
@@ -596,7 +632,7 @@ export default function Accounts() {
           id="mailboxes-heading"
           tabIndex={-1}
           title="กล่องอีเมล"
-          description='กล่อง Gmail ที่ระบบค้นเฉพาะอีเมล statement จากธนาคาร ระบบดึงให้เองทุกชั่วโมง หรือกด "ดึงอีเมลใหม่" เพื่อดึงทันที'
+          description='ระบบค้นเฉพาะอีเมล statement ดึงเองทุกชั่วโมง หรือกด "ดึงอีเมลใหม่" เพื่อดึงทันที'
           // จอแคบ PageHeader ยืด action เต็มกว้าง — ปุ่มรองนี้ไม่ยืด จะได้ไม่เด่นกว่า "ดึงอีเมลใหม่" ของแต่ละกล่อง
           // ยังไม่มีกล่อง = ซ่อน (ทางเดียวคือ "เชื่อม Gmail" ในกล่องว่างของตารางบัญชี)
           action={noMailbox ? undefined : <Button variant="outlined" startIcon={<AddRounded />} href="/auth/google?add=1" sx={{ whiteSpace: 'nowrap', alignSelf: 'flex-start' }}>ต่อกล่องอีเมลอื่นเพิ่ม</Button>}

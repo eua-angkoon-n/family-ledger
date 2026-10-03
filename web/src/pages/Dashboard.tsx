@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { Alert, Box, Button, Skeleton, Stack, Typography, useMediaQuery } from '@mui/material';
 import { useColorScheme, type Theme } from '@mui/material/styles';
 import { BarChart } from '@mui/x-charts/BarChart';
@@ -80,14 +80,13 @@ function IssueCount({ n }: { n: number }) {
   );
 }
 
-// error_reason ที่ worker เขียนจริง (src/worker.ts): decrypt_failed / pdftotext_failed / account_unresolved / checksum_failed
-// หรือข้อความ exception ของ parser (เช่น "ไม่พบชนิด KBank statement") — ปุ่มมีเฉพาะรหัสผ่าน PDF (`?edit=` เปิดฟอร์มที่บอกว่ารหัส
-// ไม่ตรง) · แยกบัญชีไม่ออกผู้ใช้ตรวจเลขบัญชีเองได้แต่ไม่มีปุ่ม (ฟอร์มจากลิงก์จะพูดเรื่องรหัสผ่านผิดเรื่อง) · ที่เหลือเป็นเรื่องของ
-// parser/เซิร์ฟเวอร์ จึงบอกให้แจ้งผู้ดูแล ไม่มีปุ่มที่กดแล้วแก้ไม่ได้ (ข้อความดิบไม่แสดง เลข #id พอให้ผู้ดูแลตามได้)
+// error_reason ที่ worker เขียนจริง (src/worker.ts): decrypt_failed / pdftotext_failed / checksum_failed หรือข้อความ
+// exception ของ parser (เช่น "ไม่พบชนิด KBank statement") — มีแค่รหัสผ่าน PDF ที่ผู้ใช้แก้เองได้ (`?edit=` เปิดฟอร์มตั้งรหัสใหม่)
+// ที่เหลือเป็นเรื่องของ parser/เซิร์ฟเวอร์ จึงบอกให้แจ้งผู้ดูแล ไม่มีปุ่มที่กดแล้วแก้ไม่ได้ (ข้อความดิบไม่แสดง เลข #id พอให้ผู้ดูแลตามได้)
+// ไฟล์ที่เปิดได้แต่เลขบัญชีไม่ตรงบัญชีใด = statement ของบัญชีที่ไม่ได้เพิ่ม worker ข้ามไป ไม่ขึ้นในรายการนี้
 function failureInfo(s: FailedStatement): { text: string; selfFix: boolean } {
   const reason = typeof s.error_reason === 'string' ? s.error_reason : '';
   if (reason === 'decrypt_failed') return { text: 'เปิดไฟล์ไม่ได้ เพราะรหัสผ่าน PDF ไม่ตรง', selfFix: true };
-  if (reason === 'account_unresolved') return { text: 'ระบบแยกไม่ออกว่าไฟล์นี้เป็นของบัญชีไหน — ตรวจเลขบัญชีที่ตั้งไว้ในหน้าบัญชีของฉัน', selfFix: false };
   if (reason === 'pdftotext_failed') return { text: 'อ่านข้อความในไฟล์ไม่ได้ — แจ้งผู้ดูแล', selfFix: false };
   if (s.status === 'checksum_failed') return { text: 'ยอดรวมในไฟล์ไม่ตรงกับรายการ — แจ้งผู้ดูแล', selfFix: false };
   return { text: 'ธนาคารเปลี่ยนรูปแบบไฟล์ ระบบยังอ่านไม่ได้ — แจ้งผู้ดูแล', selfFix: false };
@@ -160,6 +159,7 @@ const sectionHeadingSx = { fontSize: '1.25rem', mb: 1.5 } as const;
 export default function Dashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { search } = useLocation();
   // ?month= ที่พิมพ์ไม่ครบ/ผิดรูปแบบไม่ยิง request — ใช้เดือนปัจจุบันแทน (ไม่ replace URL ทิ้ง ค่าที่คำนวณได้คือสิ่งที่ใช้จริง)
   const month = validMonth(searchParams.get('month'), currentMonth()) ?? currentMonth();
   const setMonth = (m: string) => setSearchParams((prev) => { const next = new URLSearchParams(prev); next.set('month', m); return next; });
@@ -228,7 +228,7 @@ export default function Dashboard() {
   const issues = issuesReady
     ? [
         { label: 'บิลเกินกำหนด', n: overdue, to: `/planning?month=${month}` },
-        { label: 'statement ที่มีปัญหา', n: parseFailed + checksumFailed, to: '#statement-failures' },
+        { label: 'statement ที่มีปัญหา', n: parseFailed + checksumFailed, to: { search, hash: '#statement-failures' } },
         { label: 'บัญชีข้อมูลช้า', n: behindCount, to: '#data-freshness' },
         { label: 'ยังไม่จัดหมวด', n: summary?.uncategorised_count ?? 0, to: txnLink({ uncategorised: '1' }) },
         { label: 'ยังไม่ตรวจ', n: summary?.unreviewed_count ?? 0, to: txnLink({ review_status: 'unreviewed' }) },
@@ -329,8 +329,10 @@ export default function Dashboard() {
           {issues.map((i) => {
             // span ครอบ: Button เป็น inline-flex ช่องว่างล้วนระหว่างลูก flex ถูกทิ้ง ป้ายกับตัวเลขจะติดกัน
             const label = <span>{i.label} <Box component="span" sx={dataTextSx}>{i.n.toLocaleString('th-TH')}</Box></span>;
-            // ส่วนในหน้าเดียวกันเป็น anchor ธรรมดา (router ไม่เลื่อนไปหา #id ให้)
-            return i.to.startsWith('#') ? (
+            // #statement-failures ผ่าน router: ได้ location.key ใหม่ทุกครั้ง useHashTarget จึงเลื่อน+focus หัวรายการ (anchor ธรรมดา
+            // เป็น pop ที่ key "default" ซ้ำกับตอนเปิดหน้าตรงด้วย hash นี้ จึงถูกข้าม) — ส่ง search ไปด้วย ไม่งั้น ?month= หาย
+            // #data-freshness ยังไม่มี useHashTarget จึงเป็น anchor ธรรมดาให้ browser เลื่อนเอง (router ไม่เลื่อนไปหา #id ให้)
+            return typeof i.to === 'string' && i.to.startsWith('#') ? (
               <Button key={i.label} href={i.to} variant="outlined" color="warning" size="small" endIcon={<ChevronRightRounded />}>{label}</Button>
             ) : (
               <Button key={i.label} component={Link} to={i.to} variant="outlined" color="warning" size="small" endIcon={<ChevronRightRounded />}>{label}</Button>
