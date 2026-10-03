@@ -180,7 +180,18 @@ function parseOnDemand(text: string): ParsedStatement {
     closingBalanceSatang: closing,
     transactions,
     checksumValid: openingKnown && transitionsValid && checksum(transactions, opening, closing, totalDebit, totalCredit),
+    ...emptyReason(openingKnown, transactions, totalDebit, totalCredit),
   };
+}
+
+// SCB ไม่พิมพ์ยอดยกมาในช่วงที่ไม่มี movement — gate ยังไม่ผ่าน (ห้ามเดายอด) แต่ติด reason ให้รู้ว่าไม่ใช่ไฟล์พัง
+function emptyReason(
+  openingKnown: boolean,
+  transactions: ParsedTransaction[],
+  totalDebit: number,
+  totalCredit: number,
+): Pick<ParsedStatement, 'checksumReason'> {
+  return !openingKnown && !transactions.length && totalDebit === 0 && totalCredit === 0 ? { checksumReason: 'no_data' } : {};
 }
 
 function parseLegacyOnDemand(text: string): ParsedStatement {
@@ -244,6 +255,7 @@ function parseLegacyOnDemand(text: string): ParsedStatement {
     closingBalanceSatang: closing,
     transactions,
     checksumValid: openingKnown && transitionsValid && checksum(transactions, opening, closing, totalDebit, totalCredit),
+    ...emptyReason(openingKnown, transactions, totalDebit, totalCredit),
   };
 }
 

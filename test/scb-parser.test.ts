@@ -66,6 +66,14 @@ test('SCB ย้อนหลังที่ไม่มีรายการแ�
   assert.equal(parsed.periodStart, '2026-01-01');
   assert.equal(parsed.transactions.length, 0);
   assert.equal(parsed.checksumValid, false);
+  assert.equal(parsed.checksumReason, 'no_data');
+});
+
+test('SCB ย้อนหลังที่มีรายการแต่ไม่มี opening balance ไม่ใช่ไฟล์ว่าง — ยังเป็นปัญหา', () => {
+  const parsed = parseScbStatement(ondemand.replace(/^.*BALANCE BROUGHT FORWARD.*$/m, 'STATEMENT OF SAVING ACCOUNT'));
+  assert.ok(parsed.transactions.length > 0);
+  assert.equal(parsed.checksumValid, false);
+  assert.equal(parsed.checksumReason, undefined);
 });
 
 test('SCB ย้อนหลังรุ่นเก่า: code/channel อยู่ช่องเดียวและเวลาอยู่บรรทัดถัดไป', () => {
@@ -84,4 +92,5 @@ test('SCB ย้อนหลังรุ่นเก่าที่ No data ต�
   assert.equal(parsed.periodEnd, '2024-09-13');
   assert.equal(parsed.transactions.length, 0);
   assert.equal(parsed.checksumValid, false);
+  assert.equal(parsed.checksumReason, 'no_data');
 });

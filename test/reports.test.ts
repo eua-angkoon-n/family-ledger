@@ -176,6 +176,20 @@ test('reports API + transaction list/detail', async (t) => {
     assert.equal(body.failed_statements.length, 3);
   });
 
+  await t.test('statement_health ไม่นับไฟล์ว่าง (checksum_failed reason no_data) และไม่ขึ้นในรายการ', async () => {
+    const failed = { periodStart: '2026-08-01', periodEnd: '2026-08-31', status: 'checksum_failed' };
+    await seedStatement(accountA1, 'msg-checksum', { ...failed, pdfSha256: 'sha-checksum' });
+    const emptyId = await seedStatement(accountA1, 'msg-empty', { ...failed, pdfSha256: 'sha-empty' });
+    await db.pool.query(`update statement set error_detail = '{"reason":"no_data"}' where id = $1`, [emptyId]);
+    const body = (await (await request('/api/reports/summary?month=2026-08')).json()) as {
+      statement_health: { status: string; n: number }[];
+      failed_statements: { id: number }[];
+    };
+    assert.equal(body.statement_health.find((s) => s.status === 'checksum_failed')?.n, 1);
+    assert.equal(body.failed_statements.length, 4);
+    assert.ok(!body.failed_statements.some((s) => s.id === emptyId));
+  });
+
   await t.test('ข้อ 3: category-breakdown — 3-split นับครั้งเดียวต่อหมวด, 0-split ตกไป category_id: null, ผลรวมเท่า money_out_satang', async () => {
     const res = await request('/api/reports/category-breakdown?month=2026-08');
     assert.equal(res.status, 200);

@@ -330,7 +330,7 @@ export async function writeParsedStatement(
 ): Promise<boolean> {
   return tx(async (client) => {
     const status = parsed.checksumValid ? 'parsed' : 'checksum_failed';
-    const errorDetail = parsed.checksumValid ? null : JSON.stringify({ reason: 'checksum_failed' });
+    const errorDetail = parsed.checksumValid ? null : JSON.stringify({ reason: parsed.checksumReason ?? 'checksum_failed' });
     const insertedStatement = await client.query<{ id: number }>(
       `insert into statement (
          bank_account_id, gmail_message_id, gmail_attachment_id, pdf_sha256, period_start, period_end,
@@ -450,14 +450,14 @@ async function processMessage(
     }
     const pdfSha256 = createHash('sha256').update(pdfBuf).digest('hex');
     // Gmail attachmentId เปลี่ยนได้ระหว่าง messages.get; hash ของไฟล์ต้นฉบับคือ identity ที่คงที่
-    const duplicate = await query<{ status: StatementStatus }>(
-      `select s.status from statement s join bank_account a on a.id = s.bank_account_id
+    const duplicate = await query<{ status: StatementStatus; reason: string | null }>(
+      `select s.status, s.error_detail->>'reason' as reason from statement s join bank_account a on a.id = s.bank_account_id
        where a.email_account_id = $1 and s.pdf_sha256 = $2 and s.status <> 'parse_failed'`,
       [emailAccountId, pdfSha256],
     );
     if (duplicate.rowCount) {
-      // checksum_failed ไม่ถูกลองใหม่ แต่ยังเป็นไฟล์ที่พังอยู่ — นับให้ผู้ใช้เห็น ส่วนไฟล์ที่อ่านแล้วไม่นับซ้ำ
-      if (duplicate.rows.some((r) => r.status === 'checksum_failed')) statuses.push('checksum_failed');
+      // checksum_failed ไม่ถูกลองใหม่ แต่ยังเป็นไฟล์ที่พังอยู่ — นับให้ผู้ใช้เห็น ส่วนไฟล์ที่อ่านแล้วและไฟล์ว่าง (no_data) ไม่นับซ้ำ
+      if (duplicate.rows.some((r) => r.status === 'checksum_failed' && r.reason !== 'no_data')) statuses.push('checksum_failed');
       continue;
     }
     const pdfPath = join(dir, `${messageId}_${index + 1}.pdf`);
@@ -503,7 +503,7 @@ async function processMessage(
         console.warn(`[worker] เลขบัญชีใน statement ไม่ตรงบัญชีใดในกล่อง ข้ามไฟล์ mailbox=${emailAccountId} message=${messageId}`);
         await skipStatementFile(emailAccountId, pdfSha256, pdfPath);
       } else if (parsed) {
-        if (await writeParsedStatement(emailAccountId, owners[0]!.id, messageId, attachment.attachmentId, pdfSha256, pdfPath, parsed)) statuses.push(parsed.checksumValid ? 'parsed' : 'checksum_failed');
+        if (await writeParsedStatement(emailAccountId, owners[0]!.id, messageId, attachment.attachmentId, pdfSha256, pdfPath, parsed)) statuses.push(parsed.checksumValid || parsed.checksumReason === 'no_data' ? 'parsed' : 'checksum_failed');
       } else if (await writePending(emailAccountId, owners[0]!.id, messageId, attachment.attachmentId, pdfSha256, pdfPath, extracted.text)) {
         statuses.push('pending');
       }
