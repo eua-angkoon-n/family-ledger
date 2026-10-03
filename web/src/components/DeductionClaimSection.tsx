@@ -172,6 +172,8 @@ export default function DeductionClaimSection({ taxEntityId, taxYear, onChanged 
     <Box component="section" aria-labelledby="deduction-claim-heading">
       <PageHeader
         id="deduction-claim-heading"
+        // ปลายทางของลิงก์ #deduction-claim-heading จากตารางที่มาของหน้าประมาณการ (useHashTarget focus หัวข้อนี้)
+        tabIndex={-1}
         title="ค่าลดหย่อน"
         // เพดาน/ประกันสังคมอยู่ใต้ช่องในฟอร์ม (ตอนกรอกจริง) — ส่วนนำของหน้าบนมือถือสั้นลง
         description="ยอดที่ยื่นขอรวมเข้าประมาณการ ไม่รวมลดหย่อนส่วนตัวที่ระบบหักให้เอง"

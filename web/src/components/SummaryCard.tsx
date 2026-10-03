@@ -48,6 +48,13 @@ export function summaryRowSx(count: number) {
 // นอก summaryRowSx subgrid ไม่มีผล การ์ดเรียงสามบรรทัดตามปกติ
 const cardGridSx = { display: 'grid', gridRow: 'span 3', gridTemplateRows: 'subgrid', minWidth: 0 } as const;
 
+// ขั้น Data Display ของตัวเลขการ์ด (DESIGN.md) — dense ที่ md 1.125rem (การ์ด 5 ใบที่ 900px เหลือที่ให้ตัวเลขราว 125px) ที่ lg 1.5rem (ราว 185px)
+const VALUE_STEP = { xs: '1.25rem', sm: '1.5rem', lg: '1.75rem' } as const;
+const DENSE_VALUE_STEP = { xs: '1.25rem', md: '1.125rem', lg: '1.5rem' } as const;
+// ไม่เกิน 14.5% ของความกว้างกล่องตัวเลข = กว้างได้ราว 6.9em: "฿9,999,999.99" (~6.53em) จุในกล่อง ส่วน "−฿9,999,999.99" (~7.42em)
+// เกินเข้า padding ราว 8px ที่ 320px แต่ไม่ทะลุขอบการ์ด (16cqi เดิมจุแค่ ~6.25em — ยอดเจ็ดหลักล้นที่ 320px)
+const cqiCap = (step: Record<string, string>) => Object.fromEntries(Object.entries(step).map(([bp, size]) => [bp, `min(${size}, 14.5cqi)`]));
+
 // การ์ดสรุปตัวเดียว ไม่ซ้อน Paper ใน Paper (Don't ของ DESIGN.md) — value ผ่าน dataTextSx เสมอ
 // (ตัวเลข/เงินตาม Financial Clarity Rule) ต่างจาก title/caption ที่เป็นคำอธิบาย
 export default function SummaryCard({ title, icon, value, caption, to, onClick, disabled, disabledReason, loading = false, dense = false, captionInline = false }: SummaryCardProps) {
@@ -82,13 +89,12 @@ export default function SummaryCard({ title, icon, value, caption, to, onClick, 
           sx={{
             ...dataTextSx,
             lineHeight: 1.3,
-            // ตัวเลขไม่ตัดกลาง ("฿123,456.7 / 8") — ย่อแทน: ขนาดตามขั้น Data Display ของ DESIGN.md แต่ไม่เกิน 16% ของความกว้าง
-            // ("฿123,456.78" กว้างราว 6em จึงพอดีการ์ด) ที่จอปกติ 16cqi ใหญ่กว่าขั้นอยู่แล้ว ขนาดเท่าเดิม ย่อเฉพาะการ์ดที่แคบจริง
-            // (320px: กว้าง ~106px → ~17px) · dense ที่ md 1.125rem (การ์ด 5 ใบที่ 900px เหลือที่ให้ตัวเลขราว 125px) ที่ lg 1.5rem (ราว 185px)
-            whiteSpace: 'nowrap',
-            fontSize: dense
-              ? { xs: 'min(1.25rem, 16cqi)', md: 'min(1.125rem, 16cqi)', lg: 'min(1.5rem, 16cqi)' }
-              : { xs: 'min(1.25rem, 16cqi)', sm: 'min(1.5rem, 16cqi)', lg: 'min(1.75rem, 16cqi)' },
+            // ตัวเลขไม่ตัดกลาง ("฿123,456.7 / 8") — ย่อแทน: ขนาดตามขั้นแต่ไม่เกิน 14.5cqi (cqiCap) ย่อเฉพาะการ์ดที่แคบจริง
+            // (320px: กล่องกว้าง 104px → ~15px) · เบราว์เซอร์ที่ไม่รู้จัก cqi (Safari < 16) ทิ้ง min() ทั้งก้อนแล้วตัวเลขเหลือ 16px
+            // จึงใส่ขั้นปกติก่อน และ nowrap อยู่ใน @supports ด้วย — fallback ยังตัดบรรทัดได้ (overflowWrap) ดีกว่าล้นการ์ด
+            fontSize: dense ? DENSE_VALUE_STEP : VALUE_STEP,
+            overflowWrap: 'anywhere',
+            '@supports (font-size: 1cqi)': { whiteSpace: 'nowrap', fontSize: cqiCap(dense ? DENSE_VALUE_STEP : VALUE_STEP) },
           }}
         >
           {/* "—" ล้วน screen reader อ่านเป็น "ขีด" หรือข้ามไป — ซ่อนจาก AT แล้วให้ข้อความแทน */}

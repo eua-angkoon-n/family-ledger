@@ -132,7 +132,7 @@ export default function GmailAttachmentPicker({ open, mailboxes, taxEntities, on
       ) : (
         <Stack spacing={2.5}>
           <Typography variant="body2" color="text.secondary">ไฟล์ที่เลือก: {selected.filename}</Typography>
-          <TaxDocumentMetadataFields form={form} setForm={setForm} taxEntities={taxEntities} idPrefix={idPrefix} attempted={attempted} />
+          <TaxDocumentMetadataFields form={form} setForm={setForm} taxEntities={taxEntities} idPrefix={idPrefix} attempted={attempted} followIssueYear />
           {error && <Alert severity="error">{error}</Alert>}
           <Stack direction={{ xs: 'column-reverse', sm: 'row' }} spacing={1} sx={{ justifyContent: 'flex-end' }}>
             <Button type="button" color="inherit" onClick={() => setSelected(null)} disabled={submitting}>ย้อนกลับ</Button>

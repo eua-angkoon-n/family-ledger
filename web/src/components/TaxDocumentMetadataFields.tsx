@@ -169,9 +169,11 @@ export function TaxDocumentMetadataFields({
   const yearOf = (date: string) => (/^\d{4}-\d{2}-\d{2}$/.test(date) && Number(date.slice(0, 4)) >= 2000 && Number(date.slice(0, 4)) <= 2200 ? date.slice(0, 4) : '');
   const [yearTouched, setYearTouched] = useState(false);
   const issueYear = yearOf(form.issue_date);
-  // ต่างกันได้จริง (หนังสือรับรองหัก ณ ที่จ่ายของปีก่อนออกต้นปีถัดไป) — เตือนใต้ช่อง ไม่บล็อก
+  // ต่างกันได้จริงเฉพาะออกปีถัดไป (หนังสือรับรองหัก ณ ที่จ่ายของปีก่อนออกต้นปี) — กรณีอื่นมักกรอกผิด · เตือนใต้ช่อง ไม่บล็อก
   const yearHelp = issueYear === '' ? undefined : issueYear !== form.tax_year
-    ? `วันที่ออกเอกสารเป็นปี ${taxYearBE(issueYear)} — ถ้าเป็นเอกสารของปีก่อน (เช่นหนังสือรับรองหัก ณ ที่จ่ายที่ออกต้นปี) ปีภาษีนี้ถูกแล้ว`
+    ? Number(issueYear) === Number(form.tax_year) + 1
+      ? `วันที่ออกเอกสารเป็นปี ${taxYearBE(issueYear)} — ถ้าเป็นเอกสารของปีก่อน (เช่นหนังสือรับรองหัก ณ ที่จ่ายที่ออกต้นปี) ปีภาษีนี้ถูกแล้ว`
+      : `วันที่ออกเอกสารเป็นปี ${taxYearBE(issueYear)} — ปีภาษีไม่ตรงกับวันที่ออก ตรวจอีกครั้ง`
     : followIssueYear && !yearTouched ? 'ตามปีของวันที่ออกเอกสาร' : undefined;
 
   const activeEntities = taxEntities.filter((e) => e.is_active || String(e.id) === form.tax_entity_id);
