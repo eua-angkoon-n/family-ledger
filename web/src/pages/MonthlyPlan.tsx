@@ -7,7 +7,6 @@ import {
   Button,
   Checkbox,
   Chip,
-  Collapse,
   FormLabel,
   LinearProgress,
   Link as MuiLink,
@@ -35,7 +34,6 @@ import ContentCopyRounded from '@mui/icons-material/ContentCopyRounded';
 import EditRounded from '@mui/icons-material/EditRounded';
 import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
-import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded';
 import HistoryRounded from '@mui/icons-material/HistoryRounded';
 import LinkRounded from '@mui/icons-material/LinkRounded';
 import ReplayRounded from '@mui/icons-material/ReplayRounded';
@@ -91,6 +89,7 @@ import {
   amountFieldHelp,
   BELOW_MD,
   ConfirmDialog,
+  Disclosure,
   EmptyState,
   FeedbackSnackbar,
   LoadError,
@@ -98,6 +97,7 @@ import {
   PageHeader,
   RowIconButton,
   TableSkeleton,
+  useStoredOpen,
   type Notice,
 } from '../ui.js';
 
@@ -128,14 +128,6 @@ const CLAMP_2 = { display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLin
 const NAME_CELL = { width: { xs: '100%', md: 'auto' }, maxWidth: { xs: 0, md: 'none' } } as const;
 
 const RULES_OPEN_KEY = 'hyacinthia.planning.rulesOpen';
-// localStorage โดนบล็อกได้ (โหมดส่วนตัว) — อ่านไม่ได้ = พับไว้ (ค่าเริ่มต้น) เขียนไม่ได้ = จำแค่รอบนี้
-function readRulesOpen(): boolean {
-  try {
-    return localStorage.getItem(RULES_OPEN_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
 
 const EMPTY_ITEM = { kind: 'expense', name: '', amount_baht: '', due_date: '', category_id: '', note: '' };
 const EMPTY_RULE = {
@@ -287,7 +279,7 @@ export default function MonthlyPlan() {
   const [submitting, setSubmitting] = useState(false);
   const [closing, setClosing] = useState(false);
   const requestIdRef = useRef(0);
-  const [rulesOpen, setRulesOpen] = useState(readRulesOpen);
+  const [rulesOpen, setRulesOpen] = useStoredOpen(RULES_OPEN_KEY);
 
   // ค่าตอนเปิดฟอร์มของทุก modal — ต่างจากนี้ = มีการแก้ค้าง Modal ถามก่อนปิด (The Unsaved Modal Rule)
   const [itemForm, setItemForm] = useState(EMPTY_ITEM);
@@ -461,15 +453,6 @@ export default function MonthlyPlan() {
   const activeRules = rules.filter((r) => r.is_active);
   // โหลดครั้งแรกยังไม่รู้จำนวน — ไม่แสดง "(0)" หรือ "ยังไม่มีรายการประจำ" ก่อนข้อมูลมา (รายการประจำไม่ผูกกับเดือน สลับเดือนแล้วคงของเดิมไว้)
   const rulesPending = loading && rules.length === 0;
-  const toggleRules = () => {
-    const next = !rulesOpen;
-    setRulesOpen(next);
-    try {
-      localStorage.setItem(RULES_OPEN_KEY, next ? '1' : '0');
-    } catch {
-      // เขียนไม่ได้ = จำแค่รอบนี้
-    }
-  };
 
   const visibleItems = items.filter((i) => matchesItemFilter(i, itemFilter));
   if (itemSort) visibleItems.sort(comparePlanItems(itemSort.key, itemSort.dir));
@@ -752,7 +735,7 @@ export default function MonthlyPlan() {
       () => {
         setRuleModalOpen(false);
         // ส่วนที่พับไว้ต้องกางให้เห็นกฎที่เพิ่งบันทึก
-        if (!rulesOpen) toggleRules();
+        if (!rulesOpen) setRulesOpen(true);
       },
     );
   };
@@ -1336,36 +1319,20 @@ export default function MonthlyPlan() {
 
         {/* รายการประจำไม่ผูกกับเดือน ใช้ไม่บ่อย จึงพับไว้เป็นค่าเริ่มต้น จำต่อเครื่อง — หัวข้อเป็นปุ่ม disclosure
             (aria-expanded) ส่วนปุ่มเพิ่มและความล้มเหลวอยู่นอกส่วนที่พับ ให้เห็นเสมอ */}
-        <Box component="section" aria-labelledby="plan-rules-heading">
-          <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, mb: 1.5 }}>
-            <Typography variant="h2" id="plan-rules-heading">
-              <Button
-                color="inherit"
-                // โหลดไม่ได้ = ส่วนที่พับซ่อนอยู่แม้ตั้งให้กางไว้ (LoadError แสดงแทน) — บอกตามที่เห็นจริง
-                aria-expanded={rulesOpen && !rulesError}
-                aria-controls="plan-rules-panel"
-                onClick={toggleRules}
-                endIcon={
-                  <ExpandMoreRounded
-                    sx={{
-                      transform: rulesOpen && !rulesError ? 'rotate(180deg)' : 'none',
-                      transition: (theme) => theme.transitions.create('transform'),
-                      '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
-                    }}
-                  />
-                }
-                sx={{ font: 'inherit', ml: -1, px: 1 }}
-              >
-                รายการประจำ{rulesError || rulesPending ? '' : ` (${activeRules.length})`}
-              </Button>
-            </Typography>
+        {/* โหลดไม่ได้ = ส่วนที่พับซ่อนอยู่แม้ตั้งให้กางไว้ (LoadError แสดงแทน) — aria-expanded บอกตามที่เห็นจริง */}
+        <Disclosure
+          id="plan-rules-heading"
+          title={`รายการประจำ${rulesError || rulesPending ? '' : ` (${activeRules.length})`}`}
+          open={rulesOpen && !rulesError}
+          onToggle={() => setRulesOpen(!rulesOpen)}
+          action={
             <Button variant="outlined" size="small" startIcon={<AddRounded />} onClick={openAddRule}>
               เพิ่มรายการประจำ
             </Button>
-          </Stack>
-          {rulesError && <LoadError message={rulesError} onRetry={() => void reload(true)} />}
-          <Collapse in={rulesOpen && !rulesError}>
-            <Box id="plan-rules-panel">
+          }
+          notice={rulesError && <LoadError message={rulesError} onRetry={() => void reload(true)} />}
+        >
+            <Box>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, ...descriptionSx }}>
                 ระบบสร้างรายการให้ทุกเดือนที่เปิดดู การแก้กฎมีผลกับเดือนที่ยังไม่ได้สร้างรายการเท่านั้น
                 ไม่ย้อนแก้เดือนที่ตรวจหรือปิดไปแล้ว
@@ -1492,8 +1459,7 @@ export default function MonthlyPlan() {
                 </>
               )}
             </Box>
-          </Collapse>
-        </Box>
+        </Disclosure>
       </Stack>
 
       <Modal
