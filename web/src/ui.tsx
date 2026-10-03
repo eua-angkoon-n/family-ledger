@@ -263,7 +263,7 @@ export function ConfirmDialog({
 }
 
 // info = ผลที่ไม่ใช่ทั้งสำเร็จและผิดพลาด เช่น ผู้ใช้กดยกเลิกเองในหน้าของ Google (สี info = muted ไม่ใช่สีสถานะใหม่)
-// action = ปุ่มเดียวต่อท้ายข้อความ เช่น "เลิกทำ" — snackbar ค้างนานขึ้นให้ทันกด
+// action = ปุ่มเดียวต่อท้ายข้อความ เช่น "เลิกทำ" — snackbar ไม่หายเอง (WCAG 2.2.1) ปิดด้วย X หรือ Esc
 export type Notice = { message: string; severity: 'success' | 'error' | 'info'; action?: { label: string; onClick: () => void } };
 
 // placement="top" ใช้ตอนมีแถบลอยด้านล่างจอ (แถบรายการที่เลือกในหน้าวางแผน) ไม่งั้น snackbar ทับปุ่มของแถบ
@@ -276,33 +276,37 @@ export function FeedbackSnackbar({
   onClose: () => void;
   placement?: 'top' | 'bottom';
 }) {
+  // ข้อความล่าสุดค้างไว้ระหว่าง transition ตอนปิด — notice เป็น null ทันทีที่กดปิด แถบจึงเคยว่างก่อนหายไป
+  const [last, setLast] = useState(notice);
+  if (notice != null && notice !== last) setLast(notice);
+  const shown = notice ?? last;
   return (
     <Snackbar
       open={Boolean(notice)}
-      autoHideDuration={notice?.action ? 8000 : 4500}
-      // มีปุ่ม action: คลิกที่อื่น (เช่นเลือกแถว) ไม่ปิด ไม่งั้นปุ่มเลิกทำหายก่อนได้กด — ปิดได้ด้วย X, Esc และหมดเวลา
+      autoHideDuration={notice?.action ? null : 4500}
+      // มีปุ่ม action: ไม่หมดเวลา และคลิกที่อื่น (เช่นเลือกแถว) ไม่ปิด ไม่งั้นปุ่มเลิกทำหายก่อนได้กด — ปิดได้ด้วย X และ Esc
       onClose={(_, reason) => {
         if (reason === 'clickaway' && notice?.action) return;
         onClose();
       }}
       anchorOrigin={{ vertical: placement, horizontal: 'center' }}
     >
-      {notice ? (
+      {shown ? (
         <Alert
-          severity={notice.severity}
+          severity={shown.severity}
           variant="filled"
           onClose={onClose}
-          // action ของ Alert แทนที่ปุ่มปิดเดิม — ใส่ปุ่มปิดคืนเองคู่กัน
+          // action ของ Alert แทนที่ปุ่มปิดเดิม — ใส่ปุ่มปิดคืนเองคู่กัน · ระหว่างกำลังปิด (notice เป็น null) ปุ่ม action ไม่ทำงานซ้ำ
           action={
-            notice.action && (
+            shown.action && (
               <>
-                <Button color="inherit" onClick={notice.action.onClick}>{notice.action.label}</Button>
+                <Button color="inherit" onClick={notice?.action?.onClick}>{shown.action.label}</Button>
                 <IconButton color="inherit" aria-label="ปิด" onClick={onClose}><CloseRounded fontSize="small" /></IconButton>
               </>
             )
           }
         >
-          {notice.message}
+          {shown.message}
         </Alert>
       ) : undefined}
     </Snackbar>

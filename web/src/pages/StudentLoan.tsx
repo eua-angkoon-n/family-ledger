@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Alert,
   Box,
@@ -25,7 +25,15 @@ import PercentRounded from '@mui/icons-material/PercentRounded';
 import SavingsRounded from '@mui/icons-material/SavingsRounded';
 import ScienceRounded from '@mui/icons-material/ScienceRounded';
 import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded';
-import { put, req, type StudentLoanProjection, type StudentLoanResponse, type StudentLoanScenario } from '../api.js';
+import {
+  put,
+  req,
+  type StudentLoanInstallment,
+  type StudentLoanMonth,
+  type StudentLoanProjection,
+  type StudentLoanResponse,
+  type StudentLoanScenario,
+} from '../api.js';
 import Money from '../components/Money.js';
 import SummaryCard, { summaryRowSx } from '../components/SummaryCard.js';
 import Modal from '../Modal.js';
@@ -190,18 +198,27 @@ function winners(entries: [StudentLoanScenario, number][]): StudentLoanScenario[
   return entries.some(([, v]) => v > min) ? entries.filter(([, v]) => v === min).map(([s]) => s) : [];
 }
 
-/** บรรทัดเทียบกับจ่ายขั้นต่ำ — แผนที่ยังปิดไม่ได้ไม่เทียบ เพราะยอดจ่ายรวมยังไม่ใช่ยอดจนปิดหนี้ */
+/**
+ * บรรทัดเทียบกับจ่ายขั้นต่ำ — คำอธิบายของส่วนบอกครั้งเดียวว่าเทียบกับอะไร แถวจึงสั้น (ที่ 320px ไม่ตัดหลายบรรทัด)
+ * screen reader ได้ยินคำนำทุกแถว · แผนที่ยังปิดไม่ได้ไม่เทียบ เพราะยอดจ่ายรวมยังไม่ใช่ยอดจนปิดหนี้
+ */
 function vsMinimum(p: StudentLoanProjection, base: StudentLoanProjection): ReactNode {
   if (p.payoff_date == null || base.payoff_date == null) return null;
   const cheaper = base.total_payment_satang - p.total_payment_satang;
   const sooner = base.months_remaining - p.months_remaining;
   const parts: ReactNode[] = [];
-  if (cheaper !== 0) parts.push(<>{cheaper > 0 ? 'จ่ายรวมถูกกว่า' : 'จ่ายรวมแพงกว่า'} <Money satang={Math.abs(cheaper)} /></>);
+  if (cheaper !== 0) parts.push(<>{cheaper > 0 ? 'ถูกกว่า' : 'แพงกว่า'} <Money satang={Math.abs(cheaper)} /></>);
   if (sooner !== 0) {
     parts.push(<>{sooner > 0 ? 'เร็วกว่า' : 'ช้ากว่า'} <Box component="span" sx={dataTextSx}>{Math.abs(sooner)}</Box> เดือน</>);
   }
   if (parts.length === 0) return 'เท่ากับจ่ายขั้นต่ำ';
-  return <>เทียบจ่ายขั้นต่ำ: {parts[0]}{parts[1] && <> · {parts[1]}</>}</>;
+  return (
+    <>
+      <Box component="span" sx={visuallyHiddenSx}>เทียบจ่ายขั้นต่ำ: </Box>
+      {parts[0]}
+      {parts[1] && <> · {parts[1]}</>}
+    </>
+  );
 }
 
 const payoffText = (p: StudentLoanProjection) => (p.payoff_date ? formatDate(p.payoff_date) : 'ยังปิดไม่ได้');
@@ -216,6 +233,140 @@ const beforeAfter = (before: ReactNode, after: ReactNode) => (
     <Box component="span" sx={visuallyHiddenSx}>เป็น</Box> {after}
   </>
 );
+
+// ตัวตารางสามชุดเป็น memo: พิมพ์ในช่องลองปรับตัวเลขทำให้หน้า render ทุกคีย์ แต่ `data` (และ projection/แถวข้างใน)
+// ยังเป็น reference เดิมจนผลใหม่มา — ตารางรายเดือน ~180 แถวจึงไม่ render ซ้ำระหว่างพิมพ์
+
+/** แถวของตารางเทียบ — radio + คลิกทั้งแถวเลือกแผน ป้าย "จ่ายรวมน้อยสุด"/"ปิดเร็วสุด" คิดในนี้ (array ใหม่ทุก render จะทำให้ memo ไร้ผล) */
+const CompareRows = memo(function CompareRows({
+  projections,
+  scenario,
+  onSelect,
+}: {
+  projections: Record<StudentLoanScenario, StudentLoanProjection>;
+  scenario: StudentLoanScenario;
+  onSelect: (s: StudentLoanScenario) => void;
+}) {
+  // เทียบเฉพาะแผนที่ปิดได้ — ยอดรวมของแผนที่ยังปิดไม่ได้ไม่ใช่ยอดจนปิดหนี้ · "จ่ายรวมอีก" นับส่วนลดปิดบัญชีแล้ว
+  // (ดอกเบี้ยน้อยสุดไม่ใช่แผนที่ถูกสุดเสมอ ปิดทีเดียวได้ส่วนลดเงินต้นจนจ่ายรวมน้อยกว่าได้)
+  const payable = SCENARIOS.filter((s) => projections[s].payoff_date != null);
+  const cheapest = winners(payable.map((s) => [s, projections[s].total_payment_satang]));
+  const fastest = winners(payable.map((s) => [s, projections[s].months_remaining]));
+  return (
+    <TableBody>
+      {SCENARIOS.map((s) => {
+        const p = projections[s];
+        const checked = s === scenario;
+        const delta = s === 'minimum_only' ? null : vsMinimum(p, projections.minimum_only);
+        const badges = [
+          cheapest.includes(s) && <Chip key="cheapest" size="small" variant="outlined" color="success" icon={<PaymentsRounded />} label="จ่ายรวมน้อยสุด" />,
+          fastest.includes(s) && <Chip key="fastest" size="small" variant="outlined" color="success" icon={<EventAvailableRounded />} label="ปิดเร็วสุด" />,
+        ].filter(Boolean);
+        return (
+          <TableRow key={s} hover onClick={() => onSelect(s)} sx={{ cursor: 'pointer' }}>
+            <TableCell sx={NAME_CELL}>
+              <Stack direction="row" spacing={0.5} sx={{ alignItems: 'flex-start' }}>
+                <Radio
+                  id={`student-loan-plan-${s}`}
+                  name="student-loan-plan"
+                  value={s}
+                  checked={checked}
+                  onChange={() => onSelect(s)}
+                  // ชื่อกลุ่มของ radio (ห่อ radiogroup ข้ามแถวตารางไม่ได้) — "เทียบสามทางเลือก"
+                  slotProps={{ input: { 'aria-describedby': 'student-loan-compare-heading' } }}
+                  sx={{ p: 0.75, my: -0.75, ml: -0.75, flexShrink: 0 }}
+                />
+                <Box sx={{ minWidth: 0 }}>
+                  <Box component="label" htmlFor={`student-loan-plan-${s}`} sx={{ cursor: 'pointer', fontWeight: checked ? 600 : 400 }}>
+                    {SCENARIO_LABEL[s]}
+                  </Box>
+                  {badges.length > 0 && (
+                    <Stack direction="row" useFlexGap sx={{ flexWrap: 'wrap', gap: 0.5, mt: 0.75 }}>{badges}</Stack>
+                  )}
+                  {delta && <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{delta}</Typography>}
+                  {/* แถวที่เลือกไม่ซ้ำบรรทัดนี้ — การ์ดสรุปของแผนนั้นอยู่ถัดลงไปบอกดอกเบี้ยกับส่วนลดแล้ว */}
+                  {!checked && (
+                    <Typography variant="body2" color="text.secondary" sx={SECONDARY_LINE}>
+                      ดอกเบี้ยรวม <Money satang={p.total_interest_satang} tone="expense" /> · ส่วนลด{' '}
+                      <Money satang={p.discount_satang} tone="income" />
+                    </Typography>
+                  )}
+                </Box>
+              </Stack>
+            </TableCell>
+            <TableCell align="right" sx={{ ...MD_UP, ...NUM_CELL }}>{payoffText(p)}</TableCell>
+            <TableCell align="right" sx={{ ...MD_UP, ...NUM_CELL }}><Money satang={p.total_payment_satang} /></TableCell>
+            <TableCell align="right" sx={{ ...MD_UP, ...NUM_CELL }}><Money satang={p.total_interest_satang} tone="expense" /></TableCell>
+            <TableCell align="right" sx={{ ...MD_UP, ...NUM_CELL }}><Money satang={p.discount_satang} tone="income" /></TableCell>
+            <TableCell align="right" sx={{ ...BELOW_MD, ...NUM_CELL }}>
+              {payoffText(p)}
+              <br />
+              <Money satang={p.total_payment_satang} />
+            </TableCell>
+          </TableRow>
+        );
+      })}
+    </TableBody>
+  );
+});
+
+const YearlyRows = memo(function YearlyRows({ installments }: { installments: StudentLoanInstallment[] }) {
+  return (
+    <TableBody>
+      {installments.map((row) => (
+        <TableRow key={row.installment_no}>
+          <TableCell sx={NAME_CELL}>
+            <Stack direction="row" useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+              {row.installment_no}
+              {/* ไม่ใช้ `selected` ของแถว — chip primary แบบ filled บอกงวดปัจจุบันแทน (Tables ใน DESIGN.md) */}
+              {row.is_current && <Chip size="small" color="primary" label="งวดปัจจุบัน" />}
+            </Stack>
+            <Box sx={SECONDARY_LINE}>
+              <Typography variant="body2" color="text.secondary">ครบ {formatDate(row.due_date)}</Typography>
+              <Typography variant="body2" color="text.secondary">
+                เงินต้น <Money satang={row.principal_satang} /> · ดอกเบี้ย <Money satang={row.interest_satang} tone="expense" />
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                ขั้นต่ำ <Money satang={row.min_monthly_satang} /> ต่อเดือน
+              </Typography>
+            </Box>
+          </TableCell>
+          <TableCell sx={{ ...MD_UP, ...NUM_CELL }}>{formatDate(row.due_date)}</TableCell>
+          <TableCell align="right" sx={{ ...MD_UP, ...NUM_CELL }}><Money satang={row.principal_satang} /></TableCell>
+          <TableCell align="right" sx={{ ...MD_UP, ...NUM_CELL }}><Money satang={row.interest_satang} tone="expense" /></TableCell>
+          <TableCell align="right" sx={NUM_CELL}><Money satang={row.total_satang} /></TableCell>
+          <TableCell align="right" sx={{ ...MD_UP, ...NUM_CELL }}><Money satang={row.min_monthly_satang} /></TableCell>
+        </TableRow>
+      ))}
+    </TableBody>
+  );
+});
+
+const MonthlyRows = memo(function MonthlyRows({ monthly }: { monthly: StudentLoanMonth[] }) {
+  return (
+    <TableBody>
+      {monthly.map((row) => (
+        <TableRow key={row.date}>
+          <TableCell sx={NAME_CELL}>
+            {formatDate(row.date)}
+            <Box sx={SECONDARY_LINE}>
+              <Typography variant="body2" color="text.secondary">
+                ดอกเบี้ยเดือนนี้ <Money satang={row.interest_accrued_satang} tone="expense" />
+              </Typography>
+              <Typography variant="body2" color="text.secondary">เงินออมสะสม <Money satang={row.savings_satang} /></Typography>
+              <Typography variant="body2" color="text.secondary">ยอดปิดบัญชี <Money satang={row.payoff_quote_satang} /></Typography>
+            </Box>
+          </TableCell>
+          <TableCell align="right" sx={NUM_CELL}><Money satang={row.paid_satang} /></TableCell>
+          <TableCell align="right" sx={{ ...MD_UP, ...NUM_CELL }}><Money satang={row.interest_accrued_satang} tone="expense" /></TableCell>
+          <TableCell align="right" sx={NUM_CELL}><Money satang={row.closing_principal_satang} /></TableCell>
+          <TableCell align="right" sx={{ ...MD_UP, ...NUM_CELL }}><Money satang={row.savings_satang} /></TableCell>
+          <TableCell align="right" sx={{ ...MD_UP, ...NUM_CELL }}><Money satang={row.payoff_quote_satang} /></TableCell>
+        </TableRow>
+      ))}
+    </TableBody>
+  );
+});
 
 export default function StudentLoan() {
   const [data, setData] = useState<StudentLoanResponse | null>(null);
@@ -461,7 +612,20 @@ export default function StudentLoan() {
   // แผนเดียวกันจากค่าที่บันทึกไว้ — มีเฉพาะตอนบนจอเป็นค่าทดลอง
   const base = trialShown ? (baseline?.projections?.[scenario] ?? null) : null;
   // ค่าทดลองไม่เปลี่ยนผลของแผนนี้เลย (จ่ายขั้นต่ำไม่ใช้ทั้งสองช่อง หรือใส่เท่าค่าที่บันทึกไว้)
-  const trialNoEffect = base != null && projection != null && JSON.stringify(base) === JSON.stringify(projection);
+  // useMemo: ไม่ stringify ตารางรายเดือนทั้งสองชุดทุกคีย์ที่พิมพ์ — base/projection เปลี่ยนเฉพาะตอนผลใหม่มา
+  const trialNoEffect = useMemo(
+    () => base != null && projection != null && JSON.stringify(base) === JSON.stringify(projection),
+    [base, projection],
+  );
+  // บรรทัดผลใต้ช่อง: ต่างจากค่าที่บันทึกไว้เท่าไร — เทียบเฉพาะเมื่อปิดได้ทั้งสองฝั่ง (ยอดของแผนที่ยังปิดไม่ได้ไม่ใช่ยอดจนปิดหนี้)
+  const trialComparable = !trialNoEffect && base?.payoff_date != null && projection?.payoff_date != null;
+  const trialSooner = trialComparable ? base.months_remaining - projection.months_remaining : 0;
+  const trialCheaper = trialComparable ? base.total_payment_satang - projection.total_payment_satang : 0;
+  // ขั้นต่ำของงวดปัจจุบัน (ช่วงปลอดหนี้ไม่มีงวดปัจจุบัน) — ไม่ขึ้นกับยอดที่ลองพิมพ์ ค่าทดลองหรือค่าเดิมก็เลขเดียวกัน
+  const minPayment = current?.min_monthly_satang ?? null;
+  const typedPayment = parseBahtToSatang(whatIfPayment);
+  // engine ยกยอดที่ต่ำกว่าขั้นต่ำขึ้นเป็นขั้นต่ำเอง — บอกตรงช่อง ไม่บล็อก (ยังลองเลขอื่นต่อได้)
+  const belowMin = minPayment != null && typedPayment != null && typedPayment < minPayment;
   /** caption ของการ์ด + "เดิม X → Y" เมื่อค่าทดลองเปลี่ยนตัวเลขนั้น */
   const withBefore = (caption: ReactNode, pick: (p: StudentLoanProjection) => ReactNode, key: (p: StudentLoanProjection) => unknown) =>
     base != null && projection != null && key(base) !== key(projection) ? (
@@ -487,16 +651,12 @@ export default function StudentLoan() {
   // แก้ยอดคงเหลือแต่วันที่ยังเป็นวันเดิม — ดอกเบี้ยเดินรายวัน วันเก่าทำให้ทั้งแผนคลาด ไม่เปลี่ยนวันให้เอง (ฟอร์มจะ dirty ตั้งแต่เปิด)
   // เทียบเป็นสตางค์ ค่าตั้งต้น "1,234.00" กับที่พิมพ์ "1234" คือยอดเดียวกัน · เพิ่มข้อมูลครั้งแรก (loan == null) ไม่มีค่าเดิมให้เทียบ
   const balanceChanged = (key: FormKey) => parseBahtToSatang(form[key]) !== parseBahtToSatang(formInitial[key]);
+  // วันเดิมเป็นวันนี้อยู่แล้ว = แก้ยอดของวันนี้ ไม่ต้องเตือน
   const staleAsOf =
     loan != null &&
     form.as_of_date === formInitial.as_of_date &&
-    (balanceChanged('principal_remaining_baht') || balanceChanged('interest_accrued_baht'));
-
-  // เทียบเฉพาะแผนที่ปิดได้ — ยอดรวมของแผนที่ยังปิดไม่ได้ไม่ใช่ยอดจนปิดหนี้ · "จ่ายรวม" นับส่วนลดปิดบัญชีแล้ว
-  // (ดอกเบี้ยน้อยสุดไม่ใช่แผนที่ถูกสุดเสมอ ปิดทีเดียวได้ส่วนลดเงินต้นจนจ่ายรวมน้อยกว่าได้)
-  const payable = projections ? SCENARIOS.filter((s) => projections[s].payoff_date != null) : [];
-  const cheapest = projections ? winners(payable.map((s) => [s, projections[s].total_payment_satang])) : [];
-  const fastest = projections ? winners(payable.map((s) => [s, projections[s].months_remaining])) : [];
+    (balanceChanged('principal_remaining_baht') || balanceChanged('interest_accrued_baht')) &&
+    formInitial.as_of_date !== todayInBangkok();
 
   return (
     <>
@@ -563,7 +723,8 @@ export default function StudentLoan() {
           <Box component="section" aria-labelledby="student-loan-compare-heading">
             <Typography variant="h2" id="student-loan-compare-heading">เทียบสามทางเลือก</Typography>
             <Typography color="text.secondary" sx={{ mt: 0.5, mb: 2.5, maxWidth: '70ch', ...descriptionSx }}>
-              ตัวเลขชุดเดียวกัน ต่างกันแค่ว่าเอาเงินที่เก็บได้ไปทำอะไร เลือกแถวเพื่อดูรายละเอียดของแผนนั้นด้านล่าง
+              ตัวเลขชุดเดียวกัน ต่างกันแค่ว่าเอาเงินที่เก็บได้ไปทำอะไร บรรทัดใต้ชื่อแผนเทียบกับจ่ายขั้นต่ำ
+              เลือกแถวเพื่อดูรายละเอียดของแผนนั้นด้านล่าง
             </Typography>
 
             <Box role="group" aria-labelledby="student-loan-what-if-heading" data-tour="student-loan-what-if" sx={{ mb: 2.5 }}>
@@ -577,7 +738,8 @@ export default function StudentLoan() {
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                 ไม่ทับค่าที่บันทึกไว้จนกว่าจะกด “บันทึกค่านี้”
               </Typography>
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+              {/* ≥ md ไม่ยืดสองช่องเต็มความกว้างหน้า — ช่องตัวเลขสั้น ตาไม่ต้องกวาดไกลจากช่องไปผลด้านล่าง */}
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ maxWidth: { md: 560 } }}>
                 <TextField
                   id={WHAT_IF_PAYMENT_ID}
                   label="จ่าย กยศ. ต่อเดือน (บาท)"
@@ -587,7 +749,18 @@ export default function StudentLoan() {
                     setTrialError('');
                   }}
                   fullWidth
-                  helperText={<>ที่บันทึกไว้ <Money satang={loan.monthly_payment_satang} /></>}
+                  helperText={
+                    belowMin ? (
+                      <Box component="span" sx={{ color: 'warning.main' }}>
+                        ต่ำกว่าขั้นต่ำ — ระบบคิดที่ <Money satang={minPayment} /> และขั้นต่ำขึ้นทุกปี
+                      </Box>
+                    ) : (
+                      <>
+                        ที่บันทึกไว้ <Money satang={loan.monthly_payment_satang} />
+                        {minPayment != null && <> · ขั้นต่ำงวดนี้ <Money satang={minPayment} /></>}
+                      </>
+                    )
+                  }
                   {...amountFieldHelp(whatIfPayment.trim())}
                   slotProps={{ htmlInput: { inputMode: 'decimal' } }}
                 />
@@ -608,10 +781,17 @@ export default function StudentLoan() {
               {/* ผลของแผนที่เลือกอยู่ติดช่องที่พิมพ์ — มือถือไม่ต้องเลื่อนลงไปดูตาราง และ screen reader ได้ยินทุกครั้งที่คำนวณใหม่
                   กล่อง status อยู่ใน DOM ตลอด เปลี่ยนแค่ข้อความ ไม่งั้นบางตัวอ่านไม่ประกาศ */}
               <Typography variant="body2" role="status" sx={{ mt: trialShown ? 1.5 : 0 }}>
+                {/* "{แผน}: ปิด <วัน> (เร็วขึ้น n เดือน) · จ่ายรวมอีก ฿x (ถูกลง ฿y)" — ส่วนต่างเทียบค่าที่บันทึกไว้ */}
                 {trialShown && (
                   <>
-                    แผนที่เลือก: {projection.payoff_date ? <>ปิด {payoffNode(projection)}</> : 'ยังปิดไม่ได้'} · จ่ายรวม{' '}
-                    <Money satang={projection.total_payment_satang} />
+                    {SCENARIO_LABEL[scenario]}: {projection.payoff_date ? <>ปิด {payoffNode(projection)}</> : 'ยังปิดไม่ได้'}
+                    {trialComparable && (
+                      <> ({trialSooner === 0 ? 'เท่าเดิม' : <>{trialSooner > 0 ? 'เร็วขึ้น' : 'ช้าลง'} {num(Math.abs(trialSooner))} เดือน</>})</>
+                    )}
+                    {' · '}จ่ายรวมอีก <Money satang={projection.total_payment_satang} />
+                    {trialComparable && (
+                      <> ({trialCheaper === 0 ? 'เท่าเดิม' : <>{trialCheaper > 0 ? 'ถูกลง' : 'แพงขึ้น'} <Money satang={Math.abs(trialCheaper)} /></>})</>
+                    )}
                     {trialNoEffect && ' · ค่าทดลองไม่มีผลกับแผนนี้'}
                   </>
                 )}
@@ -656,64 +836,7 @@ export default function StudentLoan() {
                     <TableCell align="right" sx={BELOW_MD}>ปิดหนี้เมื่อ<br />จ่ายรวมอีก</TableCell>
                   </TableRow>
                 </TableHead>
-                <TableBody>
-                  {SCENARIOS.map((s) => {
-                    const p = projections[s];
-                    const checked = s === scenario;
-                    const delta = s === 'minimum_only' ? null : vsMinimum(p, projections.minimum_only);
-                    // แถวที่เลือกระหว่างลองตัวเลข: ยอดรวมเดิม → ใหม่ (การ์ดด้านล่างบอกครบทุกตัว)
-                    const before = checked && base != null && base.total_payment_satang !== p.total_payment_satang ? base : null;
-                    const badges = [
-                      cheapest.includes(s) && <Chip key="cheapest" size="small" variant="outlined" color="success" icon={<PaymentsRounded />} label="จ่ายรวมน้อยสุด" />,
-                      fastest.includes(s) && <Chip key="fastest" size="small" variant="outlined" color="success" icon={<EventAvailableRounded />} label="ปิดเร็วสุด" />,
-                    ].filter(Boolean);
-                    return (
-                      <TableRow key={s} hover onClick={() => setScenario(s)} sx={{ cursor: 'pointer' }}>
-                        <TableCell sx={NAME_CELL}>
-                          <Stack direction="row" spacing={0.5} sx={{ alignItems: 'flex-start' }}>
-                            <Radio
-                              id={`student-loan-plan-${s}`}
-                              name="student-loan-plan"
-                              value={s}
-                              checked={checked}
-                              onChange={() => setScenario(s)}
-                              // ชื่อกลุ่มของ radio (ห่อ radiogroup ข้ามแถวตารางไม่ได้) — "เทียบสามทางเลือก"
-                              slotProps={{ input: { 'aria-describedby': 'student-loan-compare-heading' } }}
-                              sx={{ p: 0.75, my: -0.75, ml: -0.75, flexShrink: 0 }}
-                            />
-                            <Box sx={{ minWidth: 0 }}>
-                              <Box component="label" htmlFor={`student-loan-plan-${s}`} sx={{ cursor: 'pointer', fontWeight: checked ? 600 : 400 }}>
-                                {SCENARIO_LABEL[s]}
-                              </Box>
-                              {badges.length > 0 && (
-                                <Stack direction="row" useFlexGap sx={{ flexWrap: 'wrap', gap: 0.5, mt: 0.75 }}>{badges}</Stack>
-                              )}
-                              {delta && <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{delta}</Typography>}
-                              {before && (
-                                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                                  จ่ายรวม {beforeAfter(<Money satang={before.total_payment_satang} />, <Money satang={p.total_payment_satang} />)}
-                                </Typography>
-                              )}
-                              <Typography variant="body2" color="text.secondary" sx={SECONDARY_LINE}>
-                                ดอกเบี้ย <Money satang={p.total_interest_satang} tone="expense" /> · ส่วนลด{' '}
-                                <Money satang={p.discount_satang} tone="income" />
-                              </Typography>
-                            </Box>
-                          </Stack>
-                        </TableCell>
-                        <TableCell align="right" sx={{ ...MD_UP, ...NUM_CELL }}>{payoffText(p)}</TableCell>
-                        <TableCell align="right" sx={{ ...MD_UP, ...NUM_CELL }}><Money satang={p.total_payment_satang} /></TableCell>
-                        <TableCell align="right" sx={{ ...MD_UP, ...NUM_CELL }}><Money satang={p.total_interest_satang} tone="expense" /></TableCell>
-                        <TableCell align="right" sx={{ ...MD_UP, ...NUM_CELL }}><Money satang={p.discount_satang} tone="income" /></TableCell>
-                        <TableCell align="right" sx={{ ...BELOW_MD, ...NUM_CELL }}>
-                          {payoffText(p)}
-                          <br />
-                          <Money satang={p.total_payment_satang} />
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
+                <CompareRows projections={projections} scenario={scenario} onSelect={setScenario} />
               </Table>
             </TableContainer>
           </Box>
@@ -744,7 +867,7 @@ export default function StudentLoan() {
                 )}
               />
               <SummaryCard
-                title="ยอดรวมที่ต้องจ่ายอีก"
+                title="จ่ายรวมอีก"
                 icon={<PaymentsRounded fontSize="small" />}
                 value={<Money satang={projection.total_payment_satang} />}
                 caption={withBefore(
@@ -758,7 +881,7 @@ export default function StudentLoan() {
                 )}
               />
               <SummaryCard
-                title="ดอกเบี้ยที่ต้องจ่ายอีก"
+                title="ดอกเบี้ยรวม"
                 icon={<PercentRounded fontSize="small" />}
                 value={<Money satang={projection.total_interest_satang} tone="expense" />}
                 caption={withBefore(
@@ -801,33 +924,7 @@ export default function StudentLoan() {
                     <TableCell align="right" sx={MD_UP}>ขั้นต่ำ/เดือน</TableCell>
                   </TableRow>
                 </TableHead>
-                <TableBody>
-                  {projection.installments.map((row) => (
-                    <TableRow key={row.installment_no}>
-                      <TableCell sx={NAME_CELL}>
-                        <Stack direction="row" useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
-                          {row.installment_no}
-                          {/* ไม่ใช้ `selected` ของแถว — chip primary แบบ filled บอกงวดปัจจุบันแทน (Tables ใน DESIGN.md) */}
-                          {row.is_current && <Chip size="small" color="primary" label="งวดปัจจุบัน" />}
-                        </Stack>
-                        <Box sx={SECONDARY_LINE}>
-                          <Typography variant="body2" color="text.secondary">ครบ {formatDate(row.due_date)}</Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            เงินต้น <Money satang={row.principal_satang} /> · ดอกเบี้ย <Money satang={row.interest_satang} tone="expense" />
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            ขั้นต่ำ <Money satang={row.min_monthly_satang} /> ต่อเดือน
-                          </Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell sx={{ ...MD_UP, ...NUM_CELL }}>{formatDate(row.due_date)}</TableCell>
-                      <TableCell align="right" sx={{ ...MD_UP, ...NUM_CELL }}><Money satang={row.principal_satang} /></TableCell>
-                      <TableCell align="right" sx={{ ...MD_UP, ...NUM_CELL }}><Money satang={row.interest_satang} tone="expense" /></TableCell>
-                      <TableCell align="right" sx={NUM_CELL}><Money satang={row.total_satang} /></TableCell>
-                      <TableCell align="right" sx={{ ...MD_UP, ...NUM_CELL }}><Money satang={row.min_monthly_satang} /></TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
+                <YearlyRows installments={projection.installments} />
               </Table>
             </TableContainer>
           </Box>
@@ -852,27 +949,7 @@ export default function StudentLoan() {
                     <TableCell align="right" sx={MD_UP}>ยอดปิดบัญชี</TableCell>
                   </TableRow>
                 </TableHead>
-                <TableBody>
-                  {projection.monthly.map((row) => (
-                    <TableRow key={row.date}>
-                      <TableCell sx={NAME_CELL}>
-                        {formatDate(row.date)}
-                        <Box sx={SECONDARY_LINE}>
-                          <Typography variant="body2" color="text.secondary">
-                            ดอกเบี้ยเดือนนี้ <Money satang={row.interest_accrued_satang} tone="expense" />
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary">เงินออมสะสม <Money satang={row.savings_satang} /></Typography>
-                          <Typography variant="body2" color="text.secondary">ยอดปิดบัญชี <Money satang={row.payoff_quote_satang} /></Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell align="right" sx={NUM_CELL}><Money satang={row.paid_satang} /></TableCell>
-                      <TableCell align="right" sx={{ ...MD_UP, ...NUM_CELL }}><Money satang={row.interest_accrued_satang} tone="expense" /></TableCell>
-                      <TableCell align="right" sx={NUM_CELL}><Money satang={row.closing_principal_satang} /></TableCell>
-                      <TableCell align="right" sx={{ ...MD_UP, ...NUM_CELL }}><Money satang={row.savings_satang} /></TableCell>
-                      <TableCell align="right" sx={{ ...MD_UP, ...NUM_CELL }}><Money satang={row.payoff_quote_satang} /></TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
+                <MonthlyRows monthly={projection.monthly} />
               </Table>
             </TableContainer>
           </Disclosure>
@@ -888,7 +965,7 @@ export default function StudentLoan() {
               <li>ดอกเบี้ย 1% ต่อปี เดินรายวันบนเงินต้นคงเหลือ</li>
               <li>เงินที่จ่ายตัดตามลำดับของ พ.ร.บ. 2566: เงินต้นงวดที่ครบกำหนด → ดอกเบี้ย → เบี้ยปรับ</li>
               <li>ยอดจ่ายต่อเดือนที่ต่ำกว่าขั้นต่ำของงวดไหน ระบบใช้ขั้นต่ำของงวดนั้นแทน — ขั้นต่ำขึ้นทุกปีตามตาราง Step Up</li>
-              <li>“จ่ายรวม” นับส่วนลดเงินต้นจากการปิดบัญชีก่อนกำหนดแล้ว แผนที่ดอกเบี้ยน้อยสุดจึงไม่จำเป็นต้องจ่ายรวมน้อยสุด</li>
+              <li>“จ่ายรวมอีก” นับส่วนลดเงินต้นจากการปิดบัญชีก่อนกำหนดแล้ว แผนที่ดอกเบี้ยน้อยสุดจึงไม่จำเป็นต้องจ่ายรวมน้อยสุด</li>
             </Box>
           </Disclosure>
         </Box>
@@ -1026,6 +1103,16 @@ export default function StudentLoan() {
             {/* error จาก server (ช่องที่ตรวจในเครื่องได้ขึ้นใต้ช่องของมันแล้ว) */}
             {formError && <Alert severity="error">{formError}</Alert>}
           </Stack>
+          {/* เตือนวันที่ข้อมูลซ้ำใกล้ปุ่มบันทึก — คนที่ผ่านช่องวันที่ไปแล้ว (รวม screen reader) ยังได้รู้ ไม่บล็อกการบันทึก
+              กล่อง status อยู่ใน DOM ตลอด เปลี่ยนแค่ข้อความ (live region ที่เพิ่งใส่บางตัวไม่ประกาศ) */}
+          <Typography variant="body2" role="status" sx={{ mt: staleAsOf ? 2.5 : 0, color: 'warning.main' }}>
+            {staleAsOf && (
+              <>
+                ยังใช้วันที่ข้อมูลเดิม ({num(formatDate(form.as_of_date))}) — ระบบนับดอกเบี้ยจากวันนั้น ถ้ายอดที่แก้ดูวันอื่น
+                ให้เปลี่ยน “ข้อมูล ณ วันที่” ก่อนบันทึก
+              </>
+            )}
+          </Typography>
         </Box>
       </Modal>
 
