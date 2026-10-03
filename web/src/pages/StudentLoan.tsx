@@ -5,7 +5,6 @@ import {
   Button,
   Chip,
   CircularProgress,
-  Collapse,
   Paper,
   Radio,
   Stack,
@@ -21,7 +20,6 @@ import {
 import SchoolRounded from '@mui/icons-material/SchoolRounded';
 import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded';
 import EventAvailableRounded from '@mui/icons-material/EventAvailableRounded';
-import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded';
 import PaymentsRounded from '@mui/icons-material/PaymentsRounded';
 import PercentRounded from '@mui/icons-material/PercentRounded';
 import SavingsRounded from '@mui/icons-material/SavingsRounded';
@@ -33,7 +31,20 @@ import SummaryCard, { summaryRowSx } from '../components/SummaryCard.js';
 import Modal from '../Modal.js';
 import { AMOUNT_FORMAT_HINT, formatBaht, formatDate, parseBahtToSatang, todayInBangkok } from '../format.js';
 import { dataTextSx, descriptionSx } from '../theme.js';
-import { amountFieldHelp, BELOW_MD, EmptyState, FeedbackSnackbar, LoadError, MD_UP, PageHeader, TableSkeleton, type Notice } from '../ui.js';
+import {
+  amountFieldHelp,
+  BELOW_MD,
+  Disclosure,
+  EmptyState,
+  FeedbackSnackbar,
+  LoadError,
+  MD_UP,
+  PageHeader,
+  TableSkeleton,
+  useStoredOpen,
+  visuallyHiddenSx,
+  type Notice,
+} from '../ui.js';
 
 const SCENARIO_LABEL: Record<StudentLoanScenario, string> = {
   lump_sum: 'เก็บออมแล้วปิดทีเดียว',
@@ -58,6 +69,17 @@ const CALIBRATION_TOLERANCE_SATANG = 500 * 100;
 
 const WHAT_IF_PAYMENT_ID = 'student-loan-what-if-payment';
 const WHAT_IF_SAVING_ID = 'student-loan-what-if-saving';
+const EDIT_BUTTON_ID = 'student-loan-edit';
+
+/** query override ของค่าทดลอง — ค่าที่อ่านไม่ได้ไม่ถูกส่ง (ใช้ค่าที่บันทึกไว้) ช่องนั้นขึ้น error บอกรูปแบบที่ถูกแทนการเงียบ */
+function trialQuery(saving: string, payment: string): string {
+  const p = new URLSearchParams();
+  const savingSatang = parseBahtToSatang(saving);
+  if (savingSatang != null) p.set('monthly_saving_satang', String(savingSatang));
+  const paymentSatang = parseBahtToSatang(payment);
+  if (paymentSatang != null) p.set('monthly_payment_satang', String(paymentSatang));
+  return p.toString();
+}
 
 // < md ตัดคอลัมน์รอง (MD_UP / BELOW_MD) แล้วพับลงบรรทัดรอง + padding แนวนอน 6px — ที่ 320px กล่องตารางกว้าง 286
 // ตารางรายเดือน 3 คอลัมน์: จ่าย ~82 + คงเหลือ ~100 เหลือวันที่ ~100px ไม่ต้องเลื่อนแนวนอน (ท่าเดียวกับหน้าวางแผน)
@@ -174,7 +196,7 @@ function vsMinimum(p: StudentLoanProjection, base: StudentLoanProjection): React
   const cheaper = base.total_payment_satang - p.total_payment_satang;
   const sooner = base.months_remaining - p.months_remaining;
   const parts: ReactNode[] = [];
-  if (cheaper !== 0) parts.push(<>{cheaper > 0 ? 'ถูกกว่า' : 'แพงกว่า'} <Money satang={Math.abs(cheaper)} /></>);
+  if (cheaper !== 0) parts.push(<>{cheaper > 0 ? 'จ่ายรวมถูกกว่า' : 'จ่ายรวมแพงกว่า'} <Money satang={Math.abs(cheaper)} /></>);
   if (sooner !== 0) {
     parts.push(<>{sooner > 0 ? 'เร็วกว่า' : 'ช้ากว่า'} <Box component="span" sx={dataTextSx}>{Math.abs(sooner)}</Box> เดือน</>);
   }
@@ -184,58 +206,21 @@ function vsMinimum(p: StudentLoanProjection, base: StudentLoanProjection): React
 
 const payoffText = (p: StudentLoanProjection) => (p.payoff_date ? formatDate(p.payoff_date) : 'ยังปิดไม่ได้');
 const num = (n: number | string) => <Box component="span" sx={dataTextSx}>{n}</Box>;
+/** วันปิดหนี้ในประโยค — วันที่ใช้ฟอนต์ตัวเลข คำว่า "ยังปิดไม่ได้" เป็นข้อความ */
+const payoffNode = (p: StudentLoanProjection) => (p.payoff_date ? num(formatDate(p.payoff_date)) : 'ยังปิดไม่ได้');
 
-// localStorage โดนบล็อกได้ (โหมดส่วนตัว) — อ่านไม่ได้ = พับไว้ (ค่าเริ่มต้น) เขียนไม่ได้ = จำแค่รอบนี้
-function readOpen(key: string): boolean {
-  try {
-    return localStorage.getItem(key) === '1';
-  } catch {
-    return false;
-  }
-}
-
-/** The Disclosure Section Rule: หัวข้อ h2 ห่อปุ่ม aria-expanded + aria-controls ลูกศรหมุนตามสถานะ จำต่อเครื่อง */
-function Disclosure({ id, title, storageKey, children }: { id: string; title: string; storageKey: string; children: ReactNode }) {
-  const [open, setOpen] = useState(() => readOpen(storageKey));
-  const toggle = () => {
-    setOpen(!open);
-    try {
-      localStorage.setItem(storageKey, open ? '0' : '1');
-    } catch {
-      // เขียนไม่ได้ = จำแค่รอบนี้
-    }
-  };
-  return (
-    <Box component="section" aria-labelledby={`${id}-heading`}>
-      <Typography variant="h2" id={`${id}-heading`}>
-        <Button
-          color="inherit"
-          aria-expanded={open}
-          aria-controls={`${id}-panel`}
-          onClick={toggle}
-          endIcon={
-            <ExpandMoreRounded
-              sx={{
-                transform: open ? 'rotate(180deg)' : 'none',
-                transition: (theme) => theme.transitions.create('transform'),
-                '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
-              }}
-            />
-          }
-          sx={{ font: 'inherit', ml: -1, px: 1, textAlign: 'left' }}
-        >
-          {title}
-        </Button>
-      </Typography>
-      <Collapse in={open}>
-        <Box id={`${id}-panel`} sx={{ pt: 1.5 }}>{children}</Box>
-      </Collapse>
-    </Box>
-  );
-}
+/** "เดิม X → Y" — ลูกศรซ่อนจาก screen reader แล้วอ่านว่า "เป็น" แทน */
+const beforeAfter = (before: ReactNode, after: ReactNode) => (
+  <>
+    เดิม {before} <span aria-hidden>→</span>
+    <Box component="span" sx={visuallyHiddenSx}>เป็น</Box> {after}
+  </>
+);
 
 export default function StudentLoan() {
   const [data, setData] = useState<StudentLoanResponse | null>(null);
+  // ผลล่าสุดที่ไม่มีค่าทดลอง — ไว้บอก "เดิม → ใหม่" ระหว่างลองตัวเลข (data === baseline = บนจอไม่ใช่ค่าทดลอง)
+  const [baseline, setBaseline] = useState<StudentLoanResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -249,6 +234,10 @@ export default function StudentLoan() {
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [savingTrial, setSavingTrial] = useState(false);
+  // บันทึกค่าทดลองไม่สำเร็จ — แสดงค้างในส่วนนั้น ไม่ใช่ snackbar ที่หายเอง
+  const [trialError, setTrialError] = useState('');
+  const [monthlyOpen, setMonthlyOpen] = useStoredOpen('hyacinthia.studentLoan.monthlyOpen');
+  const [methodOpen, setMethodOpen] = useStoredOpen('hyacinthia.studentLoan.methodOpen');
   // ลองปรับตัวเลขดูโดยไม่บันทึกทับของเดิม — ส่งเป็น query override ให้ server คำนวณใหม่
   const [whatIfSaving, setWhatIfSaving] = useState('');
   const [whatIfPayment, setWhatIfPayment] = useState('');
@@ -257,6 +246,8 @@ export default function StudentLoan() {
   const [appliedSaving, setAppliedSaving] = useState('');
   const [appliedPayment, setAppliedPayment] = useState('');
   const requestIdRef = useRef(0);
+  // ปุ่มที่เปิดฟอร์ม (EmptyState / แถบเตือน) หายไปได้เมื่อข้อมูลใหม่มา — ตอนนั้น focus ตกไป <body>
+  const refocusEditRef = useRef(false);
   // ผลสำเร็จของฟอร์มใน Modal — `#root` เป็น aria-hidden จนปิดสนิท จึงแสดงจาก onExited (เหมือนหน้าวางแผน/แผนผ่อน)
   const pendingNoticeRef = useRef<Notice | null>(null);
   const flushNotice = () => {
@@ -273,15 +264,10 @@ export default function StudentLoan() {
     return () => clearTimeout(timer);
   }, [whatIfSaving, whatIfPayment]);
 
-  // ค่าที่อ่านไม่ได้ไม่ถูกส่ง (ใช้ค่าที่บันทึกไว้) — ช่องนั้นขึ้น error บอกรูปแบบที่ถูกแทนการเงียบ
-  const queryString = useMemo(() => {
-    const p = new URLSearchParams();
-    const saving = parseBahtToSatang(appliedSaving);
-    if (saving != null) p.set('monthly_saving_satang', String(saving));
-    const payment = parseBahtToSatang(appliedPayment);
-    if (payment != null) p.set('monthly_payment_satang', String(payment));
-    return p.toString();
-  }, [appliedSaving, appliedPayment]);
+  const queryString = useMemo(() => trialQuery(appliedSaving, appliedPayment), [appliedSaving, appliedPayment]);
+  // ค่าล่าสุดสำหรับงาน async — closure ที่รอ PUT อยู่ถือค่าก่อน debounce ยิง
+  const queryStringRef = useRef(queryString);
+  queryStringRef.current = queryString;
 
   // qs ส่งตรงได้ — หลังบันทึก state ของค่าทดลองถูกล้างแล้วแต่ closure ยังถือ queryString เดิม
   const reload = async (qs = queryString) => {
@@ -292,6 +278,7 @@ export default function StudentLoan() {
       const result = await req<StudentLoanResponse>(`/api/student-loan${qs ? `?${qs}` : ''}`);
       if (requestId !== requestIdRef.current) return;
       setData(result);
+      if (qs === '') setBaseline(result);
     } catch (e) {
       if (requestId !== requestIdRef.current) return;
       setError(e instanceof Error ? e.message : 'โหลดข้อมูลหนี้ กยศ. ไม่สำเร็จ');
@@ -305,11 +292,25 @@ export default function StudentLoan() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryString]);
 
+  useEffect(() => {
+    if (!refocusEditRef.current) return;
+    refocusEditRef.current = false;
+    if (document.activeElement === document.body) document.getElementById(EDIT_BUTTON_ID)?.focus();
+  }, [data]);
+
   const clearTrial = () => {
     setWhatIfSaving('');
     setWhatIfPayment('');
     setAppliedSaving('');
     setAppliedPayment('');
+    setTrialError('');
+  };
+
+  /** ล้างค่าทดลองแล้วโหลดค่าที่บันทึกไว้ครั้งเดียว — มีค่าทดลองอยู่ effect ของ queryString โหลดให้เอง */
+  const clearTrialAndReload = () => {
+    const hadTrial = queryStringRef.current !== '';
+    clearTrial();
+    if (!hadTrial) void reload('');
   };
 
   const openEdit = (focus: FormKey | null = null) => {
@@ -389,9 +390,9 @@ export default function StudentLoan() {
         payment_day: Number(form.payment_day),
       });
       pendingNoticeRef.current = { message: 'บันทึกข้อมูลหนี้ กยศ. แล้ว', severity: 'success' };
+      refocusEditRef.current = true;
       setModalOpen(false);
-      clearTrial();
-      void reload('');
+      clearTrialAndReload();
     } catch (e) {
       setFormError(e instanceof Error ? e.message : 'บันทึกไม่สำเร็จ');
     } finally {
@@ -410,34 +411,67 @@ export default function StudentLoan() {
     const payment = whatIfPayment.trim() === '' ? loan.monthly_payment_satang : parseBahtToSatang(whatIfPayment);
     const saving = whatIfSaving.trim() === '' ? loan.monthly_saving_satang : parseBahtToSatang(whatIfSaving);
     if (payment == null || saving == null) {
-      setNotice({ message: `ยังบันทึกไม่ได้ — ช่องที่ขึ้นสีแดงต้อง${AMOUNT_FORMAT_HINT}`, severity: 'error' });
+      setTrialError(`ยังบันทึกไม่ได้ — ช่องที่ขึ้นสีแดงต้อง${AMOUNT_FORMAT_HINT}`);
       document.getElementById(payment == null ? WHAT_IF_PAYMENT_ID : WHAT_IF_SAVING_ID)?.focus();
       return;
     }
+    setTrialError('');
     setSavingTrial(true);
     try {
       // ส่งข้อมูลที่บันทึกไว้ทั้งชุด เปลี่ยนแค่สองช่อง — server อ่านเฉพาะช่องของตัวเอง (id/created_at ถูกข้าม)
       await put('/api/student-loan', { ...loan, monthly_payment_satang: payment, monthly_saving_satang: saving });
-      clearTrial();
+      clearTrialAndReload();
       setNotice({
         message: `บันทึกเป็นค่าจริงแล้ว — จ่าย กยศ. เดือนละ ฿${formatBaht(payment)} · เก็บออมเดือนละ ฿${formatBaht(saving)}`,
         severity: 'success',
+        // เลิกทำ = ส่งค่าเดิมสองช่องกลับไป (loan ตอนนี้คือข้อมูลก่อนบันทึก)
+        action: { label: 'เลิกทำ', onClick: () => void undoTrialSave(loan) },
       });
       // ปุ่มหายไปพร้อมค่าทดลอง — ส่ง focus ไปช่องแรกของส่วนนี้แทนการตกไปที่ <body>
       document.getElementById(WHAT_IF_PAYMENT_ID)?.focus();
-      void reload('');
     } catch (e) {
-      setNotice({ message: e instanceof Error ? e.message : 'บันทึกไม่สำเร็จ', severity: 'error' });
+      setTrialError(e instanceof Error ? e.message : 'บันทึกไม่สำเร็จ');
     } finally {
       setSavingTrial(false);
     }
   };
 
+  const undoTrialSave = async (previous: NonNullable<StudentLoanResponse['loan']>) => {
+    setNotice(null);
+    // ปุ่มเลิกทำหายไปกับ snackbar — focus กลับไปที่ส่วนลองปรับตัวเลข
+    document.getElementById(WHAT_IF_PAYMENT_ID)?.focus();
+    try {
+      await put('/api/student-loan', previous);
+      clearTrialAndReload();
+      setNotice({
+        message: `คืนค่าเดิมแล้ว — จ่าย กยศ. เดือนละ ฿${formatBaht(previous.monthly_payment_satang)} · เก็บออมเดือนละ ฿${formatBaht(previous.monthly_saving_satang)}`,
+        severity: 'success',
+      });
+    } catch (e) {
+      setTrialError(e instanceof Error ? `เลิกทำไม่สำเร็จ — ${e.message}` : 'เลิกทำไม่สำเร็จ');
+    }
+  };
+
   const trialTyped = whatIfPayment.trim() !== '' || whatIfSaving.trim() !== '';
-  // ป้ายตามค่าที่ตัวเลขบนจอใช้อยู่จริง ไม่ใช่ค่าที่ยังพิมพ์ค้าง
-  const trialApplied = queryString !== '';
-  const recalculating = (loading && data != null) || whatIfPayment !== appliedPayment || whatIfSaving !== appliedSaving;
+  // ป้ายตามตัวเลขที่อยู่บนจอจริง (ผลที่โหลดมาแล้ว) ไม่ใช่ค่าที่ยังพิมพ์ค้างหรือกำลังโหลด
+  const trialShown = data != null && data !== baseline;
+  // หมุนเฉพาะตอนที่จะคำนวณใหม่จริง — ค่าที่อ่านไม่ได้ไม่ถูกส่ง พิมพ์ผิดรูปแบบ query จึงไม่เปลี่ยน
+  const recalculating = (loading && data != null) || trialQuery(whatIfSaving, whatIfPayment) !== queryString;
   const trialChip = <Chip size="small" variant="outlined" icon={<ScienceRounded />} label="ตัวเลขทดลอง" />;
+  // แผนเดียวกันจากค่าที่บันทึกไว้ — มีเฉพาะตอนบนจอเป็นค่าทดลอง
+  const base = trialShown ? (baseline?.projections?.[scenario] ?? null) : null;
+  // ค่าทดลองไม่เปลี่ยนผลของแผนนี้เลย (จ่ายขั้นต่ำไม่ใช้ทั้งสองช่อง หรือใส่เท่าค่าที่บันทึกไว้)
+  const trialNoEffect = base != null && projection != null && JSON.stringify(base) === JSON.stringify(projection);
+  /** caption ของการ์ด + "เดิม X → Y" เมื่อค่าทดลองเปลี่ยนตัวเลขนั้น */
+  const withBefore = (caption: ReactNode, pick: (p: StudentLoanProjection) => ReactNode, key: (p: StudentLoanProjection) => unknown) =>
+    base != null && projection != null && key(base) !== key(projection) ? (
+      <>
+        {caption}
+        <Box component="span" sx={{ display: 'block' }}>{beforeAfter(pick(base), pick(projection))}</Box>
+      </>
+    ) : (
+      caption
+    );
 
   // เทียบยอดครบกำหนดปีนี้ที่แอปแจ้ง กับที่ระบบคำนวณได้ — จับกรณีกรอกเลขผิดตั้งแต่ต้น
   // ต่างกันเล็กน้อยเป็นเรื่องปกติ เพราะเงินต้นคงเหลือ ณ 5 ก.ค. กับ ณ วันที่กรอกไม่เท่ากัน
@@ -450,10 +484,19 @@ export default function StudentLoan() {
         }
       : null;
 
-  const leastInterest = projections ? winners(SCENARIOS.map((s) => [s, projections[s].total_interest_satang])) : [];
-  const fastest = projections
-    ? winners(SCENARIOS.filter((s) => projections[s].payoff_date != null).map((s) => [s, projections[s].months_remaining]))
-    : [];
+  // แก้ยอดคงเหลือแต่วันที่ยังเป็นวันเดิม — ดอกเบี้ยเดินรายวัน วันเก่าทำให้ทั้งแผนคลาด ไม่เปลี่ยนวันให้เอง (ฟอร์มจะ dirty ตั้งแต่เปิด)
+  // เทียบเป็นสตางค์ ค่าตั้งต้น "1,234.00" กับที่พิมพ์ "1234" คือยอดเดียวกัน · เพิ่มข้อมูลครั้งแรก (loan == null) ไม่มีค่าเดิมให้เทียบ
+  const balanceChanged = (key: FormKey) => parseBahtToSatang(form[key]) !== parseBahtToSatang(formInitial[key]);
+  const staleAsOf =
+    loan != null &&
+    form.as_of_date === formInitial.as_of_date &&
+    (balanceChanged('principal_remaining_baht') || balanceChanged('interest_accrued_baht'));
+
+  // เทียบเฉพาะแผนที่ปิดได้ — ยอดรวมของแผนที่ยังปิดไม่ได้ไม่ใช่ยอดจนปิดหนี้ · "จ่ายรวม" นับส่วนลดปิดบัญชีแล้ว
+  // (ดอกเบี้ยน้อยสุดไม่ใช่แผนที่ถูกสุดเสมอ ปิดทีเดียวได้ส่วนลดเงินต้นจนจ่ายรวมน้อยกว่าได้)
+  const payable = projections ? SCENARIOS.filter((s) => projections[s].payoff_date != null) : [];
+  const cheapest = projections ? winners(payable.map((s) => [s, projections[s].total_payment_satang])) : [];
+  const fastest = projections ? winners(payable.map((s) => [s, projections[s].months_remaining])) : [];
 
   return (
     <>
@@ -461,10 +504,16 @@ export default function StudentLoan() {
         level={1}
         id="student-loan-heading"
         title="แผนปลดหนี้ กยศ."
-        description="ดูว่าจะปิดหนี้ กยศ. ได้เมื่อไหร่ และแบบไหนจ่ายดอกน้อยสุด"
+        description="ดูว่าจะปิดหนี้ กยศ. ได้เมื่อไหร่ และแบบไหนจ่ายรวมน้อยสุด"
         // ยังไม่มีข้อมูล = ปุ่มเดียวอยู่ใน EmptyState
-        action={loan != null ? <Button variant="contained" onClick={() => openEdit()}>แก้ไขข้อมูล</Button> : undefined}
+        action={loan != null ? <Button id={EDIT_BUTTON_ID} variant="contained" onClick={() => openEdit()}>แก้ไขข้อมูล</Button> : undefined}
       />
+      {/* ข้อมูลถึงวันไหน = ประกาศสถานะที่คงอยู่ (The Quiet Notice Rule) — บรรทัดเงียบใต้หัวหน้า ไม่ใช่แถบที่กินที่ทุกครั้งที่เปิด */}
+      {loan != null && (
+        <Typography variant="body2" color="text.secondary" role="status" sx={{ mt: 1, maxWidth: '70ch' }}>
+          ข้อมูล ณ วันที่ {num(formatDate(loan.as_of_date))} — ดอกเบี้ยเดินทุกวัน ควรกลับมาอัปเดตยอดคงเหลือเป็นระยะ
+        </Typography>
+      )}
 
       {error && <LoadError message={error} onRetry={() => void reload()} />}
 
@@ -482,39 +531,33 @@ export default function StudentLoan() {
         )
       ) : (
         <Stack spacing={4} sx={{ mt: 3 }}>
-          <Stack spacing={2}>
-            <Alert severity="info" role="status" icon={<EventAvailableRounded />}>
-              ข้อมูล ณ วันที่ {num(formatDate(loan.as_of_date))} — ดอกเบี้ย กยศ. เดินทุกวัน ยิ่งทิ้งไว้นานตัวเลขยิ่งคลาด
-              ควรกลับมาอัปเดตยอดคงเหลือเป็นระยะ
+          {/* ยอดไม่ตรงกับแอป = เตือน (warning ผ่าน AA ทั้งสองโหมด) พร้อมไอคอน + ข้อความ และทางแก้ในแถบเดียวกัน
+              ข้อความรองใช้สีของแถบเอง ไม่ใช่ text.secondary ที่เป็นเทาบนพื้นสี */}
+          {calibration && current && (
+            <Alert
+              severity={calibration.ok ? 'success' : 'warning'}
+              role="status"
+              icon={calibration.ok ? <CheckCircleRounded /> : <WarningAmberRounded />}
+            >
+              <Stack spacing={0.5} sx={{ alignItems: 'flex-start' }}>
+                <Typography variant="body2">
+                  ยอดครบกำหนดงวดที่ {num(current.installment_no)} — แอปแจ้ง <Money satang={calibration.entered} /> ·
+                  ระบบคำนวณได้ <Money satang={calibration.modelled} />
+                </Typography>
+                <Typography variant="body2">
+                  {calibration.ok
+                    ? 'ใกล้เคียงกัน แปลว่าเลขที่กรอกถูกต้อง'
+                    : 'ต่างกันมาก — น่าจะกรอกวันครบกำหนดครั้งแรกหรือยอดกู้ตามสัญญาผิด ไม่ใช่การคำนวณผิด'}
+                </Typography>
+                {/* ชื่อปุ่มบอกช่องที่ฟอร์มจะเปิดไป — ไม่ซ้ำกับ "แก้ไขข้อมูล" ข้างชื่อหน้า */}
+                {!calibration.ok && (
+                  <Button variant="outlined" color="inherit" onClick={() => openEdit('first_due_date')} sx={{ mt: 0.5 }}>
+                    แก้วันครบกำหนดครั้งแรก
+                  </Button>
+                )}
+              </Stack>
             </Alert>
-
-            {/* ยอดไม่ตรงกับแอป = เตือน (warning ผ่าน AA ทั้งสองโหมด) พร้อมไอคอน + ข้อความ และทางแก้ในแถบเดียวกัน
-                ข้อความรองใช้สีของแถบเอง ไม่ใช่ text.secondary ที่เป็นเทาบนพื้นสี */}
-            {calibration && current && (
-              <Alert
-                severity={calibration.ok ? 'success' : 'warning'}
-                role="status"
-                icon={calibration.ok ? <CheckCircleRounded /> : <WarningAmberRounded />}
-              >
-                <Stack spacing={0.5} sx={{ alignItems: 'flex-start' }}>
-                  <Typography variant="body2">
-                    ยอดครบกำหนดงวดที่ {num(current.installment_no)} — แอปแจ้ง <Money satang={calibration.entered} /> ·
-                    ระบบคำนวณได้ <Money satang={calibration.modelled} />
-                  </Typography>
-                  <Typography variant="body2">
-                    {calibration.ok
-                      ? 'ใกล้เคียงกัน แปลว่าเลขที่กรอกถูกต้อง'
-                      : 'ต่างกันมาก — น่าจะกรอกวันครบกำหนดครั้งแรกหรือยอดกู้ตามสัญญาผิด ไม่ใช่การคำนวณผิด'}
-                  </Typography>
-                  {!calibration.ok && (
-                    <Button variant="outlined" color="inherit" onClick={() => openEdit('first_due_date')} sx={{ mt: 0.5 }}>
-                      แก้ไขข้อมูล
-                    </Button>
-                  )}
-                </Stack>
-              </Alert>
-            )}
-          </Stack>
+          )}
 
           {/* เลือกแผน = แถวของตารางเทียบ และช่องลองปรับตัวเลขอยู่เหนือตารางนี้ ผลจึงเปลี่ยนในจอที่เห็นอยู่ */}
           <Box component="section" aria-labelledby="student-loan-compare-heading">
@@ -528,21 +571,23 @@ export default function StudentLoan() {
                 <Typography component="h3" variant="h2" id="student-loan-what-if-heading" sx={{ fontSize: '1rem', lineHeight: 1.5 }}>
                   ลองปรับตัวเลขดู
                 </Typography>
-                {/* status: screen reader ได้ยินตอนตัวเลขบนจอเปลี่ยนเป็นค่าทดลอง */}
-                <Box role="status" sx={{ display: 'inline-flex' }}>{trialApplied && trialChip}</Box>
+                {trialShown && trialChip}
                 {recalculating && <CircularProgress size={16} aria-label="กำลังคำนวณใหม่" />}
               </Stack>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                พิมพ์แล้วรอครู่เดียว ตารางและการ์ดด้านล่างคำนวณใหม่ให้ ยังไม่บันทึกทับค่าเดิมจนกว่าจะกด “บันทึกค่านี้”
+                ไม่ทับค่าที่บันทึกไว้จนกว่าจะกด “บันทึกค่านี้”
               </Typography>
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
                 <TextField
                   id={WHAT_IF_PAYMENT_ID}
                   label="จ่าย กยศ. ต่อเดือน (บาท)"
                   value={whatIfPayment}
-                  onChange={(e) => setWhatIfPayment(e.target.value)}
+                  onChange={(e) => {
+                    setWhatIfPayment(e.target.value);
+                    setTrialError('');
+                  }}
                   fullWidth
-                  helperText={<>ที่บันทึกไว้ <Money satang={loan.monthly_payment_satang} /> — ต่ำกว่าขั้นต่ำของงวดไหน ระบบใช้ขั้นต่ำของงวดนั้นแทน</>}
+                  helperText={<>ที่บันทึกไว้ <Money satang={loan.monthly_payment_satang} /></>}
                   {...amountFieldHelp(whatIfPayment.trim())}
                   slotProps={{ htmlInput: { inputMode: 'decimal' } }}
                 />
@@ -550,13 +595,27 @@ export default function StudentLoan() {
                   id={WHAT_IF_SAVING_ID}
                   label="เก็บออมต่อเดือน (บาท)"
                   value={whatIfSaving}
-                  onChange={(e) => setWhatIfSaving(e.target.value)}
+                  onChange={(e) => {
+                    setWhatIfSaving(e.target.value);
+                    setTrialError('');
+                  }}
                   fullWidth
-                  helperText={<>ที่บันทึกไว้ <Money satang={loan.monthly_saving_satang} /> — เงินที่กันไว้จ่ายก้อนเดียวตอนปิดบัญชี</>}
+                  helperText={<>ที่บันทึกไว้ <Money satang={loan.monthly_saving_satang} /></>}
                   {...amountFieldHelp(whatIfSaving.trim())}
                   slotProps={{ htmlInput: { inputMode: 'decimal' } }}
                 />
               </Stack>
+              {/* ผลของแผนที่เลือกอยู่ติดช่องที่พิมพ์ — มือถือไม่ต้องเลื่อนลงไปดูตาราง และ screen reader ได้ยินทุกครั้งที่คำนวณใหม่
+                  กล่อง status อยู่ใน DOM ตลอด เปลี่ยนแค่ข้อความ ไม่งั้นบางตัวอ่านไม่ประกาศ */}
+              <Typography variant="body2" role="status" sx={{ mt: trialShown ? 1.5 : 0 }}>
+                {trialShown && (
+                  <>
+                    แผนที่เลือก: {projection.payoff_date ? <>ปิด {payoffNode(projection)}</> : 'ยังปิดไม่ได้'} · จ่ายรวม{' '}
+                    <Money satang={projection.total_payment_satang} />
+                    {trialNoEffect && ' · ค่าทดลองไม่มีผลกับแผนนี้'}
+                  </>
+                )}
+              </Typography>
               {trialTyped && (
                 <Stack direction="row" useFlexGap sx={{ flexWrap: 'wrap', gap: 1, mt: 1.5 }}>
                   <Button
@@ -578,10 +637,12 @@ export default function StudentLoan() {
                   </Button>
                 </Stack>
               )}
+              {trialError && <Alert severity="error" sx={{ mt: 1.5 }}>{trialError}</Alert>}
             </Box>
 
-            {/* tabIndex ให้คีย์บอร์ดเลื่อนตารางได้เมื่อกว้างเกินกล่อง เหมือนตารางอื่นของแอป */}
-            <TableContainer component={Paper} variant="outlined" tabIndex={0} role="region" aria-label="ตารางเทียบสามทางเลือก">
+            {/* ไม่ใส่ tabIndex: ทั้งสามตารางของหน้านี้พับคอลัมน์รองจนไม่ล้นกล่องทุกขนาดจอ (< md เหลือสองถึงสามคอลัมน์
+                ≥ md กล่องกว้าง ≥ 852px) — กล่องที่ไม่มีอะไรให้เลื่อนไม่ควรเป็นจุดแวะของปุ่ม Tab */}
+            <TableContainer component={Paper} variant="outlined" role="region" aria-label="ตารางเทียบสามทางเลือก">
               {/* แถวที่เลือกไม่ใส่ `selected` (พื้น sidebar-accent ทำยอดสีเหลือ 1.11–1.67 ในธีมมืด) — radio บอกสถานะแทน
                   radio name เดียวกัน = ลูกศรขึ้น/ลงเลือกแผนได้ คลิกทั้งแถวก็เลือกได้ (พื้นที่กดของนิ้ว) */}
               <Table size="small" aria-label="เทียบสามทางเลือกในการปลดหนี้" sx={{ minWidth: { md: 680 }, ...COMPACT_CELLS }}>
@@ -600,8 +661,10 @@ export default function StudentLoan() {
                     const p = projections[s];
                     const checked = s === scenario;
                     const delta = s === 'minimum_only' ? null : vsMinimum(p, projections.minimum_only);
+                    // แถวที่เลือกระหว่างลองตัวเลข: ยอดรวมเดิม → ใหม่ (การ์ดด้านล่างบอกครบทุกตัว)
+                    const before = checked && base != null && base.total_payment_satang !== p.total_payment_satang ? base : null;
                     const badges = [
-                      leastInterest.includes(s) && <Chip key="interest" size="small" variant="outlined" color="success" icon={<PercentRounded />} label="ดอกเบี้ยน้อยสุด" />,
+                      cheapest.includes(s) && <Chip key="cheapest" size="small" variant="outlined" color="success" icon={<PaymentsRounded />} label="จ่ายรวมน้อยสุด" />,
                       fastest.includes(s) && <Chip key="fastest" size="small" variant="outlined" color="success" icon={<EventAvailableRounded />} label="ปิดเร็วสุด" />,
                     ].filter(Boolean);
                     return (
@@ -614,6 +677,8 @@ export default function StudentLoan() {
                               value={s}
                               checked={checked}
                               onChange={() => setScenario(s)}
+                              // ชื่อกลุ่มของ radio (ห่อ radiogroup ข้ามแถวตารางไม่ได้) — "เทียบสามทางเลือก"
+                              slotProps={{ input: { 'aria-describedby': 'student-loan-compare-heading' } }}
                               sx={{ p: 0.75, my: -0.75, ml: -0.75, flexShrink: 0 }}
                             />
                             <Box sx={{ minWidth: 0 }}>
@@ -624,6 +689,11 @@ export default function StudentLoan() {
                                 <Stack direction="row" useFlexGap sx={{ flexWrap: 'wrap', gap: 0.5, mt: 0.75 }}>{badges}</Stack>
                               )}
                               {delta && <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{delta}</Typography>}
+                              {before && (
+                                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                                  จ่ายรวม {beforeAfter(<Money satang={before.total_payment_satang} />, <Money satang={p.total_payment_satang} />)}
+                                </Typography>
+                              )}
                               <Typography variant="body2" color="text.secondary" sx={SECONDARY_LINE}>
                                 ดอกเบี้ย <Money satang={p.total_interest_satang} tone="expense" /> · ส่วนลด{' '}
                                 <Money satang={p.discount_satang} tone="income" />
@@ -651,7 +721,9 @@ export default function StudentLoan() {
           <Box component="section" aria-labelledby="student-loan-plan-heading">
             <Stack direction="row" useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
               <Typography variant="h2" id="student-loan-plan-heading">ถ้า{SCENARIO_LABEL[scenario]}</Typography>
-              {trialApplied && trialChip}
+              {/* แผนที่ค่าทดลองไม่เปลี่ยนอะไรเลย (เช่นจ่ายขั้นต่ำ) ไม่ติดป้าย "ตัวเลขทดลอง" ให้เข้าใจผิดว่าเลขชุดนี้ขยับแล้ว */}
+              {trialShown &&
+                (trialNoEffect ? <Chip size="small" variant="outlined" label="ค่าทดลองไม่มีผลกับแผนนี้" /> : trialChip)}
             </Stack>
             <Typography color="text.secondary" sx={{ mt: 0.5, mb: 2, maxWidth: '70ch', ...descriptionSx }}>
               {SCENARIO_HINT[scenario]}
@@ -661,43 +733,53 @@ export default function StudentLoan() {
                 title="ปิดหนี้ได้เมื่อ"
                 icon={<EventAvailableRounded fontSize="small" />}
                 value={payoffText(projection)}
-                caption={
+                caption={withBefore(
                   projection.payoff_date ? (
                     <>อีก {num(projection.months_remaining)} เดือน · งวดที่ {num(projection.payoff_installment_no ?? '')}</>
                   ) : (
                     'ยอดจ่ายไม่พอไล่ดอกเบี้ยทัน'
-                  )
-                }
+                  ),
+                  payoffNode,
+                  (p) => p.payoff_date,
+                )}
               />
               <SummaryCard
                 title="ยอดรวมที่ต้องจ่ายอีก"
                 icon={<PaymentsRounded fontSize="small" />}
                 value={<Money satang={projection.total_payment_satang} />}
-                caption={
+                caption={withBefore(
                   projection.final_payoff_satang > 0 ? (
                     <>ก้อนปิดบัญชี <Money satang={projection.final_payoff_satang} /></>
                   ) : (
                     'จ่ายจนหมดตามตาราง ไม่มีก้อนปิดบัญชี'
-                  )
-                }
+                  ),
+                  (p) => <Money satang={p.total_payment_satang} />,
+                  (p) => p.total_payment_satang,
+                )}
               />
               <SummaryCard
                 title="ดอกเบี้ยที่ต้องจ่ายอีก"
                 icon={<PercentRounded fontSize="small" />}
                 value={<Money satang={projection.total_interest_satang} tone="expense" />}
-                caption="ค้างอยู่ตอนนี้ + ที่จะเดินต่อจนปิด"
+                caption={withBefore(
+                  'ค้างอยู่ตอนนี้ + ที่จะเดินต่อจนปิด',
+                  (p) => <Money satang={p.total_interest_satang} />,
+                  (p) => p.total_interest_satang,
+                )}
               />
               <SummaryCard
                 title="ส่วนลดที่ได้"
                 icon={<SavingsRounded fontSize="small" />}
                 value={<Money satang={projection.discount_satang} tone="income" />}
-                caption={
+                caption={withBefore(
                   projection.discount_satang > 0 ? (
                     <>ลดเงินต้น {num(`${loan.payoff_discount_bp / 100}%`)} จากการปิดก่อนกำหนด</>
                   ) : (
                     'ไม่ได้ปิดก่อนกำหนด จึงไม่มีส่วนลด'
-                  )
-                }
+                  ),
+                  (p) => <Money satang={p.discount_satang} />,
+                  (p) => p.discount_satang,
+                )}
               />
             </Box>
           </Box>
@@ -707,7 +789,7 @@ export default function StudentLoan() {
             <Typography color="text.secondary" sx={{ mt: 0.5, mb: 2, maxWidth: '70ch', ...descriptionSx }}>
               เงินต้นแต่ละงวดคิดเป็น % ของยอดกู้ตามสัญญา และเพิ่มขึ้นทุกปี — ขั้นต่ำต่อเดือนจึงไม่ใช่ตัวเลขคงที่
             </Typography>
-            <TableContainer component={Paper} variant="outlined" tabIndex={0} role="region" aria-label="ตารางงวดรายปี">
+            <TableContainer component={Paper} variant="outlined" role="region" aria-label="ตารางงวดรายปี">
               <Table size="small" aria-label="งวดรายปีตามตาราง Step Up" sx={COMPACT_CELLS}>
                 <TableHead>
                   <TableRow>
@@ -750,8 +832,15 @@ export default function StudentLoan() {
             </TableContainer>
           </Box>
 
-          <Disclosure id="student-loan-monthly" title={`ตารางรายเดือน (${projection.monthly.length} เดือน)`} storageKey="hyacinthia.studentLoan.monthlyOpen">
-            <TableContainer component={Paper} variant="outlined" tabIndex={0} role="region" aria-label="ตารางรายเดือน">
+          {/* unmountOnExit: ตารางยาวหลายร้อยแถวไม่ค้างใน DOM ตอนพับ — ค่าทดลองเปลี่ยนก็ไม่ต้องอัปเดตแถวที่มองไม่เห็น */}
+          <Disclosure
+            id="student-loan-monthly-heading"
+            title={`ตารางรายเดือน (${projection.monthly.length} เดือน)`}
+            open={monthlyOpen}
+            onToggle={() => setMonthlyOpen(!monthlyOpen)}
+            unmountOnExit
+          >
+            <TableContainer component={Paper} variant="outlined" role="region" aria-label="ตารางรายเดือน">
               <Table size="small" aria-label="รายเดือนจนถึงวันปิดหนี้" sx={COMPACT_CELLS}>
                 <TableHead>
                   <TableRow>
@@ -793,11 +882,13 @@ export default function StudentLoan() {
       {/* วิธีคำนวณใช้ไม่บ่อย จึงพับไว้ท้ายหน้า (The Disclosure Section Rule) — ขึ้นทั้งตอนมีข้อมูลและตอนยังว่าง */}
       {data != null && (
         <Box sx={{ mt: 4 }}>
-          <Disclosure id="student-loan-method" title="วิธีคำนวณ" storageKey="hyacinthia.studentLoan.methodOpen">
+          <Disclosure id="student-loan-method-heading" title="วิธีคำนวณ" open={methodOpen} onToggle={() => setMethodOpen(!methodOpen)}>
             <Box component="ul" sx={{ m: 0, pl: 2.5, maxWidth: '70ch', color: 'text.secondary', ...descriptionSx, '& > li + li': { mt: 0.75 } }}>
               <li>เงินต้นที่ต้องจ่ายแต่ละปีตามตาราง Step Up 15 งวดของ กยศ. คิดเป็น % ของยอดกู้ตามสัญญา</li>
               <li>ดอกเบี้ย 1% ต่อปี เดินรายวันบนเงินต้นคงเหลือ</li>
               <li>เงินที่จ่ายตัดตามลำดับของ พ.ร.บ. 2566: เงินต้นงวดที่ครบกำหนด → ดอกเบี้ย → เบี้ยปรับ</li>
+              <li>ยอดจ่ายต่อเดือนที่ต่ำกว่าขั้นต่ำของงวดไหน ระบบใช้ขั้นต่ำของงวดนั้นแทน — ขั้นต่ำขึ้นทุกปีตามตาราง Step Up</li>
+              <li>“จ่ายรวม” นับส่วนลดเงินต้นจากการปิดบัญชีก่อนกำหนดแล้ว แผนที่ดอกเบี้ยน้อยสุดจึงไม่จำเป็นต้องจ่ายรวมน้อยสุด</li>
             </Box>
           </Disclosure>
         </Box>
@@ -843,12 +934,23 @@ export default function StudentLoan() {
               />
             </Stack>
 
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+            {/* แถวสามช่องเรียงกันเฉพาะ ≥ md — ที่ 600–760px ช่องกว้าง 152–205px ป้าย outlined ไม่ตัดบรรทัด
+                "เงินเก็บที่มีอยู่แล้ว (บาท)" (~200px) จึงถูกตัด · ≥ md (dialog 836px) ช่องละ ~252px */}
+            <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
               <TextField
                 label="ข้อมูล ณ วันที่"
                 type="date"
                 required
-                {...fieldProps('as_of_date', 'วันที่เปิดแอปดูยอดคงเหลือชุดนี้')}
+                {...fieldProps(
+                  'as_of_date',
+                  staleAsOf ? (
+                    <Box component="span" sx={{ color: 'warning.main' }}>
+                      อัปเดตยอดแล้ว — อย่าลืมเปลี่ยน “ข้อมูล ณ วันที่” ให้ตรงกับวันที่ดูยอดในแอป
+                    </Box>
+                  ) : (
+                    'วันที่เปิดแอปดูยอดคงเหลือชุดนี้'
+                  ),
+                )}
                 slotProps={{ inputLabel: { shrink: true } }}
               />
               <TextField
@@ -878,7 +980,7 @@ export default function StudentLoan() {
               slotProps={{ htmlInput: { inputMode: 'decimal' } }}
             />
 
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+            <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
               <TextField
                 label="จ่าย กยศ. ต่อเดือน (บาท)"
                 required

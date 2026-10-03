@@ -1,8 +1,9 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
 import {
   Alert,
   Box,
   Button,
+  Collapse,
   Dialog,
   DialogActions,
   DialogContent,
@@ -18,6 +19,8 @@ import {
   type ButtonProps,
   type IconButtonProps,
 } from '@mui/material';
+import CloseRounded from '@mui/icons-material/CloseRounded';
+import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded';
 import { GuideButton } from './guide/GuideButton.js';
 import { AMOUNT_FORMAT_HINT, parseBahtToSatang } from './format.js';
 import { dataTextSx, descriptionSx } from './theme.js';
@@ -260,7 +263,8 @@ export function ConfirmDialog({
 }
 
 // info = ผลที่ไม่ใช่ทั้งสำเร็จและผิดพลาด เช่น ผู้ใช้กดยกเลิกเองในหน้าของ Google (สี info = muted ไม่ใช่สีสถานะใหม่)
-export type Notice = { message: string; severity: 'success' | 'error' | 'info' };
+// action = ปุ่มเดียวต่อท้ายข้อความ เช่น "เลิกทำ" — snackbar ค้างนานขึ้นให้ทันกด
+export type Notice = { message: string; severity: 'success' | 'error' | 'info'; action?: { label: string; onClick: () => void } };
 
 // placement="top" ใช้ตอนมีแถบลอยด้านล่างจอ (แถบรายการที่เลือกในหน้าวางแผน) ไม่งั้น snackbar ทับปุ่มของแถบ
 export function FeedbackSnackbar({
@@ -273,8 +277,112 @@ export function FeedbackSnackbar({
   placement?: 'top' | 'bottom';
 }) {
   return (
-    <Snackbar open={Boolean(notice)} autoHideDuration={4500} onClose={onClose} anchorOrigin={{ vertical: placement, horizontal: 'center' }}>
-      {notice ? <Alert severity={notice.severity} variant="filled" onClose={onClose}>{notice.message}</Alert> : undefined}
+    <Snackbar
+      open={Boolean(notice)}
+      autoHideDuration={notice?.action ? 8000 : 4500}
+      // มีปุ่ม action: คลิกที่อื่น (เช่นเลือกแถว) ไม่ปิด ไม่งั้นปุ่มเลิกทำหายก่อนได้กด — ปิดได้ด้วย X, Esc และหมดเวลา
+      onClose={(_, reason) => {
+        if (reason === 'clickaway' && notice?.action) return;
+        onClose();
+      }}
+      anchorOrigin={{ vertical: placement, horizontal: 'center' }}
+    >
+      {notice ? (
+        <Alert
+          severity={notice.severity}
+          variant="filled"
+          onClose={onClose}
+          // action ของ Alert แทนที่ปุ่มปิดเดิม — ใส่ปุ่มปิดคืนเองคู่กัน
+          action={
+            notice.action && (
+              <>
+                <Button color="inherit" onClick={notice.action.onClick}>{notice.action.label}</Button>
+                <IconButton color="inherit" aria-label="ปิด" onClick={onClose}><CloseRounded fontSize="small" /></IconButton>
+              </>
+            )
+          }
+        >
+          {notice.message}
+        </Alert>
+      ) : undefined}
     </Snackbar>
+  );
+}
+
+/** เปิด/พับของ Disclosure จำต่อเครื่อง — localStorage โดนบล็อกได้ (โหมดส่วนตัว) อ่านไม่ได้ = พับ เขียนไม่ได้ = จำแค่รอบนี้ */
+export function useStoredOpen(storageKey: string): [boolean, (open: boolean) => void] {
+  const [open, setOpen] = useState(() => {
+    try {
+      return localStorage.getItem(storageKey) === '1';
+    } catch {
+      return false;
+    }
+  });
+  const set = (next: boolean) => {
+    setOpen(next);
+    try {
+      localStorage.setItem(storageKey, next ? '1' : '0');
+    } catch {
+      // เขียนไม่ได้ = จำแค่รอบนี้
+    }
+  };
+  return [open, set];
+}
+
+/**
+ * The Disclosure Section Rule: หัวข้อ h2 ห่อปุ่ม aria-expanded + aria-controls ลูกศรหมุนตามสถานะ (คู่กับ `useStoredOpen`)
+ * `id` = id ของหัวข้อ (คู่มืออ้างได้) · `action` อยู่ข้างหัวข้อ `notice` (เช่น LoadError) อยู่ใต้หัวข้อ ทั้งสองอยู่นอกส่วนที่พับ
+ * `unmountOnExit` ไม่ค้างตารางยาวไว้ใน DOM ตอนพับ — id ของ panel อยู่ที่กล่องนอก Collapse aria-controls จึงชี้เจอเสมอ
+ */
+export function Disclosure({
+  id,
+  title,
+  open,
+  onToggle,
+  action,
+  notice,
+  unmountOnExit = false,
+  children,
+}: {
+  id: string;
+  title: ReactNode;
+  open: boolean;
+  onToggle: () => void;
+  action?: ReactNode;
+  notice?: ReactNode;
+  unmountOnExit?: boolean;
+  children: ReactNode;
+}) {
+  const panelId = useId();
+  return (
+    <Box component="section" aria-labelledby={id}>
+      <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, mb: 1.5 }}>
+        <Typography variant="h2" id={id}>
+          <Button
+            color="inherit"
+            aria-expanded={open}
+            aria-controls={panelId}
+            onClick={onToggle}
+            endIcon={
+              <ExpandMoreRounded
+                sx={{
+                  transform: open ? 'rotate(180deg)' : 'none',
+                  transition: (theme) => theme.transitions.create('transform'),
+                  '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
+                }}
+              />
+            }
+            sx={{ font: 'inherit', ml: -1, px: 1, textAlign: 'left' }}
+          >
+            {title}
+          </Button>
+        </Typography>
+        {action}
+      </Stack>
+      {notice}
+      <Box id={panelId}>
+        <Collapse in={open} unmountOnExit={unmountOnExit}>{children}</Collapse>
+      </Box>
+    </Box>
   );
 }
