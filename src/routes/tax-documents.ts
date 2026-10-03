@@ -3,7 +3,7 @@ import { requireUser } from '../auth.js';
 import { decrypt } from '../crypto.js';
 import { pool, query, tx } from '../db.js';
 import { getAttachment, getMessage, listAttachments, listMessages, refreshAccessToken } from '../gmail.js';
-import { enumStr, HttpError, id, isoDate, optionalStr, pathId, satang, str, type Body } from '../http.js';
+import { enumStr, FILE_TOO_LARGE, HttpError, id, isoDate, MAX_FILE_BYTES, optionalStr, pathId, satang, str, type Body } from '../http.js';
 import { audit } from '../services/audit.js';
 import { detectMime, readStoredFile, sha256Of, storeFile } from '../services/file-vault.js';
 import { assertOwnsTaxEntity } from './tax-entities.js';
@@ -15,7 +15,8 @@ const DOCUMENT_TYPES = [
   'insurance_certificate', 'donation_receipt', 'investment_certificate', 'other',
 ] as const;
 const STATUSES = ['draft', 'verified', 'submitted'] as const;
-const MAX_FILE_BYTES = 10 * 1024 * 1024;
+// base64 ของไฟล์ 10MB พอดียาว 13,981,016 ตัวอักษร — ยาวกว่านี้คือไฟล์ใหญ่เกินแน่นอน ไม่ต้อง decode ก่อน
+const MAX_FILE_BASE64_CHARS = Math.ceil(MAX_FILE_BYTES / 3) * 4;
 const LIST_LIMIT_DEFAULT = 50;
 const LIST_LIMIT_MAX = 200;
 // ปิดคู่กับ TAX_PAGES_ENABLED ใน web/src/features.ts — สองเส้นนี้ค้นทั้งกล่อง (has:attachment) ไม่ใช่เฉพาะเมลธนาคาร
@@ -45,16 +46,16 @@ function optEnumQ<T extends string>(q: Record<string, unknown>, field: string, v
   return v as T;
 }
 
-function optYear(v: unknown, field: string): number | null {
+function optYear(v: unknown): number | null {
   if (v == null || v === '') return null;
   const n = Number(v);
-  if (!Number.isInteger(n) || n < 2000 || n > 2200) throw new HttpError(400, `${field} ต้องเป็นปีที่ถูกต้อง`);
+  if (!Number.isInteger(n) || n < 2000 || n > 2200) throw new HttpError(400, 'ปีภาษีไม่ถูกต้อง');
   return n;
 }
 
-function requiredYear(v: unknown, field: string): number {
-  const n = optYear(v, field);
-  if (n == null) throw new HttpError(400, `ต้องกรอก ${field}`);
+function requiredYear(v: unknown): number {
+  const n = optYear(v);
+  if (n == null) throw new HttpError(400, 'ต้องกรอกปีภาษี');
   return n;
 }
 
@@ -82,7 +83,7 @@ function parseTaxDocMeta(b: Body): TaxDocMeta {
   return {
     taxEntityId: id(b, 'tax_entity_id'),
     documentType: enumStr(b, 'document_type', DOCUMENT_TYPES),
-    taxYear: requiredYear(b.tax_year, 'tax_year'),
+    taxYear: requiredYear(b.tax_year),
     issuerName: str(b, 'issuer_name', 200),
     issuerTaxId: optionalStr(b, 'issuer_tax_id', 20),
     recipientTaxId: optionalStr(b, 'recipient_tax_id', 20),
@@ -106,7 +107,7 @@ async function createTaxDocument(
 ) {
   const mime = detectMime(buf);
   if (!mime) throw new HttpError(400, 'ไฟล์ต้องเป็น PDF, JPEG หรือ PNG เท่านั้น');
-  if (buf.length > MAX_FILE_BYTES) throw new HttpError(413, `ไฟล์ใหญ่เกิน ${MAX_FILE_BYTES / 1024 / 1024}MB`);
+  if (buf.length > MAX_FILE_BYTES) throw new HttpError(413, FILE_TOO_LARGE);
 
   await assertOwnsTaxEntity(userId, meta.taxEntityId);
 
@@ -152,7 +153,7 @@ async function createTaxDocument(
 taxDocumentsRouter.get('/tax-documents', requireUser(async (req, res, user) => {
   const q = req.query as Record<string, unknown>;
   const taxEntityId = optId(q, 'tax_entity_id');
-  const taxYearFilter = optYear(q.tax_year, 'tax_year');
+  const taxYearFilter = optYear(q.tax_year);
   const status = optEnumQ(q, 'status', STATUSES);
   const documentType = optEnumQ(q, 'document_type', DOCUMENT_TYPES);
   const search = typeof q.q === 'string' && q.q.trim() !== '' ? q.q.trim() : null;
@@ -222,9 +223,11 @@ taxDocumentsRouter.post('/tax-documents', requireUser(async (req, res, user) => 
   const b = req.body as Body;
   const meta = parseTaxDocMeta(b);
   const filename = str(b, 'filename', 200);
-  const fileBase64 = str(b, 'file_base64', 15_000_000);
+  const fileBase64 = b.file_base64;
+  if (typeof fileBase64 !== 'string' || fileBase64 === '') throw new HttpError(400, 'ต้องแนบไฟล์');
+  if (fileBase64.length > MAX_FILE_BASE64_CHARS) throw new HttpError(413, FILE_TOO_LARGE);
   const buf = Buffer.from(fileBase64, 'base64');
-  if (buf.length === 0) throw new HttpError(400, 'file_base64 ไม่ถูกต้อง');
+  if (buf.length === 0) throw new HttpError(400, 'ไฟล์ไม่ถูกต้อง');
 
   const doc = await createTaxDocument(user.id, meta, buf, filename, req.ip ?? null);
   res.status(201).json(doc);
@@ -282,7 +285,7 @@ taxDocumentsRouter.patch('/tax-documents/:id', requireUser(async (req, res, user
 
   const has = (field: string) => Object.prototype.hasOwnProperty.call(b, field);
   const documentType = b.document_type == null ? null : enumStr(b, 'document_type', DOCUMENT_TYPES);
-  const taxYearValue = optYear(b.tax_year, 'tax_year');
+  const taxYearValue = optYear(b.tax_year);
   const issuerName = b.issuer_name == null ? null : str(b, 'issuer_name', 200);
   const issuerTaxIdProvided = has('issuer_tax_id');
   const recipientTaxIdProvided = has('recipient_tax_id');
@@ -296,6 +299,7 @@ taxDocumentsRouter.patch('/tax-documents/:id', requireUser(async (req, res, user
 
   const updated = await tx(async (c) => {
     const before = (await c.query(`select ${TAX_DOC_COLUMNS} from tax_document where id = $1 and user_id = $2`, [docId, user.id])).rows[0];
+    // verified_at: ถอยจาก submitted กลับมา verified คงเวลาตรวจเดิม — ตั้งใหม่เฉพาะหลังกลับเป็น draft (ล้างเป็น null)
     const { rows } = await c.query(
       `update tax_document set
          tax_entity_id = coalesce($3, tax_entity_id),
@@ -311,7 +315,7 @@ taxDocumentsRouter.patch('/tax-documents/:id', requireUser(async (req, res, user
          total_satang = coalesce($19, total_satang),
          withholding_satang = case when $20 then $21 else withholding_satang end,
          status = coalesce($22, status),
-         verified_at = case when $22 = 'verified' then now() when $22 = 'draft' then null else verified_at end,
+         verified_at = case when $22 = 'verified' then coalesce(verified_at, now()) when $22 = 'draft' then null else verified_at end,
          updated_at = now()
        where id = $1 and user_id = $2 and archived_at is null
        returning ${TAX_DOC_COLUMNS}`,
@@ -361,14 +365,19 @@ taxDocumentsRouter.get('/tax-documents/:id/file', requireUser(async (req, res, u
   );
   const doc = rows[0];
   if (!doc) throw new HttpError(404, 'ไม่พบเอกสาร');
+  // ?inline=1 = "เปิดดู" ในแท็บใหม่ — action เดิม (ป้ายใน web/src/auditLabels.ts มีอยู่แล้ว) แยกด้วย after.inline
+  const inline = req.query.inline === '1';
 
   await audit(pool, {
-    userId: user.id, action: 'tax_document.download', entityType: 'tax_document', entityId: docId, ip: req.ip ?? null,
+    userId: user.id, action: 'tax_document.download', entityType: 'tax_document', entityId: docId,
+    after: inline ? { inline: true } : undefined, ip: req.ip ?? null,
   });
 
   const buf = await readStoredFile(doc.storage_path);
+  // file_mime มาจาก detectMime (magic bytes) ตอนอัปโหลดเท่านั้น ไม่ใช่จากชื่อไฟล์ — inline จึงปลอดภัยคู่กับ nosniff จาก useSecurityHeaders
+  // ไม่ใส่ CSP sandbox: Chrome ไม่ยอมเปิด PDF viewer ในเอกสารที่ถูก sandbox
   res.setHeader('content-type', doc.file_mime);
-  res.setHeader('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(doc.original_filename)}`);
+  res.setHeader('content-disposition', `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(doc.original_filename)}`);
   res.send(buf);
 }));
 

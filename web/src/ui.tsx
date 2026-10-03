@@ -375,6 +375,33 @@ export function useHashTarget(hash: string, ready: boolean, scrollRef: RefObject
   }, [location.hash, location.key, ready, hash, scrollRef, focusId]);
 }
 
+/**
+ * พิมพ์ (ปุ่มพิมพ์หรือ Ctrl+P) ด้วยสีธีมสว่างชั่วคราว — ตัวอักษรของธีมมืดจางบนกระดาษขาว (The Guide Page Rule)
+ * beforeprint สลับ `data-mui-color-scheme` เป็น light แล้ว afterprint คืนค่าเดิม · หน้าคู่มือและหน้าประมาณการภาษี
+ */
+export function usePrintLightScheme() {
+  useEffect(() => {
+    const root = document.documentElement;
+    const attr = 'data-mui-color-scheme';
+    let scheme: string | null = null;
+    const before = () => {
+      scheme = root.getAttribute(attr);
+      root.setAttribute(attr, 'light');
+    };
+    const after = () => {
+      if (scheme) root.setAttribute(attr, scheme);
+      scheme = null;
+    };
+    window.addEventListener('beforeprint', before);
+    window.addEventListener('afterprint', after);
+    return () => {
+      window.removeEventListener('beforeprint', before);
+      window.removeEventListener('afterprint', after);
+      after();
+    };
+  }, []);
+}
+
 /** เปิด/พับของ Disclosure จำต่อเครื่อง — localStorage โดนบล็อกได้ (โหมดส่วนตัว) อ่านไม่ได้ = พับ เขียนไม่ได้ = จำแค่รอบนี้ */
 export function useStoredOpen(storageKey: string): [boolean, (open: boolean) => void] {
   const [open, setOpen] = useState(() => {

@@ -24,7 +24,7 @@ test('tax document vault: upload, dedupe, link, verify, download, audit, archive
   process.env.TAX_DOC_STORAGE_DIR = dir;
   t.after(() => rm(dir, { recursive: true, force: true }));
 
-  const { HttpError } = await import('../src/http.js');
+  const { errorHandler } = await import('../src/http.js');
   const { taxEntitiesRouter } = await import('../src/routes/tax-entities.js');
   const { taxDocumentsRouter } = await import('../src/routes/tax-documents.js');
 
@@ -39,13 +39,7 @@ test('tax document vault: upload, dedupe, link, verify, download, audit, archive
     });
     app.use('/api', taxEntitiesRouter);
     app.use('/api', taxDocumentsRouter);
-    app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-      if (err instanceof HttpError) return void res.status(err.status).json({ error: err.message });
-      const code = (err as { code?: string }).code;
-      if (code === '23505') return void res.status(409).json({ error: 'ซ้ำ' });
-      console.error(err);
-      res.status(500).json({ error: 'internal' });
-    });
+    app.use(errorHandler);
     return app;
   }
 
@@ -177,6 +171,45 @@ test('tax document vault: upload, dedupe, link, verify, download, audit, archive
     assert.equal(res.status, 409);
   });
 
+  // หน้าเว็บโชว์ error ตรง ๆ — ต้องเป็นภาษาไทยที่ผู้ใช้อ่านรู้เรื่อง ไม่มีชื่อ field ดิบ
+  await t.test('ไฟล์เกิน 10MB → 413 ข้อความไทย, พิมพ์ปี พ.ศ. → 400 "ปีภาษีไม่ถูกต้อง"', async () => {
+    const meta = { tax_entity_id: taxEntityId, document_type: 'receipt', issuer_name: 'ร้านค้า', total_satang: 100, filename: 'big.pdf' };
+    const big = await app.request('/api/tax-documents', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...meta, tax_year: 2026, file_base64: Buffer.concat([pdfBytes, Buffer.alloc(10 * 1024 * 1024)]).toString('base64') }),
+    });
+    assert.equal(big.status, 413);
+    assert.equal(((await big.json()) as { error: string }).error, 'ไฟล์ใหญ่เกิน 10MB');
+
+    const buddhistYear = await app.request('/api/tax-documents', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...meta, tax_year: 2569, file_base64: pdfBytes.toString('base64') }),
+    });
+    assert.equal(buddhistYear.status, 400);
+    assert.equal(((await buddhistYear.json()) as { error: string }).error, 'ปีภาษีไม่ถูกต้อง');
+  });
+
+  // body เกินเพดาน express.json (15mb) — body-parser โยน entity.too.large ก่อนถึง route ต้องได้ 413 ข้อความไทยจาก errorHandler
+  await t.test('body เกินเพดาน express.json → 413 ข้อความไทย (ไม่ใช่ 500)', async () => {
+    const huge = await app.request('/api/tax-documents', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ file_base64: Buffer.alloc(12 * 1024 * 1024).toString('base64') }),
+    });
+    assert.equal(huge.status, 413);
+    assert.equal(((await huge.json()) as { error: string }).error, 'ไฟล์ใหญ่เกิน 10MB');
+
+    const other = await app.request('/api/tax-entities', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ display_name: 'x'.repeat(200 * 1024) }),
+    });
+    assert.equal(other.status, 413);
+    assert.equal(((await other.json()) as { error: string }).error, 'ข้อมูลที่ส่งมาใหญ่เกินไป');
+  });
+
   await t.test('ดาวน์โหลดได้ไบต์เดิมเป๊ะ + header ถูก + มี audit log', async () => {
     const res = await app.request(`/api/tax-documents/${docId}/file`);
     assert.equal(res.status, 200);
@@ -193,6 +226,23 @@ test('tax document vault: upload, dedupe, link, verify, download, audit, archive
     ).rows;
     assert.equal(auditRows.length, 1);
     assert.ok(auditRows[0]!.ip_address);
+  });
+
+  await t.test('?inline=1 เปิดดูในแท็บ — disposition inline + content-type จาก magic bytes + audit แยกด้วย after.inline', async () => {
+    const res = await app.request(`/api/tax-documents/${docId}/file?inline=1`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('content-type'), 'application/pdf');
+    assert.equal(res.headers.get('content-disposition'), "inline; filename*=UTF-8''receipt.pdf");
+    assert.ok(Buffer.from(await res.arrayBuffer()).equals(pdfBytes));
+
+    const auditRows = (
+      await db.pool.query(
+        `select 1 from audit_log where user_id = $1 and action = 'tax_document.download' and entity_id = $2
+           and after_data->>'inline' = 'true'`,
+        [userA, docId],
+      )
+    ).rows;
+    assert.equal(auditRows.length, 1);
   });
 
   await t.test('เชื่อม transaction — ตรวจย้อนกลับได้และมี audit log', async () => {
@@ -228,6 +278,28 @@ test('tax document vault: upload, dedupe, link, verify, download, audit, archive
     const body = (await res.json()) as { status: string; verified_at: string | null };
     assert.equal(body.status, 'verified');
     assert.ok(body.verified_at);
+  });
+
+  await t.test('ถอย submitted → verified คงเวลาตรวจเดิม, draft → verified ได้เวลาใหม่', async () => {
+    const patch = async (status: string) => {
+      const res = await app.request(`/api/tax-documents/${docId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      assert.equal(res.status, 200);
+      return ((await res.json()) as { verified_at: string | null }).verified_at;
+    };
+    // ย้อนเวลาตรวจไปก่อน ให้แยก "คงเดิม" กับ "now()" ได้แน่นอนโดยไม่พึ่งความละเอียดมิลลิวินาที
+    const original = '2026-01-02T03:04:05.000Z';
+    await db.pool.query('update tax_document set verified_at = $2 where id = $1', [docId, original]);
+
+    await patch('submitted');
+    assert.equal(await patch('verified'), original, 'submitted → verified ต้องคงเวลาตรวจเดิม');
+
+    assert.equal(await patch('draft'), null, 'กลับเป็น draft ต้องล้างเวลาตรวจ');
+    const reverified = await patch('verified');
+    assert.ok(reverified && new Date(reverified) > new Date(original), 'draft → verified ต้องได้เวลาใหม่ (now())');
   });
 
   await t.test('list กรองด้วย tax_entity_id เห็นเอกสารที่สร้างไว้', async () => {

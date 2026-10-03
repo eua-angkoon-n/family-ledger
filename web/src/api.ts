@@ -463,7 +463,8 @@ export const TAX_TREATMENT_LABEL: Record<TaxTreatment, string> = {
   excluded: 'ไม่นับรวม',
 };
 
-export type TaxBracketBreakdown = { upToSatang: number | null; rate: number; taxSatang: number };
+// incomeSatang = เงินได้สุทธิที่ตกอยู่ในขั้นนี้ — snapshot เก่าก่อน 1.5.0 ไม่มี field นี้ แต่หน้าเว็บไม่แสดงขั้นบันไดจาก snapshot
+export type TaxBracketBreakdown = { upToSatang: number | null; rate: number; taxSatang: number; incomeSatang: number };
 export type TaxEstimate = {
   ruleVersion: string;
   employmentIncomeSatang: number;
@@ -495,6 +496,10 @@ export type UnlinkedClaimSample = { id: number; deduction_type: string; claimed_
 
 export type TaxMissingDocument = {
   untreated_txn_count: number;
+  // แยกตามทิศเงินจาก untreated_txn_count (ผลรวมเท่ากัน): เงินเข้าที่ยังไม่ระบุ = อาจมีรายได้ตกหล่น (ประมาณการต่ำกว่าจริง)
+  // เงินออกที่ยังไม่ระบุ = อาจหักเป็นค่าใช้จ่ายได้ (ประมาณการได้แต่สูงกว่าจริง) — "ยังไม่ครบ" ดูเฉพาะฝั่งเงินเข้า
+  untreated_credit_count: number;
+  untreated_debit_count: number;
   unlinked_business_txn_count: number;
   unlinked_business_txn_samples: UnlinkedBusinessTxnSample[];
   draft_document_count: number;

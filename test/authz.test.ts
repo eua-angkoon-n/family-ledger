@@ -628,11 +628,16 @@ test('cross-user authorization: Slice 4A endpoints', async (t) => {
     await loginAs(userA);
     assert.equal((await request(`/api/tax-documents/${taxDocB}`)).status, 404);
     assert.equal((await request(`/api/tax-documents/${taxDocB}/file`)).status, 404);
+    assert.equal((await request(`/api/tax-documents/${taxDocB}/file?inline=1`)).status, 404);
+    // เปิดดู inline ก็ต้องล็อกอิน — ข้อถัดไป loginAs ใหม่เอง
+    cookie = '';
+    assert.equal((await request(`/api/tax-documents/${taxDocB}/file?inline=1`)).status, 401);
   });
 
   await t.test('27. admin ดาวน์โหลด/เปิดเอกสารของ B ไม่ได้เหมือนกัน (404 ไม่ใช่สิทธิพิเศษ)', async () => {
     await loginAs(admin);
     assert.equal((await request(`/api/tax-documents/${taxDocB}/file`)).status, 404);
+    assert.equal((await request(`/api/tax-documents/${taxDocB}/file?inline=1`)).status, 404);
     assert.equal((await request(`/api/tax-documents/${taxDocB}`)).status, 404);
   });
 

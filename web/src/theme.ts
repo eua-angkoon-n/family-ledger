@@ -192,6 +192,13 @@ export const dataTextSx = {
   fontVariantNumeric: 'tabular-nums',
 } as const;
 
+// Data Display ขั้นใหญ่สุด (DESIGN.md Hierarchy) — ยอดหลักบนหัวลิ้นชัก (ReviewDrawer, TaxDocumentDrawer) ส่งเป็น sx ของ Money
+export const dataDisplaySx = {
+  ...dataTextSx,
+  fontSize: '1.75rem',
+  lineHeight: 1.3,
+} as const;
+
 export const descriptionSx = {
   ...brandCopySx,
   fontSize: '1rem',
@@ -278,6 +285,8 @@ const theme = createTheme({
     fontWeightBold: 600,
     h1: { ...brandCopySx, fontWeight: 600, fontSize: '1.75rem', lineHeight: 1.3, letterSpacing: 0, textWrap: 'balance' },
     h2: { ...brandCopySx, fontWeight: 600, fontSize: '1.25rem', lineHeight: 1.4, letterSpacing: 0, textWrap: 'balance' },
+    // Headline Small — หัวข้อส่วน h3 ใต้ชื่อลิ้นชัก (variant="h3" ได้ <h3> เอง)
+    h3: { ...brandCopySx, fontWeight: 600, fontSize: '1rem', lineHeight: 1.5, letterSpacing: 0 },
     subtitle1: { letterSpacing: 0 },
     subtitle2: { letterSpacing: 0 },
     body1: { lineHeight: 1.5, letterSpacing: 0 },

@@ -75,7 +75,7 @@ export const AUDIT_ACTIONS: readonly (readonly [code: string, label: string, ent
   ['tax.export', 'ส่งออกข้อมูลภาษี', 'tax_entity'],
   ['tax_document.upload', 'อัปโหลดเอกสารภาษี', 'tax_document'],
   ['tax_document.update', 'แก้ไขเอกสารภาษี', 'tax_document'],
-  ['tax_document.archive', 'เก็บเอกสารภาษีเข้าคลัง', 'tax_document'],
+  ['tax_document.archive', 'เอาเอกสารภาษีออกจากรายการ', 'tax_document'],
   ['tax_document.download', 'เปิดเอกสารภาษี', 'tax_document'],
   ['tax_document.link_txn', 'ผูกเอกสารภาษีกับธุรกรรม', 'tax_document'],
   ['tax_calculation_snapshot.create', 'บันทึกผลคำนวณภาษี', 'tax_calculation_snapshot'],

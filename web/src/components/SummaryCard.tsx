@@ -48,6 +48,13 @@ export function summaryRowSx(count: number) {
 // นอก summaryRowSx subgrid ไม่มีผล การ์ดเรียงสามบรรทัดตามปกติ
 const cardGridSx = { display: 'grid', gridRow: 'span 3', gridTemplateRows: 'subgrid', minWidth: 0 } as const;
 
+// ขั้น Data Display ของตัวเลขการ์ด (DESIGN.md) — dense ที่ md 1.125rem (การ์ด 5 ใบที่ 900px เหลือที่ให้ตัวเลขราว 125px) ที่ lg 1.5rem (ราว 185px)
+const VALUE_STEP = { xs: '1.25rem', sm: '1.5rem', lg: '1.75rem' } as const;
+const DENSE_VALUE_STEP = { xs: '1.25rem', md: '1.125rem', lg: '1.5rem' } as const;
+// ไม่เกิน 14.5% ของความกว้างกล่องตัวเลข = กว้างได้ราว 6.9em: "฿9,999,999.99" (~6.53em) จุในกล่อง ส่วน "−฿9,999,999.99" (~7.42em)
+// เกินเข้า padding ราว 8px ที่ 320px แต่ไม่ทะลุขอบการ์ด (16cqi เดิมจุแค่ ~6.25em — ยอดเจ็ดหลักล้นที่ 320px)
+const cqiCap = (step: Record<string, string>) => Object.fromEntries(Object.entries(step).map(([bp, size]) => [bp, `min(${size}, 14.5cqi)`]));
+
 // การ์ดสรุปตัวเดียว ไม่ซ้อน Paper ใน Paper (Don't ของ DESIGN.md) — value ผ่าน dataTextSx เสมอ
 // (ตัวเลข/เงินตาม Financial Clarity Rule) ต่างจาก title/caption ที่เป็นคำอธิบาย
 export default function SummaryCard({ title, icon, value, caption, to, onClick, disabled, disabledReason, loading = false, dense = false, captionInline = false }: SummaryCardProps) {
@@ -72,25 +79,32 @@ export default function SummaryCard({ title, icon, value, caption, to, onClick, 
           </Tooltip>
         )}
         {/* ลูกศรบอกว่าการ์ดนี้พาไปดูรายการต่อได้ — แยกการ์ดกดได้/กดไม่ได้โดยไม่ต้อง hover */}
-        {interactive && <ChevronRightRounded fontSize="small" aria-hidden sx={{ ml: 'auto', flexShrink: 0 }} />}
+        {/* ไม่พิมพ์ — บนกระดาษกดไม่ได้ */}
+        {interactive && <ChevronRightRounded fontSize="small" aria-hidden sx={{ ml: 'auto', flexShrink: 0, displayPrint: 'none' }} />}
       </Stack>
-      <Box
-        sx={{
-          ...dataTextSx,
-          lineHeight: 1.3,
-          overflowWrap: 'anywhere',
-          // ขั้น Data Display ของ DESIGN.md — ไม่ dense ก็อยู่ 2 คอลัมน์บนมือถือ / 4 ใบที่ 900px 1.75rem ล้นการ์ดถ้าไม่ย่อลง
-          // dense ที่ md 1.125rem (การ์ด 5 ใบที่ 900px เหลือที่ให้ตัวเลขราว 125px) ที่ lg 1.5rem (ราว 185px)
-          fontSize: dense ? { xs: '1.25rem', md: '1.125rem', lg: '1.5rem' } : { xs: '1.25rem', sm: '1.5rem', lg: '1.75rem' },
-        }}
-      >
-        {/* "—" ล้วน screen reader อ่านเป็น "ขีด" หรือข้ามไป — ซ่อนจาก AT แล้วให้ข้อความแทน */}
-        {loading ? <Skeleton width="60%" /> : disabled ? (
-          <>
-            <span aria-hidden>—</span>
-            <Box component="span" sx={visuallyHiddenSx}>ยังไม่มีข้อมูล</Box>
-          </>
-        ) : value}
+      {/* กล่องนอกเป็น container (กว้างตามคอลัมน์ ไม่ขึ้นกับเนื้อหา) ให้ตัวเลขข้างในย่อตามความกว้างการ์ดด้วย cqi —
+          ไม่ใส่ที่กล่อง subgrid ของการ์ดเอง เพราะ containment ของ container อาจตัดการเป็น subgrid */}
+      <Box sx={{ containerType: 'inline-size', minWidth: 0 }}>
+        <Box
+          sx={{
+            ...dataTextSx,
+            lineHeight: 1.3,
+            // ตัวเลขไม่ตัดกลาง ("฿123,456.7 / 8") — ย่อแทน: ขนาดตามขั้นแต่ไม่เกิน 14.5cqi (cqiCap) ย่อเฉพาะการ์ดที่แคบจริง
+            // (320px: กล่องกว้าง 104px → ~15px) · เบราว์เซอร์ที่ไม่รู้จัก cqi (Safari < 16) ทิ้ง min() ทั้งก้อนแล้วตัวเลขเหลือ 16px
+            // จึงใส่ขั้นปกติก่อน และ nowrap อยู่ใน @supports ด้วย — fallback ยังตัดบรรทัดได้ (overflowWrap) ดีกว่าล้นการ์ด
+            fontSize: dense ? DENSE_VALUE_STEP : VALUE_STEP,
+            overflowWrap: 'anywhere',
+            '@supports (font-size: 1cqi)': { whiteSpace: 'nowrap', fontSize: cqiCap(dense ? DENSE_VALUE_STEP : VALUE_STEP) },
+          }}
+        >
+          {/* "—" ล้วน screen reader อ่านเป็น "ขีด" หรือข้ามไป — ซ่อนจาก AT แล้วให้ข้อความแทน */}
+          {loading ? <Skeleton width="60%" /> : disabled ? (
+            <>
+              <span aria-hidden>—</span>
+              <Box component="span" sx={visuallyHiddenSx}>ยังไม่มีข้อมูล</Box>
+            </>
+          ) : value}
+        </Box>
       </Box>
       {!loading && ((caption != null && !captionAsTip) || (disabled && disabledReason)) && (
         <Typography variant="body2" color="text.secondary">

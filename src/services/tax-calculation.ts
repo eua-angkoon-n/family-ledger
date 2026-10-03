@@ -11,6 +11,7 @@ export type TaxInput = {
 export type BracketBreakdown = {
   upToSatang: number | null;
   rate: number;
+  incomeSatang: number; // เงินได้สุทธิส่วนที่ตกอยู่ในขั้นนี้ (snapshot เก่าไม่มี field นี้)
   taxSatang: number;
 };
 
@@ -37,7 +38,7 @@ function applyBrackets(netSatang: number, brackets: TaxRuleSet['brackets']): Bra
   for (const bracket of brackets) {
     const upperBound = bracket.upToSatang ?? Infinity;
     const taxableInBracket = Math.max(0, Math.min(netSatang, upperBound) - lowerBound);
-    result.push({ upToSatang: bracket.upToSatang, rate: bracket.rate, taxSatang: Math.round(taxableInBracket * bracket.rate) });
+    result.push({ upToSatang: bracket.upToSatang, rate: bracket.rate, incomeSatang: taxableInBracket, taxSatang: Math.round(taxableInBracket * bracket.rate) });
     lowerBound = upperBound;
     if (netSatang <= upperBound) break;
   }

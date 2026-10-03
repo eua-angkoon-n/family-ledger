@@ -28,7 +28,7 @@ import {
   type Category, type Classification, type TaxEntity, type TaxTreatment, type TxnDetail, type TxnSplit,
 } from '../api.js';
 import { AMOUNT_FORMAT_HINT, formatBaht, formatDate, parseBahtToSatang } from '../format.js';
-import { dataTextSx, radii } from '../theme.js';
+import { dataDisplaySx, dataTextSx, radii } from '../theme.js';
 import { ConfirmDialog, LoadError, visuallyHiddenSx, type Notice } from '../ui.js';
 import IncomeQuickAddModal from './IncomeQuickAddModal.js';
 import Money from './Money.js';
@@ -40,9 +40,6 @@ const CLASSIFICATION_LABEL: Record<Classification, string> = {
   internal_transfer: 'โอนภายใน',
   excluded: 'ไม่นับรวม',
 };
-
-// h3 ใต้ชื่อ drawer (h2) ขั้น Headline Small ของ DESIGN.md
-const SECTION_HEADING_SX = { fontSize: '1rem', lineHeight: 1.5 } as const;
 
 // คีย์ลัด "บันทึกแล้วไปถัดไป" — Ctrl+Enter และ ⌘+Enter ใช้ได้ทั้งคู่ คำใบ้บนจอแสดงตามเครื่อง
 const IS_MAC = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
@@ -452,7 +449,7 @@ export default function ReviewDrawer({
     >
       <Box sx={{ width: { xs: '100vw', sm: 440 }, p: 3, height: '100%', overflowY: 'auto' }} onKeyDownCapture={onShortcut}>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start', justifyContent: 'space-between', mb: position ? 1 : 2 }}>
-          <Typography variant="h2" id="review-drawer-heading" sx={{ fontSize: '1.25rem', pt: 0.75 }}>รายละเอียดธุรกรรม</Typography>
+          <Typography variant="h2" id="review-drawer-heading" sx={{ pt: 0.75 }}>รายละเอียดธุรกรรม</Typography>
           <IconButton aria-label="ปิด" onClick={() => guard(onClose, 'close')}><CloseRounded /></IconButton>
         </Stack>
         {/* เลื่อนรายการโดยไม่ต้องปิด — focus อยู่ที่ปุ่มเดิม กด Enter ซ้ำได้ ตำแหน่งประกาศผ่าน live region */}
@@ -495,14 +492,14 @@ export default function ReviewDrawer({
                 satang={detail.direction === 'debit' ? -detail.amount_satang : detail.amount_satang}
                 tone={detail.classification === 'internal_transfer' ? 'neutral' : detail.direction === 'credit' ? 'income' : 'expense'}
                 showSign
-                sx={{ fontSize: '1.75rem', display: 'block', mt: 1 }}
+                sx={{ ...dataDisplaySx, display: 'block', mt: 1 }}
               />
             </Box>
 
             <Divider />
 
             <Box component="section" aria-labelledby="classification-heading">
-              <Typography component="h3" variant="h2" id="classification-heading" sx={{ ...SECTION_HEADING_SX, mb: 1.5 }}>จัดประเภทรายการ</Typography>
+              <Typography variant="h3" id="classification-heading" sx={{ mb: 1.5 }}>จัดประเภทรายการ</Typography>
               <Stack spacing={1.5}>
                 <TextField select label="ประเภทรายการ" value={classification} onChange={(e) => setClassification(e.target.value as Classification)} size="small">
                   {(Object.entries(CLASSIFICATION_LABEL) as [Classification, string][]).map(([value, label]) => (
@@ -627,7 +624,7 @@ export default function ReviewDrawer({
 
             <Box component="section" aria-labelledby="splits-heading" ref={splitsBoxRef}>
               <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
-                <Typography component="h3" variant="h2" id="splits-heading" sx={SECTION_HEADING_SX}>แยกยอดตามหมวด</Typography>
+                <Typography variant="h3" id="splits-heading">แยกยอดตามหมวด</Typography>
                 <Button
                   ref={addSplitRef}
                   size="small"
@@ -729,7 +726,7 @@ export default function ReviewDrawer({
               <>
                 <Divider />
                 <Box component="section" aria-labelledby="transfer-heading">
-                  <Typography component="h3" variant="h2" id="transfer-heading" sx={{ ...SECTION_HEADING_SX, mb: 1.5 }}>คู่โอนภายในที่ระบบพบ</Typography>
+                  <Typography variant="h3" id="transfer-heading" sx={{ mb: 1.5 }}>คู่โอนภายในที่ระบบพบ</Typography>
                   <Stack spacing={1.5}>
                     {detail.transfer_matches.map((m) => (
                       <Box key={m.id} sx={{ p: 2, border: 1, borderColor: 'divider', borderRadius: `${radii.xl}px` }}>
