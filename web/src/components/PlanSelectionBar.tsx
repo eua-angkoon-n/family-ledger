@@ -27,9 +27,9 @@ type Props = {
   onClear: () => void;
 };
 
-// ยกแถบให้พ้น VersionBadge มุมล่างขวา (≥ sm ลอย bottom 10 สูง ~21px) — จอ < ~1300px แถบกว้างจนถึงมุมนั้น
-// ถ้าวางต่ำกว่านี้จะบังเลขเวอร์ชัน (Floating Selection Bar Rule ของ DESIGN.md) · < sm ป้ายอยู่ท้ายเนื้อหา ไม่ลอย จึงชิดล่างได้
-const BAR_BOTTOM = { xs: 16, sm: 36 };
+// ยกแถบให้พ้น VersionBadge — ≥ sm ลอยมุมล่างขวา (bottom 10 สูง ~21px) จอ < ~1300px แถบกว้างจนถึงมุมนั้น
+// < sm ป้ายอยู่ท้ายเนื้อหา (สูงจากขอบล่าง ~27px ตอนเลื่อนสุด) แถบจึงต้องอยู่สูงกว่านั้นเหมือนกัน (Floating Selection Bar Rule)
+const BAR_BOTTOM = { xs: 32, sm: 36 };
 const GAP_ABOVE_BAR = 16;
 
 // แถบลอยเหนือเนื้อหา = Floating Offset (elevation 8) ของ DESIGN.md และยังมี

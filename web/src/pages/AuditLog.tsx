@@ -8,9 +8,11 @@ import HistoryRounded from '@mui/icons-material/HistoryRounded';
 import KeyboardArrowDownRounded from '@mui/icons-material/KeyboardArrowDownRounded';
 import KeyboardArrowRightRounded from '@mui/icons-material/KeyboardArrowRightRounded';
 import { req, type AuditLogEntry, type AuditLogListResponse, type Category, type User } from '../api.js';
-import { ACTION_LABEL, AUDIT_ACTIONS, ENTITY_LABEL, changedFields, isTaxEntity, redactRaw, type CategoryNames } from '../auditLabels.js';
+import {
+  ACTION_LABEL, AUDIT_ACTIONS, ENTITY_LABEL, changeSections, entrySubject, isTaxEntity, redactRaw, type CategoryNames, type ChangeSection,
+} from '../auditLabels.js';
 import { TAX_PAGES_ENABLED } from '../features.js';
-import { dataTextSx, fontFamilies } from '../theme.js';
+import { dataTextSx, fontFamilies, rowHoverBg } from '../theme.js';
 import { BELOW_MD, EmptyState, LoadError, MD_UP, PageHeader, TableSkeleton, visuallyHiddenSx } from '../ui.js';
 
 const LIMIT = 50;
@@ -28,26 +30,25 @@ const codeLabel = (labels: Record<string, string>, code: string) =>
 const Value = ({ text, mono }: { text: string; mono: boolean }) =>
   mono ? <Box component="code" sx={{ fontFamily: fontFamilies.mono }}>{text}</Box> : <>{text}</>;
 
-/** รายการช่องที่เปลี่ยน "ชื่อช่อง: เดิม X → Y" — สร้าง/ลบมีฝั่งเดียว แสดงเป็นค่าที่บันทึก/ค่าก่อนลบ */
-function ChangeList({ entry, categories }: { entry: AuditLogEntry; categories?: CategoryNames }) {
-  const changes = changedFields(entry.before_data, entry.after_data, categories);
-  if (changes.length === 0) {
-    return entry.before_data == null && entry.after_data == null ? null : (
-      <Typography variant="body2" color="text.secondary">ไม่มีช่องที่เปลี่ยนให้แสดง</Typography>
-    );
+/**
+ * รายการช่องที่เปลี่ยน "ชื่อช่อง: เดิม X → Y" แบ่งเป็นส่วน (changeSections) · ไม่มีส่วนไหนแต่มีค่าดิบ = แอดมินเท่านั้น
+ * (ผู้ใช้ทั่วไปไม่ได้กางแถวแบบนี้) < sm ป้ายอยู่เหนือค่า เว้นระยะก่อนป้ายถัดไปให้แยกคู่ออกจากกัน — สองคอลัมน์ที่ 320px
+ * เหลือที่ให้ค่า (regex, เงินเดิม → ใหม่) ไม่ถึง 140px
+ */
+function ChangeList({ sections, hasRaw }: { sections: ChangeSection[]; hasRaw: boolean }) {
+  if (sections.length === 0) {
+    return hasRaw ? <Typography variant="body2" color="text.secondary">ไม่มีช่องที่เปลี่ยนให้แสดง</Typography> : null;
   }
-  const title = entry.before_data != null && entry.after_data != null ? 'สิ่งที่เปลี่ยน'
-    : entry.after_data != null ? 'ข้อมูลที่บันทึก' : 'ข้อมูลก่อนลบ';
-  return (
-    <Box>
+  return <>{sections.map(({ title, changes }) => (
+    <Box key={title}>
       <Typography variant="body2" sx={{ fontWeight: 600 }}>{title}</Typography>
       <Box
         component="dl"
         sx={{ m: 0, mt: 0.5, display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'minmax(8rem, max-content) 1fr' }, columnGap: 2, rowGap: { xs: 0, sm: 0.5 } }}
       >
-        {changes.map((c) => (
+        {changes.map((c, i) => (
           <Box key={c.key} sx={{ display: 'contents' }}>
-            <Box component="dt" sx={{ color: 'text.secondary', mt: { xs: 0.5, sm: 0 } }}>{c.label}</Box>
+            <Box component="dt" sx={{ color: 'text.secondary', mt: { xs: i === 0 ? 0 : 1.5, sm: 0 } }}>{c.label}</Box>
             <Box component="dd" sx={{ m: 0, ...dataTextSx, overflowWrap: 'anywhere' }}>
               {c.before != null && c.after != null ? (
                 <>
@@ -61,7 +62,7 @@ function ChangeList({ entry, categories }: { entry: AuditLogEntry; categories?: 
         ))}
       </Box>
     </Box>
-  );
+  ))}</>;
 }
 
 function LogRow({ entry, showUser, isAdmin, categories }: {
@@ -82,26 +83,46 @@ function LogRow({ entry, showUser, isAdmin, categories }: {
     entry.ip_address ? `IP ${entry.ip_address.replace(/^::ffff:/, '')}` : null,
   ].filter(Boolean).join(' · ');
   const hasRaw = entry.before_data != null || entry.after_data != null;
+  const sections = changeSections(entry.before_data, entry.after_data, categories);
+  // ผู้ใช้ทั่วไปไม่เห็น meta/ข้อมูลดิบ — ไม่มีช่องให้แสดง (เช่นออกจากระบบ) = แถวกางไม่ได้ ไม่มีลูกศร
+  const expandable = isAdmin || sections.length > 0;
+  // ชื่อรายการจาก payload ที่มีอยู่แล้ว · ชื่อเดียวกับผู้ลงมือ (เข้าสู่ระบบ: display_name ของตัวเอง) ไม่ซ้ำให้รก
+  const subject = entrySubject(entry.before_data, entry.after_data);
+  const subjectLine = subject && subject !== who ? subject : null;
   const toggle = () => setOpen((v) => !v);
   return (
     <>
-      {/* คลิกที่ไหนก็ได้ในแถว = ทางลัดของเมาส์ ปุ่มลูกศรยังเป็นตัวควบคุมหลักของคีย์บอร์ด/screen reader */}
-      <TableRow hover onClick={toggle} sx={{ cursor: 'pointer', ...(open ? { '& > td': { borderBottom: 'none' } } : {}) }}>
-        {/* py 0.5 + ปุ่ม 40px = กึ่งกลางลูกศรตรงกับบรรทัดแรกของข้อความ (ช่องอื่นเว้นบน 14px สูงบรรทัด 20px) */}
+      {/* คลิกที่ไหนก็ได้ในแถว = ทางลัดของเมาส์ ปุ่มลูกศรยังเป็นตัวควบคุมหลักของคีย์บอร์ด/screen reader
+          ลากเลือกข้อความแล้วปล่อยในแถวไม่นับเป็นคลิก · กางอยู่ = hover แถวไหนก็ได้ทั้งคู่ (ดูเป็นชิ้นเดียว) */}
+      <TableRow
+        hover={expandable}
+        onClick={expandable ? () => { if (!window.getSelection()?.toString()) toggle(); } : undefined}
+        sx={expandable ? (theme) => ({
+          cursor: 'pointer',
+          // แยกสองกฎ — เบราว์เซอร์ที่ไม่รู้จัก :has() ทิ้งทั้งกฎ ไม่งั้นเสียฝั่งหัว → รายละเอียดไปด้วย
+          ...(open ? { '& > td': { borderBottom: 'none' }, '&:hover + tr': rowHoverBg(theme), '&:has(+ tr:hover)': rowHoverBg(theme) } : {}),
+        }) : undefined}
+      >
+        {/* py 0.5 + ปุ่ม 40px = กึ่งกลางลูกศรตรงกับบรรทัดแรกของข้อความ (ช่องอื่นเว้นบน 14px สูงบรรทัด 20px) · กางไม่ได้ = ช่องว่าง แถวยังตรงกัน */}
         <TableCell sx={{ width: 48, py: 0.5, pl: 1, pr: 0 }}>
-          <IconButton
-            size="small"
-            onClick={(e) => { e.stopPropagation(); toggle(); }}
-            aria-expanded={open}
-            aria-controls={detailId}
-            aria-label={`ดูรายละเอียด ${ACTION_LABEL[entry.action] ?? entry.action} ${time}`}
-          >
-            {open ? <KeyboardArrowDownRounded /> : <KeyboardArrowRightRounded />}
-          </IconButton>
+          {expandable && (
+            <IconButton
+              size="small"
+              onClick={(e) => { e.stopPropagation(); toggle(); }}
+              aria-expanded={open}
+              aria-controls={detailId}
+              aria-label={`ดูรายละเอียด ${ACTION_LABEL[entry.action] ?? entry.action}${subjectLine ? ` ${subjectLine}` : ''} ${time}`}
+            >
+              {open ? <KeyboardArrowDownRounded /> : <KeyboardArrowRightRounded />}
+            </IconButton>
+          )}
         </TableCell>
         <TableCell sx={{ ...MD_UP, whiteSpace: 'nowrap' }}>{time}</TableCell>
         <TableCell>
           {codeLabel(ACTION_LABEL, entry.action)}
+          {subjectLine && (
+            <Typography component="div" variant="body2" color="text.secondary" sx={{ ...dataTextSx, overflowWrap: 'anywhere' }}>{subjectLine}</Typography>
+          )}
           <Typography component="div" variant="body2" color="text.secondary" sx={{ ...BELOW_MD, ...dataTextSx, overflowWrap: 'anywhere' }}>
             {showUser ? `${time} · ${who}` : time}
           </Typography>
@@ -110,30 +131,32 @@ function LogRow({ entry, showUser, isAdmin, categories }: {
       </TableRow>
       {/* id อยู่ที่ช่องที่ mount ตลอด (Collapse unmount ตอนพับ) aria-controls จึงชี้เจอเสมอ · ตอนพับซ่อนทั้งแถวจาก
           screen reader ไม่งั้นนับแถวของตารางเป็นสองเท่า */}
-      <TableRow aria-hidden={open ? undefined : true}>
-        <TableCell id={detailId} colSpan={showUser ? 4 : 3} sx={{ py: 0, ...(open ? {} : { borderBottom: 'none' }) }}>
-          <Collapse in={open} unmountOnExit>
-            <Stack spacing={1.5} sx={{ pb: 2, pl: { md: 6 } }}>
-              <ChangeList entry={entry} categories={categories} />
-              {isAdmin && (
-                <Typography variant="body2" color="text.secondary" sx={{ ...dataTextSx, overflowWrap: 'anywhere' }}>{meta}</Typography>
-              )}
-              {isAdmin && hasRaw && (
-                // แอดมินเท่านั้น — ค่าดิบทั้งก้อนไว้ไล่ปัญหา คนทั่วไปเห็นแค่รายการที่เปลี่ยนด้านบน
-                <Box component="details" sx={{ '& > summary': { cursor: 'pointer', py: 1.25, lineHeight: '20px', width: 'fit-content', color: 'text.secondary' } }}>
-                  <summary>ข้อมูลดิบ</summary>
-                  <Box
-                    component="pre"
-                    sx={{ fontFamily: fontFamilies.mono, m: 0, p: 1.5, fontSize: '0.875rem', borderRadius: 1, border: 1, borderColor: 'divider', bgcolor: 'background.default', overflowX: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
-                  >
-                    {JSON.stringify({ before: redactRaw(entry.before_data), after: redactRaw(entry.after_data) }, null, 2)}
+      {expandable && (
+        <TableRow hover aria-hidden={open ? undefined : true}>
+          <TableCell id={detailId} colSpan={showUser ? 4 : 3} sx={{ py: 0, ...(open ? {} : { borderBottom: 'none' }) }}>
+            <Collapse in={open} unmountOnExit>
+              <Stack spacing={1.5} sx={{ pb: 2, pl: { md: 6 } }}>
+                <ChangeList sections={sections} hasRaw={hasRaw} />
+                {isAdmin && (
+                  <Typography variant="body2" color="text.secondary" sx={{ ...dataTextSx, overflowWrap: 'anywhere' }}>{meta}</Typography>
+                )}
+                {isAdmin && hasRaw && (
+                  // แอดมินเท่านั้น — ค่าดิบทั้งก้อนไว้ไล่ปัญหา คนทั่วไปเห็นแค่รายการที่เปลี่ยนด้านบน
+                  <Box component="details" sx={{ '& > summary': { cursor: 'pointer', py: 1.25, lineHeight: '20px', width: 'fit-content', color: 'text.secondary' } }}>
+                    <summary>ข้อมูลดิบ</summary>
+                    <Box
+                      component="pre"
+                      sx={{ fontFamily: fontFamilies.mono, m: 0, p: 1.5, fontSize: '0.875rem', borderRadius: 1, border: 1, borderColor: 'divider', bgcolor: 'background.default', overflowX: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
+                    >
+                      {JSON.stringify({ before: redactRaw(entry.before_data), after: redactRaw(entry.after_data) }, null, 2)}
+                    </Box>
                   </Box>
-                </Box>
-              )}
-            </Stack>
-          </Collapse>
-        </TableCell>
-      </TableRow>
+                )}
+              </Stack>
+            </Collapse>
+          </TableCell>
+        </TableRow>
+      )}
     </>
   );
 }

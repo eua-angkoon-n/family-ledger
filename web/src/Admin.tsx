@@ -53,6 +53,16 @@ const errorText = (e: unknown, fallback: string) => (e instanceof Error ? e.mess
 // < md คอลัมน์ชื่อกินที่ที่เหลือแล้วตัดบรรทัด (maxWidth 0 กันดันตารางเกินกล่อง) — ท่าเดียวกับหน้าบัญชีของฉัน
 const NAME_CELL = { width: { xs: '100%', md: 'auto' }, maxWidth: { xs: 0, md: 'none' }, overflowWrap: 'anywhere' } as const;
 const SEP = <Box component="span" aria-hidden>{' · '}</Box>;
+// อีเมลผู้ส่ง: ตัดบรรทัดหลัง @ ก่อน (ไม่ใช่กลางชื่อโดเมน "kasikornba / nk.com") — break-word ยังตัดคำที่ยาวเกินบรรทัดได้
+// ใช้ทุกที่ที่แสดงอีเมลผู้ส่งในหน้านี้
+const senderEmail = (email: string) => {
+  const at = email.indexOf('@') + 1;
+  return (
+    <Box component="span" sx={{ ...dataTextSx, overflowWrap: 'break-word' }}>
+      {at > 0 ? <>{email.slice(0, at)}<wbr />{email.slice(at)}</> : email}
+    </Box>
+  );
+};
 // error ของฟอร์มอยู่บนสุด — เลื่อนมาให้เห็นตอนเพิ่งขึ้น (ปุ่มบันทึกอยู่นอกส่วนที่เลื่อน) เหมือนหน้าบัญชีของฉัน
 const revealOnMount = (el: HTMLElement | null) => el?.scrollIntoView({ block: 'nearest' });
 const resyncText = (n: number) => `ระบบกำลังอ่านอีเมลย้อนหลังของ ${n.toLocaleString('th-TH')} กล่องใหม่ทั้งหมด ผลจะเข้ามาในไม่กี่นาที`;
@@ -365,7 +375,7 @@ function Banks() {
     />
   );
   const rowActions = (bank: AdminBank) => (
-    <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end', alignItems: 'center' }}>
+    <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end', alignItems: 'center' }}>
       <RowIconButton label={`แก้ไข ${bank.name}`} tooltip="แก้ไข" onClick={() => openEdit(bank)}>
         <EditRounded fontSize="small" />
       </RowIconButton>
@@ -412,7 +422,7 @@ function Banks() {
                   <TableRow>
                     <TableCell>ธนาคาร</TableCell>
                     <TableCell sx={MD_UP}>ผู้ส่ง</TableCell>
-                    <TableCell sx={MD_UP}>หัวข้ออีเมล</TableCell>
+                    <TableCell sx={MD_UP}>รูปแบบการจับคู่</TableCell>
                     <TableCell sx={MD_UP}>ใช้งาน</TableCell>
                     <TableCell align="right" sx={MD_UP}>จัดการ</TableCell>
                   </TableRow>
@@ -423,22 +433,27 @@ function Banks() {
                       <TableCell sx={NAME_CELL}>
                         {bank.name}
                         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                          ตัวแกะ <code>{bank.parser_key}</code>{SEP}<Box component="span" sx={dataTextSx}>{bank.account_count.toLocaleString('th-TH')}</Box> บัญชี
+                          ตัวแกะ <code>{bank.parser_key}</code>{SEP}
+                          <Box component="span" sx={{ whiteSpace: 'nowrap' }}><Box component="span" sx={dataTextSx}>{bank.account_count.toLocaleString('th-TH')}</Box> บัญชี</Box>
+                          {/* สถานะเป็นคำ ไม่ใช่แค่สวิตช์ที่ปิดอยู่ */}
+                          {!bank.is_active && <>{SEP}ปิดใช้งาน</>}
                         </Typography>
-                        <Typography variant="body2" color="text.secondary" sx={{ ...BELOW_MD, ...dataTextSx }}>{bank.sender_email}</Typography>
+                        <Typography variant="body2" color="text.secondary" sx={BELOW_MD}>{senderEmail(bank.sender_email)}</Typography>
                         <Stack direction="row" sx={{ ...BELOW_MD, mt: 1, alignItems: 'center', justifyContent: 'space-between' }}>
                           {/* label ที่ตาเห็นแทนหัวคอลัมน์ที่ซ่อน · ชื่อที่ screen reader อ่านยังเป็น aria-label "ใช้งาน <ธนาคาร>" */}
                           <FormControlLabel control={activeSwitch(bank, 'medium')} label="ใช้งาน" sx={{ ml: 0 }} />
                           {rowActions(bank)}
                         </Stack>
                       </TableCell>
-                      <TableCell sx={{ ...MD_UP, overflowWrap: 'anywhere' }}>
-                        <Box sx={dataTextSx}>{bank.sender_email}</Box>
-                        <Typography variant="body2" color="text.secondary" sx={dataTextSx}>DKIM {bank.sender_domain}</Typography>
-                      </TableCell>
                       <TableCell sx={MD_UP}>
+                        {senderEmail(bank.sender_email)}
+                        <Typography variant="body2" color="text.secondary" sx={{ ...dataTextSx, overflowWrap: 'break-word' }}>DKIM {bank.sender_domain}</Typography>
+                      </TableCell>
+                      {/* regex ตัดได้ทุกตัว (รูปแบบชื่อไฟล์ไม่มีช่องว่าง ไม่งั้นดันตารางเกินกล่อง) */}
+                      <TableCell sx={{ ...MD_UP, overflowWrap: 'anywhere' }}>
                         <Typography variant="body2" color="text.secondary">รายเดือน <code>{bank.subject_monthly}</code></Typography>
                         <Typography variant="body2" color="text.secondary">ขอเอง <code>{bank.subject_ondemand}</code></Typography>
+                        <Typography variant="body2" color="text.secondary">ไฟล์ <code>{bank.attachment_filename_pattern}</code></Typography>
                       </TableCell>
                       <TableCell sx={MD_UP}>{activeSwitch(bank)}</TableCell>
                       <TableCell align="right" sx={{ ...MD_UP, py: 0.5 }}>{rowActions(bank)}</TableCell>
@@ -551,7 +566,7 @@ function Banks() {
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' && !event.nativeEvent.isComposing) event.preventDefault();
                   }}
-                  placeholder="ตัวอย่างจาก SCB: SCB E PASSBOOK: e-Statement"
+                  placeholder="ตัวอย่างจาก SCB: “SCB E PASSBOOK: e-Statement”"
                   helperText={
                     <Box component="span" sx={{ display: 'flex', gap: 0.5, alignItems: 'flex-start', overflowWrap: 'anywhere' }}>
                       {sampleCheck.matched === true && <CheckCircleRounded aria-hidden sx={{ fontSize: '1.125rem' }} />}
@@ -799,7 +814,7 @@ function Users({ currentUserId, onUsersChanged }: { currentUserId: number; onUse
 
   return (
     <Box sx={{ mt: 4 }}>
-      <PageHeader title="ผู้ใช้งาน" description="อนุมัติคนที่เข้าสู่ระบบด้วย Google และกำหนดผู้ดูแล — คนที่รออนุมัติอยู่บนสุด" />
+      <PageHeader title="ผู้ใช้" description="อนุมัติคนที่เข้าสู่ระบบด้วย Google และกำหนดผู้ดูแล — คนที่รออนุมัติอยู่บนสุด" />
       {users == null ? (
         loadError ? <LoadError message={loadError} onRetry={() => void reload()} /> : <TableSkeleton />
       ) : (

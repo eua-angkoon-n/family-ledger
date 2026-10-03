@@ -58,11 +58,13 @@ export function requireAdmin(handler: (req: Request, res: Response, user: User) 
 
 /** ต่อ Google ที่ปลายทาง revoke จริง ๆ ไม่ใช่แค่ลบแถวในตารางเรา */
 export async function revokeAtGoogle(refreshToken: string, doFetch: typeof fetch = fetch): Promise<void> {
-  await doFetch('https://oauth2.googleapis.com/revoke', {
+  const res = await doFetch('https://oauth2.googleapis.com/revoke', {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ token: refreshToken }),
   });
+  // Google ตอบ 400 เมื่อ token หมดอายุ/ถูกยกเลิกไปแล้ว — ผลเท่ากับยกเลิกสำเร็จ จึงไม่ throw แต่ลง log ให้ตามได้
+  if (!res.ok) console.warn(`[auth] Google revoke ตอบ ${res.status}`);
 }
 
 /**

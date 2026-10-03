@@ -351,6 +351,32 @@ export function changedFields(before: unknown, after: unknown, categories?: Cate
   return changes;
 }
 
+export type ChangeSection = { title: string; changes: FieldChange[] };
+
+/**
+ * รายการที่เปลี่ยนแบ่งตามความหมาย: มีทั้งค่าเดิมและค่าใหม่ = "สิ่งที่เปลี่ยน" · มีแต่ค่าหลัง (สร้าง หรือช่องที่ before
+ * ไม่ได้เก็บ เช่นยกเลิกบันทึกจ่าย) = "ข้อมูลที่บันทึก" · มีแต่ค่าก่อน (ลบ) = "ข้อมูลก่อนลบ" — ช่องที่ before ไม่ได้เก็บจึงไม่ปน
+ * อยู่ใต้ "สิ่งที่เปลี่ยน" เหมือนถูกแก้ · ไม่มีส่วนไหนเลย = ไม่มีอะไรให้ผู้ใช้ทั่วไปดู
+ */
+export function changeSections(before: unknown, after: unknown, categories?: CategoryNames): ChangeSection[] {
+  const changes = changedFields(before, after, categories);
+  const titleOf = (c: FieldChange) => (c.before == null ? 'ข้อมูลที่บันทึก' : c.after == null ? 'ข้อมูลก่อนลบ' : 'สิ่งที่เปลี่ยน');
+  return ['สิ่งที่เปลี่ยน', 'ข้อมูลที่บันทึก', 'ข้อมูลก่อนลบ']
+    .map((title) => ({ title, changes: changes.filter((c) => titleOf(c) === title) }))
+    .filter((s) => s.changes.length > 0);
+}
+
+/** ชื่อของสิ่งที่ถูกแตะ (บรรทัดรองของแถวที่พับ) จากค่าที่บันทึกไว้แล้ว — name → nickname → display_name ค่าหลังก่อนค่าเดิม */
+export function entrySubject(before: unknown, after: unknown): string | null {
+  for (const key of ['name', 'nickname', 'display_name']) {
+    for (const side of [after, before]) {
+      const value = isRecord(side) ? side[key] : undefined;
+      if (typeof value === 'string' && value.trim() !== '') return value;
+    }
+  }
+  return null;
+}
+
 /** ข้อมูลดิบสำหรับแอดมิน — ตัดช่อง `*_enc` แบบเดียวกับรายการที่เปลี่ยน */
 export function redactRaw(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(redactRaw);

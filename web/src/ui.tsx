@@ -54,6 +54,8 @@ export const BELOW_MD = { display: { md: 'none' } } as const;
  * Tooltip ห่อปุ่มตรง ๆ เหตุผลจึงเป็น accessible description ของปุ่มเอง (describeChild: title ตอนปิด, aria-describedby ตอนเปิด)
  * span ห่อเฉพาะตอน `disabled` จริง — Tooltip ของ MUI ฟัง event จากปุ่มที่ disabled ไม่ได้ ตอนนั้นใช้ describeChild ด้วย
  * ไม่งั้น Tooltip ใส่ aria-label ให้ span (generic ตั้งชื่อไม่ได้) — ชื่อคือ aria-label ของปุ่มเองเสมอ
+ * จอสัมผัส: แตะปุ่มที่ถูกบล็อกเปิดเหตุผลทันทีและค้างพอให้อ่าน (ค่าเริ่มต้นต้องกดค้าง 700ms — แตะแล้วเหมือนไม่มีอะไรเกิด)
+ * สองค่านี้มีผลเฉพาะ touch event เมาส์/คีย์บอร์ดเหมือนเดิม
  */
 export function RowIconButton({
   label,
@@ -70,7 +72,12 @@ export function RowIconButton({
     </IconButton>
   );
   return (
-    <Tooltip title={blocked ? disabledReason : (tooltip ?? label)} describeChild={blocked || Boolean(props.disabled)}>
+    <Tooltip
+      title={blocked ? disabledReason : (tooltip ?? label)}
+      describeChild={blocked || Boolean(props.disabled)}
+      enterTouchDelay={blocked ? 0 : undefined}
+      leaveTouchDelay={blocked ? 5000 : undefined}
+    >
       {props.disabled ? <span>{button}</span> : button}
     </Tooltip>
   );

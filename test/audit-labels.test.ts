@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
-import { ACTION_LABEL, AUDIT_ACTIONS, ENTITY_LABEL, changedFields, fieldLabel, formatFieldValue, isHiddenField, redactRaw } from '../web/src/auditLabels.js';
+import {
+  ACTION_LABEL, AUDIT_ACTIONS, ENTITY_LABEL, changeSections, changedFields, entrySubject, fieldLabel, formatFieldValue, isHiddenField, redactRaw,
+} from '../web/src/auditLabels.js';
 
 const SRC = join(import.meta.dirname, '..', 'src');
 const MIGRATIONS = join(import.meta.dirname, '..', 'migrations');
@@ -120,13 +122,28 @@ test('ป้าย audit: รหัสภายในซ่อน หมวด�
   assert.deepEqual(changedFields(null, { subject_monthly: '^statement', name: 'KBank' }).map((c) => [c.key, c.mono]), [['subject_monthly', true], ['name', false]]);
 });
 
-test('ป้าย audit: before ที่เก็บแคบกว่า after ไม่ขึ้นว่าเปลี่ยนจาก "ว่าง"', () => {
+test('ป้าย audit: before ที่เก็บแคบกว่า after ไม่ขึ้นว่าเปลี่ยนจาก "ว่าง" และไม่อยู่ใต้ "สิ่งที่เปลี่ยน"', () => {
   // monthly_item_payment.cancel: before = id, monthly_plan_item_id, status · after = ทั้งแถว
+  const before = { id: 1, monthly_plan_item_id: 2, status: 'declared', plan_status: 'open', note: 'ไม่ได้ส่งฝั่งหลัง' };
+  const after = { id: 1, monthly_plan_item_id: 2, status: 'cancelled', amount_satang: 50000, paid_date: '2026-09-30', txn_id: null };
   assert.deepEqual(
-    changedFields(
-      { id: 1, monthly_plan_item_id: 2, status: 'declared', plan_status: 'open', note: 'ไม่ได้ส่งฝั่งหลัง' },
-      { id: 1, monthly_plan_item_id: 2, status: 'cancelled', amount_satang: 50000, paid_date: '2026-09-30', txn_id: null },
-    ).map((c) => [c.key, c.before, c.after]),
+    changedFields(before, after).map((c) => [c.key, c.before, c.after]),
     [['status', 'บันทึกจ่ายแล้ว', 'ยกเลิกแล้ว'], ['amount_satang', null, '฿500.00'], ['paid_date', null, formatFieldValue('paid_date', '2026-09-30')]],
   );
+  // ช่องที่มีแต่ค่าหลังแยกไปหัว "ข้อมูลที่บันทึก" · สร้าง/ลบมีส่วนเดียว · ไม่มีช่องให้แสดง = ไม่มีส่วน (แถวไม่ต้องกางได้)
+  const titles = (b: unknown, a: unknown) => changeSections(b, a).map((s) => [s.title, s.changes.map((c) => c.key)]);
+  assert.deepEqual(titles(before, after), [['สิ่งที่เปลี่ยน', ['status']], ['ข้อมูลที่บันทึก', ['amount_satang', 'paid_date']]]);
+  assert.deepEqual(titles(null, { name: 'ค่าน้ำ' }), [['ข้อมูลที่บันทึก', ['name']]]);
+  assert.deepEqual(titles({ name: 'ค่าน้ำ' }, null), [['ข้อมูลก่อนลบ', ['name']]]);
+  assert.deepEqual(titles(null, null), []);
+  assert.deepEqual(titles({ id: 1, updated_at: 'a' }, { id: 1, updated_at: 'b' }), []);
+});
+
+test('ป้าย audit: ชื่อของสิ่งที่ถูกแตะมาจาก payload — ค่าหลังก่อน, name → nickname → display_name, ไม่ใช่ข้อความ = null', () => {
+  assert.equal(entrySubject({ name: 'ค่าน้ำ' }, null), 'ค่าน้ำ');
+  assert.equal(entrySubject({ name: 'เดิม' }, { name: 'ใหม่' }), 'ใหม่');
+  assert.equal(entrySubject({ name: 'ค่าไฟ' }, { status: 'cancelled' }), 'ค่าไฟ');
+  assert.equal(entrySubject(null, { nickname: 'ออมทรัพย์', display_name: 'X' }), 'ออมทรัพย์');
+  assert.equal(entrySubject(null, { name: '  ', display_name: 'Scent' }), 'Scent');
+  assert.equal(entrySubject({ name: 5 }, [{ name: 'แบ่ง' }]), null);
 });

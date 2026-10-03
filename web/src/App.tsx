@@ -170,7 +170,8 @@ function activeNavPath(pathname: string): string | false {
 function AuthPanel({ children, version }: { children: ReactNode; version: string | null }) {
   return (
     // แถว auto ล่าง = เลขเวอร์ชัน (< sm อยู่ในลำดับเนื้อหา) — กล่องยังอยู่กลางจอ ≥ sm เลขเวอร์ชัน fixed แถวนี้จึงว่าง
-    <Box component="main" sx={{ minHeight: '100vh', display: 'grid', gridTemplateRows: '1fr auto', placeItems: 'center', p: { xs: 2, sm: 3 } }}>
+    // 100dvh: iOS Safari 100vh สูงกว่าจอที่เห็น เลขเวอร์ชันไปอยู่ใต้ toolbar · 100vh เป็น fallback ของเบราว์เซอร์ที่ไม่รู้จัก dvh
+    <Box component="main" sx={{ minHeight: '100vh', '@supports (min-height: 100dvh)': { minHeight: '100dvh' }, display: 'grid', gridTemplateRows: '1fr auto', placeItems: 'center', p: { xs: 2, sm: 3 } }}>
       <Box sx={{ position: 'fixed', top: { xs: 8, sm: 16 }, right: { xs: 8, sm: 16 } }}>
         <ThemeModeToggle />
       </Box>
