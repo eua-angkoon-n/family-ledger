@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type MouseEvent, type ReactElement, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type FocusEvent, type MouseEvent, type ReactElement, type ReactNode } from 'react';
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import {
   Alert,
@@ -48,8 +48,8 @@ import SwitchAccountRounded from '@mui/icons-material/SwitchAccountRounded';
 import { req, type EmailAccount, type MeResponse, type User } from './api.js';
 import ThemeModeToggle from './components/ThemeModeToggle.js';
 import { isPageEnabled } from './features.js';
-import { brandCopySx, dataTextSx, descriptionSx } from './theme.js';
-import { APP_NAME, FeedbackSnackbar, TableSkeleton, VersionBadge, visuallyHiddenSx, type Notice } from './ui.js';
+import { brandCopySx, dataTextSx, descriptionSx, radii } from './theme.js';
+import { APP_NAME, emailText, FeedbackSnackbar, TableSkeleton, VersionBadge, visuallyHiddenSx, type Notice } from './ui.js';
 
 // แยก chunk เฉพาะ Dashboard — เป็นหน้าเดียวที่ดึง @mui/x-charts (~600KB) เข้ามา หน้าอื่นไม่ต้องรอโหลดมันด้วย
 const Dashboard = lazy(() => import('./pages/Dashboard.js'));
@@ -69,7 +69,8 @@ const SettingsPage = lazy(() => import('./Admin.js'));
 const AUTH_ERROR_NOTICE: Record<string, Notice> = {
   access_denied: { message: 'คุณยกเลิกการเข้าสู่ระบบกับ Google', severity: 'info' },
   expired: { message: 'ลิงก์เข้าสู่ระบบหมดอายุ กดเข้าสู่ระบบอีกครั้ง', severity: 'warning' },
-  rate_limited: { message: 'ลองเข้าสู่ระบบบ่อยเกินไป รอสักครู่แล้วลองใหม่', severity: 'warning' },
+  // ล็อก 15 นาทีนับทั้งเครือข่าย (rate limit ฝั่ง server) — "รอสักครู่" ทำให้ลองซ้ำแล้วติดต่อ
+  rate_limited: { message: 'ลองเข้าสู่ระบบหลายครั้งเกินไปจากเครือข่ายนี้ รอประมาณ 15 นาทีแล้วลองใหม่', severity: 'warning' },
   failed: { message: 'เข้าสู่ระบบกับ Google ไม่สำเร็จ ลองใหม่อีกครั้ง', severity: 'error' },
 };
 const authErrorNotice = (code: string | null) => (code === null ? null : AUTH_ERROR_NOTICE[code] ?? AUTH_ERROR_NOTICE.failed);
@@ -78,14 +79,37 @@ const authErrorNotice = (code: string | null) => (code === null ? null : AUTH_ER
 const userAgent = navigator.userAgent;
 const IN_APP_BROWSER = /Line\//.test(userAgent) ? 'LINE' : /Instagram/.test(userAgent) ? 'Instagram' : /FBAN|FBAV/.test(userAgent) ? 'Facebook' : null;
 
-// URL ของหน้านี้โดยไม่มีผลของ OAuth (refresh/แชร์/เปิดในเบราว์เซอร์อื่นแล้วข้อความเดิมไม่ขึ้นซ้ำ)
+// URL ของหน้านี้โดยไม่มีผลของ OAuth และ openExternalBrowser (refresh/แชร์/เปิดในเบราว์เซอร์อื่นแล้วข้อความเดิมไม่ขึ้นซ้ำ)
 // openExternal: LINE เปิด URL ที่มี openExternalBrowser=1 ในเบราว์เซอร์ภายนอกให้เอง
+const TRANSIENT_PARAMS = ['auth_error', 'gmail', 'openExternalBrowser'];
 function pageUrl(openExternal = false) {
   const url = new URL(window.location.href);
-  url.searchParams.delete('auth_error');
-  url.searchParams.delete('gmail');
+  for (const key of TRANSIENT_PARAMS) url.searchParams.delete(key);
   if (openExternal) url.searchParams.set('openExternalBrowser', '1');
   return url.toString();
+}
+
+// สำรองของ navigator.clipboard (บาง WebView ไม่มี/ไม่ให้สิทธิ์) — textarea ชั่วคราว + execCommand แล้วคืน focus ให้ปุ่มเดิม
+// font-size 16px กัน iOS ซูมตอน select · คืน false = คัดลอกไม่ได้
+function copyWithTextarea(text: string) {
+  const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const area = document.createElement('textarea');
+  area.value = text;
+  area.setAttribute('readonly', '');
+  area.style.cssText = 'position:fixed;top:0;left:0;opacity:0;font-size:16px';
+  document.body.append(area);
+  area.focus(); // execCommand คัดลอก selection ของ element ที่ focus อยู่
+  area.select();
+  area.setSelectionRange(0, text.length);
+  let copied = false;
+  try {
+    copied = document.execCommand('copy');
+  } catch {
+    // บางเบราว์เซอร์ throw แทนคืน false
+  }
+  area.remove();
+  active?.focus();
+  return copied;
 }
 
 // โลโก้ "G" ของ Google สีตาม brand guideline — guideline ให้ G อยู่บนพื้นขาว แต่ปุ่มหลักเป็นชมพู (สว่าง) / เหลือง (มืด)
@@ -125,8 +149,11 @@ const GMAIL_NOTICE: Record<string, Notice> = {
   no_refresh_token: { message: 'Google ไม่ได้ส่งสิทธิ์ระยะยาวกลับมา ลองเชื่อม Gmail ใหม่อีกครั้ง', severity: 'error' },
   expired: { message: 'ลิงก์เชื่อม Gmail หมดอายุ ลองเชื่อมใหม่อีกครั้ง', severity: 'warning' },
   failed: { message: 'เชื่อม Gmail ไม่สำเร็จ ลองใหม่อีกครั้ง', severity: 'error' },
-  rate_limited: { message: 'ลองเชื่อม Gmail บ่อยเกินไป รอสักครู่แล้วลองใหม่', severity: 'warning' },
+  rate_limited: { message: 'ลองเชื่อม Gmail หลายครั้งเกินไปจากเครือข่ายนี้ รอประมาณ 15 นาทีแล้วลองใหม่', severity: 'warning' },
 };
+
+// /api/me ตอบ user null ระหว่างรออนุมัติ = session หมด/ถูกล้าง — หน้ากลายเป็นเข้าสู่ระบบ ต้องบอกว่าทำไม
+const SESSION_EXPIRED_NOTICE: Notice = { message: 'เซสชันหมดอายุ เข้าสู่ระบบอีกครั้ง', severity: 'warning' };
 
 // แถบเตือนทุกหน้า: กล่องอีเมลที่ Google ปฏิเสธสิทธิ์ (invalid_grant) หรือยังไม่มีกล่องอีเมลเลย — ทั้งสองกรณีนำเข้า statement ไม่ได้
 // ปุ่มไป /auth/google ต้องเป็น <a href> (โหลดทั้งหน้าไป OAuth) ไม่ใช่ Link ของ router; ปุ่มอยู่ใต้ข้อความ ไม่ใช้ action
@@ -251,6 +278,8 @@ export default function App() {
   const [leaving, setLeaving] = useState<'logout' | 'switch' | null>(null);
   const [goingToGoogle, setGoingToGoogle] = useState(false);
   const [checkingStatus, setCheckingStatus] = useState(false);
+  // คัดลอกลิงก์ไม่ได้ทั้งสองทาง → แสดงลิงก์ในช่อง readOnly ให้คัดลอกเอง
+  const [showLinkField, setShowLinkField] = useState(false);
   // OAuth callback ส่งผลกลับมาเป็น ?auth_error= / ?gmail= — อ่านตอน render แรก (ก่อน `/` ถูก Navigate ไป /dashboard จน query หาย)
   const [oauthParams] = useState(() => new URLSearchParams(window.location.search));
   const authError = oauthParams.get('auth_error');
@@ -268,7 +297,7 @@ export default function App() {
 
   // ลบ query ของ OAuth ออกจาก URL หลังอ่านแล้ว ไม่ให้ refresh/แชร์ลิงก์แล้วข้อความขึ้นซ้ำ
   useEffect(() => {
-    if (!oauthParams.has('auth_error') && !oauthParams.has('gmail')) return;
+    if (!TRANSIENT_PARAMS.some((key) => oauthParams.has(key))) return;
     window.history.replaceState(window.history.state, '', pageUrl());
   }, [oauthParams]);
 
@@ -278,13 +307,19 @@ export default function App() {
   }, [user?.status]);
 
   // ทางเดียวที่อ่าน /api/me: โหลดแรก, หน้ารออนุมัติเช็คซ้ำ, ปุ่ม "ตรวจสอบอีกครั้ง" และตอนกลับจาก bfcache
+  // คำขอที่ยังค้างอยู่ใช้ร่วมกัน — ไม่ยิงซ้อน และคำตอบเก่าไม่มาทับคำตอบใหม่
+  const meRequest = useRef<Promise<MeResponse> | null>(null);
   const loadMe = () =>
-    req<MeResponse>('/api/me').then((response) => {
-      setUser(response.user);
-      setVersion(response.version);
-      setPendingUserCount(response.pending_user_count ?? 0);
-      return response;
-    });
+    (meRequest.current ??= req<MeResponse>('/api/me')
+      .then((response) => {
+        setUser(response.user);
+        setVersion(response.version);
+        setPendingUserCount(response.pending_user_count ?? 0);
+        return response;
+      })
+      .finally(() => {
+        meRequest.current = null;
+      }));
 
   useEffect(() => {
     loadMe()
@@ -303,10 +338,11 @@ export default function App() {
   useEffect(() => {
     if (!awaitingApproval) return;
     const check = () => {
-      if (document.visibilityState !== 'visible') return;
+      // รอบก่อน (หรือปุ่มตรวจสอบ) ยังไม่จบ = ข้ามรอบนี้
+      if (document.visibilityState !== 'visible' || meRequest.current) return;
       loadMe()
         .then((response) => {
-          const changed = response.user && STATUS_CHANGE_NOTICE[response.user.status];
+          const changed = response.user ? STATUS_CHANGE_NOTICE[response.user.status] : SESSION_EXPIRED_NOTICE;
           if (changed) setNotice(changed);
         })
         .catch(() => {}); // เช็คเบื้องหลัง — พลาดรอบนี้ก็รอรอบหน้า
@@ -331,6 +367,24 @@ export default function App() {
     window.addEventListener('pageshow', restore);
     return () => window.removeEventListener('pageshow', restore);
   }, []);
+
+  // การไป Google ถูกยกเลิก (กด Stop, เน็ตหลุด) หน้านี้ไม่ได้ไปไหน — ปลดปุ่มเองหลัง 10 วินาที
+  // ponytail: เน็ตช้ากว่า 10 วินาทีกดซ้ำได้ (oauthState ใหม่ทับของเดิม ครั้งแรกกลับมาเป็น expired) — ยอมรับ
+  useEffect(() => {
+    if (!goingToGoogle) return;
+    const timer = window.setTimeout(() => setGoingToGoogle(false), 10_000);
+    return () => window.clearTimeout(timer);
+  }, [goingToGoogle]);
+
+  // ออกจากหน้ารออนุมัติ (อนุมัติ → แอป, ปฏิเสธ, session หมด → เข้าสู่ระบบ) ปุ่มที่ถือ focus อาจหายไปกับหน้าเดิม focus ตกไป <body>
+  // ย้ายไป h1 ของหน้าใหม่ — เข้าแอปใช้ <main> เพราะ h1 ของหน้าแรกยังอยู่ใน chunk ที่กำลังโหลด
+  const lastStatus = useRef<User['status'] | undefined>(undefined);
+  useEffect(() => {
+    const was = lastStatus.current;
+    lastStatus.current = user?.status;
+    if (was !== 'pending' || user?.status === 'pending') return;
+    document.getElementById(user?.status === 'approved' ? 'app-main' : 'auth-heading')?.focus();
+  }, [user?.status]);
   // หลังแอดมินเปลี่ยนสถานะผู้ใช้ในหน้าตั้งค่า — อ่านเฉพาะตัวนับใหม่ (ตัวนับเป็นของเสริม โหลดไม่ได้คงค่าเดิม)
   const refreshPendingUserCount = () => {
     req<MeResponse>('/api/me').then((response) => setPendingUserCount(response.pending_user_count ?? 0)).catch(() => {});
@@ -365,7 +419,9 @@ export default function App() {
     setCheckingStatus(true);
     try {
       const response = await loadMe();
-      if (response.user) setNotice(STATUS_CHANGE_NOTICE[response.user.status] ?? { message: 'ยังรอผู้ดูแลอนุมัติอยู่', severity: 'info' });
+      setNotice(response.user
+        ? STATUS_CHANGE_NOTICE[response.user.status] ?? { message: 'ยังรอผู้ดูแลอนุมัติอยู่', severity: 'info' }
+        : SESSION_EXPIRED_NOTICE);
     } catch {
       setNotice({ message: 'ตรวจสอบสถานะไม่สำเร็จ ลองใหม่อีกครั้ง', severity: 'error' });
     } finally {
@@ -381,13 +437,22 @@ export default function App() {
     setGoingToGoogle(true);
   };
 
+  // ไม่มี navigator.clipboard = ใช้ textarea ทันที (ก่อน await ยังอยู่ในจังหวะคลิก) · writeText ถูกปฏิเสธ = ลอง textarea อีกครั้ง
+  // ไม่ได้ทั้งคู่ = แสดงลิงก์ในช่องให้คัดลอกเอง
   const copyLink = async () => {
+    const url = pageUrl();
+    let copied = false;
     try {
-      await navigator.clipboard.writeText(pageUrl()); // บาง WebView ไม่มี navigator.clipboard — TypeError ตกมาที่ catch
-      setNotice({ message: 'คัดลอกลิงก์แล้ว วางในแถบที่อยู่ของ Chrome หรือ Safari', severity: 'success' });
+      if (!navigator.clipboard) copied = copyWithTextarea(url);
+      else {
+        await navigator.clipboard.writeText(url);
+        copied = true;
+      }
     } catch {
-      setNotice({ message: 'คัดลอกลิงก์ไม่สำเร็จ แตะเมนู ⋯ ของแอปแล้วเลือกเปิดในเบราว์เซอร์แทน', severity: 'error' });
+      copied = copyWithTextarea(url);
     }
+    if (copied) setNotice({ message: 'คัดลอกลิงก์แล้ว วางในแถบที่อยู่ของ Chrome หรือ Safari', severity: 'success' });
+    else setShowLinkField(true);
   };
 
   if (user === undefined) {
@@ -416,7 +481,7 @@ export default function App() {
           <Stack spacing={3} sx={{ alignItems: 'center', textAlign: 'center' }}>
             <Box component="img" src="/logo-144.webp" alt="" width={72} height={72} sx={{ display: 'block' }} />
             <Box>
-              <Typography variant="h1">Hyacinthia Ledger</Typography>
+              <Typography variant="h1" id="auth-heading" tabIndex={-1}>Hyacinthia Ledger</Typography>
               <Typography color="text.secondary" sx={{ mt: 1, ...descriptionSx }}>
                 เปลี่ยน statement จากธนาคารให้เป็น<NoBreak>ภาพรวม</NoBreak>การเงินที่ถูกต้องและดูแลง่าย
               </Typography>
@@ -443,6 +508,36 @@ export default function App() {
                   คัดลอกลิงก์
                 </Button>
               )}
+              {/* autoFocus → onFocus เลือกทั้งหมด screen reader อ่านชื่อ + คำแนะนำทันที · input ธรรมดาหน้าตาเดียวกับช่องกรอก
+                  ไม่ใช่ TextField (ลาก Select/Menu เข้า chunk หลัก +56 kB เพื่อทางสำรองที่แทบไม่มีใครเห็น) · 16px กัน iOS ซูม */}
+              {showLinkField && (
+                <Box sx={{ textAlign: 'left' }}>
+                  <Box
+                    component="input"
+                    readOnly
+                    autoFocus
+                    value={pageUrl()}
+                    aria-label="ลิงก์ของหน้านี้"
+                    aria-describedby="copy-link-help"
+                    onFocus={(event: FocusEvent<HTMLInputElement>) => event.currentTarget.select()}
+                    sx={{
+                      ...dataTextSx,
+                      width: '100%',
+                      minHeight: 40,
+                      px: 1.5,
+                      fontSize: '1rem',
+                      color: 'text.primary',
+                      bgcolor: 'brand.inputBg',
+                      border: 1,
+                      borderColor: 'brand.input',
+                      borderRadius: `${radii.md}px`,
+                    }}
+                  />
+                  <Typography id="copy-link-help" variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                    คัดลอกให้อัตโนมัติไม่ได้ กดค้างที่ลิงก์แล้วเลือกคัดลอก
+                  </Typography>
+                </Box>
+              )}
               <Button
                 fullWidth
                 variant={IN_APP_BROWSER ? 'outlined' : 'contained'}
@@ -454,6 +549,8 @@ export default function App() {
               >
                 {goingToGoogle ? 'กำลังไปที่ Google…' : 'เข้าสู่ระบบด้วย Google'}
               </Button>
+              {/* ป้ายของปุ่มที่ focus อยู่เปลี่ยนแล้ว screen reader ไม่อ่าน — live region อยู่นอกปุ่ม (aria-busy บนปุ่มกดการประกาศของลูก) */}
+              <Box component="span" role="status" sx={visuallyHiddenSx}>{goingToGoogle ? 'กำลังไปที่ Google…' : ''}</Box>
             </Stack>
           </Stack>
         </AuthPanel>
@@ -473,9 +570,9 @@ export default function App() {
               ? <HourglassTopRounded sx={{ color: 'text.secondary', fontSize: 40 }} />
               : <BlockRounded color="error" sx={{ fontSize: 40 }} />}
             <Box>
-              <Typography variant="h1">{isPending ? 'รอการอนุมัติ' : 'บัญชีนี้ไม่ได้รับอนุมัติ'}</Typography>
-              {/* อีเมลอยู่บรรทัดของตัวเอง — อยู่กลางประโยคแล้วดันคำไทยให้ตัดกลางคำ */}
-              <Typography sx={{ mt: 1, ...dataTextSx, overflowWrap: 'anywhere' }}>{user.email}</Typography>
+              <Typography variant="h1" id="auth-heading" tabIndex={-1}>{isPending ? 'รอการอนุมัติ' : 'บัญชีนี้ไม่ได้รับอนุมัติ'}</Typography>
+              {/* อีเมลอยู่บรรทัดของตัวเอง — อยู่กลางประโยคแล้วดันคำไทยให้ตัดกลางคำ · ตัดหลัง @ ก่อนกลางโดเมน */}
+              <Typography sx={{ mt: 1 }}>{emailText(user.email)}</Typography>
               {isPending ? (
                 <>
                   {/* worker ดึงอีเมลเฉพาะผู้ใช้ที่ approved (src/worker.ts) */}
@@ -490,14 +587,13 @@ export default function App() {
                 // ปฏิเสธ = แอดมิน revoke token ทุกกล่องที่ Google (routes/admin.ts) และล็อกอินซ้ำก็ไม่เก็บ token ใหม่ (auth.ts)
                 <Typography color="text.secondary" sx={{ mt: 2, ...descriptionSx }}>
                   ระบบไม่อ่านอีเมลของบัญชีนี้ และได้ขอ Google ยกเลิกสิทธิ์อ่านอีเมลที่บัญชีนี้เคยให้ไว้แล้ว
-                  ถ้าเข้าผิดบัญชี กด "ใช้บัญชี Google อื่น"
                 </Typography>
               )}
             </Box>
             {/* ล็อกอินโดยไม่ติ๊กอ่านอีเมล — บอกสิ่งที่ทำได้หลังอนุมัติ (GmailBanner มีปุ่ม "เชื่อม Gmail" ทุกหน้า) */}
             {isPending && oauthParams.get('gmail') === 'not_granted' && (
               <Alert severity="info" role="status" sx={authAlertSx}>
-                คุณยังไม่ได้ให้สิทธิ์อ่าน Gmail ไม่เป็นไร หลังได้รับอนุมัติ กด "เชื่อม Gmail" ที่แถบด้านบนของแอป ระบบจึงจะนำเข้า statement ได้
+                ยังไม่ได้ให้สิทธิ์อ่าน Gmail — ให้ทีหลังได้ เมื่อได้รับอนุมัติแล้ว กด <NoBreak>"เชื่อม Gmail"</NoBreak> ที่แถบด้านบนของแอป ระบบจึงจะนำเข้า statement ได้
               </Alert>
             )}
             <Stack spacing={1} sx={{ width: '100%' }}>
@@ -694,7 +790,8 @@ export default function App() {
       </Drawer>
 
       {/* < sm เลขเวอร์ชันต่อท้ายหน้า (ไม่ลอย) ระยะล่างรวมกับบรรทัดเวอร์ชันจึงใกล้เดิม */}
-      <Container component="main" maxWidth="lg" sx={{ py: { xs: 3, sm: 4 }, pb: { xs: 4, sm: 8 } }}>
+      {/* tabIndex -1: ปลายทาง focus ตอนเพิ่งได้รับอนุมัติ — landmark ไม่ใช่ control จึงไม่วาด ring รอบทั้งหน้า */}
+      <Container component="main" id="app-main" tabIndex={-1} maxWidth="lg" sx={{ py: { xs: 3, sm: 4 }, pb: { xs: 4, sm: 8 }, '&:focus-visible': { outline: 'none' } }}>
         <GmailBanner mailboxes={mailboxes} />
         <Suspense fallback={<TableSkeleton rows={6} />}>
           <Routes>

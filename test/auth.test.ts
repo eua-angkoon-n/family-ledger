@@ -65,15 +65,23 @@ async function openTestApp(existingUserId?: number, googleEmail = 'member@exampl
   useSecurityHeaders(app);
   app.use(express.json());
   app.use(session({ secret: 'test-secret-test-secret-test-secret', resave: false, saveUninitialized: false }));
+  const faults = { regenerate: false };
+  app.use((req, _res, next) => {
+    if (faults.regenerate) req.session.regenerate = (cb) => (cb(new Error('regenerate ล้ม')), req.session);
+    next();
+  });
   // /api/me อ่าน app_user จาก DB จริง (loadUser ไม่ได้ใช้ query ที่ฉีดเข้ามา) — ดูผู้ใช้ใน session ตรง ๆ แทน
   app.get('/test/session', (req, res) => res.json({ userId: req.session.userId ?? null }));
+  const limits = { fails: new Map<string, { n: number; resetAt: number }>(), starts: new Map<string, { n: number; resetAt: number }>() };
   app.use('/auth', createAuthRouter({
     query: fakeQuery as never,
     encrypt: (value: string) => `encrypted:${value}`,
     env: authEnv,
     fetch: fakeFetch,
+    limits,
   }));
   app.use('/api', api);
+  app.use('/api', (_req, res) => res.status(404).json({ error: 'ไม่พบ endpoint' })); // เหมือน server.ts
   app.use(express.static(import.meta.dirname)); // แทน web/dist — GET /auth.test.ts เป็นไฟล์ static ที่มีแน่นอน
 
   const server = app.listen(0);
@@ -97,7 +105,7 @@ async function openTestApp(existingUserId?: number, googleEmail = 'member@exampl
 
   const sessionUserId = async () => ((await (await request('/test/session')).json()) as { userId: number | null }).userId;
 
-  return { calls, google, revoked, request, sessionUserId, cookie: () => cookie, close: () => server.close() };
+  return { calls, google, revoked, faults, limits, request, sessionUserId, cookie: () => cookie, close: () => server.close() };
 }
 
 async function completeGoogleLogin(request: (path: string, init?: RequestInit) => Promise<Response>, startPath = '/auth/google') {
@@ -274,6 +282,7 @@ test('rate limit นับเฉพาะความล้มเหลว: ล�
   t.after(app.close);
 
   for (let i = 0; i < 12; i++) assert.equal((await completeGoogleLogin(app.request)).headers.get('location'), '/');
+  await app.request('/auth/google'); // state ไม่ตรงนับเฉพาะ session ที่มี OAuth ค้างอยู่ — ไม่ถูกล้างเพราะ state ไม่ผ่าน
   for (let i = 0; i < 9; i++) await app.request('/auth/google/callback?error=access_denied&state=wrong');
   assert.match((await app.request('/auth/google')).headers.get('location')!, /^https:\/\/accounts\.google\.com\//, 'ล้ม 9 ครั้งยังเริ่มได้');
   await app.request('/auth/google/callback?state=wrong');
@@ -292,13 +301,55 @@ test('rate limit ยังกันการเริ่ม OAuth รัว ๆ 
   assert.equal((await app.request('/auth/google')).headers.get('location'), '/?auth_error=rate_limited');
 });
 
+test('โควตาความล้มเหลวไม่นับ: callback ไม่มี cookie (<img> ข้ามไซต์), กดยกเลิกที่ Google, กด Back — นับเฉพาะ OAuth ที่ค้างใน session', async (t) => {
+  const app = await openTestApp(7);
+  t.after(app.close);
+  const stateOf = (res: Response) => new URL(res.headers.get('location')!).searchParams.get('state');
+
+  for (let i = 0; i < 10; i++) await app.request('/auth/google/callback?code=x&state=forged');
+  assert.equal(app.cookie(), '', 'ไม่มี cookie ก็ต้องไม่ได้ session ใหม่');
+  for (let i = 0; i < 10; i++) {
+    const state = stateOf(await app.request('/auth/google'));
+    assert.equal((await app.request(`/auth/google/callback?error=access_denied&state=${state}`)).headers.get('location'), '/?auth_error=access_denied');
+  }
+  const callback = `/auth/google/callback?code=oauth-code&state=${stateOf(await app.request('/auth/google'))}`;
+  assert.equal((await app.request(callback)).headers.get('location'), '/');
+  for (let i = 0; i < 10; i++) assert.equal((await app.request(callback)).headers.get('location'), '/?auth_error=expired');
+  const restart = await app.request('/auth/google');
+  assert.match(restart.headers.get('location')!, /^https:\/\/accounts\.google\.com\//, 'ยังไม่มีอะไรถูกนับ');
+
+  for (let i = 0; i < 10; i++) await app.request('/auth/google/callback?code=x&state=wrong');
+  assert.equal((await app.request('/auth/google')).headers.get('location'), '/?auth_error=rate_limited');
+});
+
+test('rate limit กวาดรายการที่หมดอายุทิ้ง — map ไม่โตค้างตลอดอายุ process', async (t) => {
+  const app = await openTestApp();
+  t.after(app.close);
+  for (let i = 0; i < 1000; i++) app.limits.starts.set(`198.51.100.${i}`, { n: 1, resetAt: 0 });
+  app.limits.starts.set('203.0.113.1', { n: 1, resetAt: Date.now() + 60_000 });
+
+  await app.request('/auth/google');
+  assert.equal(app.limits.starts.size, 2, 'เหลือตัวที่ยังไม่หมดอายุ + IP ที่เพิ่งเข้ามา');
+  assert.ok(app.limits.starts.has('203.0.113.1'));
+});
+
+test('regenerate ล้ม: ไม่เขียน audit ว่าล็อกอิน และไม่ได้ล็อกอิน', async (t) => {
+  const app = await openTestApp(7);
+  t.after(app.close);
+  app.faults.regenerate = true;
+
+  assert.equal((await completeGoogleLogin(app.request)).headers.get('location'), '/?auth_error=failed');
+  assert.equal(app.calls.some(({ sql }) => sql.includes('insert into audit_log')), false);
+  assert.equal(await app.sessionUserId(), null);
+});
+
 test('ทุก response มี security headers — HSTS เฉพาะ https ที่มาผ่าน proxy', async (t) => {
   const app = await openTestApp();
   t.after(app.close);
 
-  for (const path of ['/api/me', '/auth.test.ts', '/auth/google']) {
+  for (const [path, status] of [['/api/me', 200], ['/auth.test.ts', 200], ['/auth/google', 302], ['/api/nope', 404]] as const) {
     const res = await app.request(path);
-    assert.ok(res.status === 200 || res.status === 302, path);
+    assert.equal(res.status, status, path);
     assert.equal(res.headers.get('x-content-type-options'), 'nosniff', path);
     assert.equal(res.headers.get('x-frame-options'), 'DENY', path);
     assert.equal(res.headers.get('content-security-policy'), "frame-ancestors 'none'", path);

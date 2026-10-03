@@ -77,11 +77,15 @@ function logAuthFailure(reason: string, req: Request): void {
   console.warn(`auth ล้มเหลว: ${reason} ip=${req.ip ?? 'unknown'}`);
 }
 
+type Hits = Map<string, { n: number; resetAt: number }>;
+
 type AuthDependencies = {
   query: typeof query;
   encrypt: typeof encrypt;
   env: Pick<typeof env, 'googleClientId' | 'googleClientSecret' | 'baseUrl' | 'adminEmail'>;
   fetch: typeof fetch;
+  /** เทสต์ฉีดเข้ามาเพื่อดูว่ารายการหมดอายุถูกกวาดทิ้ง — ปกติ router สร้าง map ของตัวเอง */
+  limits?: { fails: Hits; starts: Hits };
 };
 
 const defaultAuthDependencies: AuthDependencies = { query, encrypt, env, fetch };
@@ -91,31 +95,36 @@ export function createAuthRouter({
   encrypt,
   env,
   fetch,
+  limits: { fails, starts } = { fails: new Map(), starts: new Map() },
 }: AuthDependencies = defaultAuthDependencies): Router {
   const authRouter = Router();
   // ponytail: rate limit ในหน่วยความจำ (fixed window 15 นาที/IP) พอสำหรับ instance เดียว ถ้าสเกลค่อยย้ายไปตาราง/redis
   // อยู่ในตัว router (prod มีตัวเดียว) — เทสต์ที่สร้าง router ใหม่ต่อเคสจึงไม่ชนเพดานของกันและกัน
+  // ponytail: key ด้วย req.ip ตรง ๆ — IPv6 หมุนที่อยู่ภายใน /64 ของตัวเองหนีทั้งสองถังได้ ถ้าเจอจริงค่อย key ด้วย prefix /64
   // สองถัง: ล็อกอินสำเร็จไม่กินโควตาความล้มเหลว คนในบ้านที่ออก Wi-Fi เดียวกัน (IP เดียว) จึงไม่ล็อกกันเอง
-  // - fails: callback ที่ล้มก่อนได้ token (state ไม่ตรง, Google ตอบ error/ผู้ใช้ปฏิเสธ, ไม่มี code) ครบ 10 → ปิดการเริ่มใหม่
-  //   แลก token/userinfo ล้มไม่นับ — ไปถึงได้ด้วย state ที่ใช้ได้ครั้งเดียวเท่านั้น (ถัง starts คุมอยู่แล้ว)
-  //   และ Google ล่มต้องไม่ล็อกทั้งบ้าน
+  // - fails: callback ที่ state ไม่ตรง จาก session ที่เริ่ม OAuth ค้างไว้จริง ครบ 10 → ปิดการเริ่มใหม่ (ดูเงื่อนไขที่ callback)
+  //   ความล้มหลังผ่าน state แล้ว (ผู้ใช้กดยกเลิก/Google ตอบ error, ไม่มี code, แลก token/userinfo ล้ม) ไม่นับ —
+  //   ไปถึงได้ด้วย state ที่ใช้ได้ครั้งเดียวเท่านั้น (ถัง starts คุมอยู่แล้ว) และการกดยกเลิก/Google ล่มต้องไม่ล็อกทั้งบ้าน
   // - starts: ทุกการเริ่ม /auth/google เพดาน 60 — แต่ละครั้งเขียนแถว session ใหม่ลง DB (oauthState) ถังนี้กันสคริปต์ยิงรัว
   //   คนจริง session อยู่ 30 วัน ทั้งบ้านไม่น่าเริ่มเกินหลักหน่วยต่อ 15 นาที
-  const fails = new Map<string, { n: number; resetAt: number }>();
-  const starts = new Map<string, { n: number; resetAt: number }>();
-  function hit(bucket: typeof fails, ip: string): number {
+  function hit(bucket: Hits, ip: string): number {
     const now = Date.now();
+    // กวาดรายการหมดอายุทิ้ง ไม่งั้นทุก IP ที่เคยมาค้างใน map ตลอดอายุ process — Map วนตามลำดับที่ใส่และทุกตัวมีหน้าต่าง
+    // ยาวเท่ากัน หัว map จึงหมดอายุก่อนเสมอ: ลบจากหัวจนเจอตัวที่ยังไม่หมด (แต่ละตัวถูกลบครั้งเดียว ไม่สแกนทั้ง map ทุกครั้ง)
+    for (const [k, e] of bucket) {
+      if (now <= e.resetAt) break;
+      bucket.delete(k);
+    }
     let e = bucket.get(ip);
-    if (!e || now > e.resetAt) bucket.set(ip, (e = { n: 0, resetAt: now + 15 * 60_000 }));
+    if (!e || now > e.resetAt) {
+      bucket.delete(ip); // เริ่มหน้าต่างใหม่ต้องย้ายไปท้าย map — set ทับ key เดิมไม่เปลี่ยนลำดับ
+      bucket.set(ip, (e = { n: 0, resetAt: now + 15 * 60_000 }));
+    }
     return ++e.n;
   }
   function failCount(ip: string): number {
     const e = fails.get(ip);
     return e && Date.now() <= e.resetAt ? e.n : 0;
-  }
-  function callbackFailed(reason: string, req: Request): void {
-    logAuthFailure(reason, req);
-    hit(fails, req.ip ?? 'unknown');
   }
   // ห้ามทิ้งผู้ใช้ไว้ที่หน้าข้อความดิบ — กลับเข้าแอปพร้อม code ให้เว็บแสดงข้อความ
   // เชื่อมกล่องเมล (ล็อกอินอยู่แล้ว) กลับหน้าบัญชี นอกนั้นกลับหน้าเข้าสู่ระบบ
@@ -184,7 +193,13 @@ authRouter.get('/google/callback', async (req, res) => {
   try {
     const { code, state, error } = req.query;
     if (!req.session.oauthState || state !== req.session.oauthState) {
-      callbackFailed('state ไม่ตรงกับที่ออกให้', req);
+      logAuthFailure('state ไม่ตรงกับที่ออกให้', req);
+      // โควตาเป็นของทั้ง IP (ทั้งบ้าน) — นับเฉพาะ session ที่เริ่ม OAuth ค้างไว้จริง (มี oauthState) ไม่งั้นคนนอกล็อกบ้านได้:
+      // session ที่มี oauthState เกิดได้จากการเปิด /auth/google เท่านั้น และ cookie เป็น SameSite=Lax ซึ่งเบราว์เซอร์ไม่แนบไปกับ
+      // <img>/fetch ข้ามไซต์ (แนบเฉพาะ top-level GET navigation) — หน้าเว็บอื่นที่ยิง callback จากเบราว์เซอร์ของคนในบ้าน
+      // จึงได้ session ว่าง ไม่นับ · กด Back กลับมา callback เก่า: state ถูกใช้ไปแล้ว/ล็อกอินแล้ว session ถูก regenerate
+      // ไม่มี oauthState ไม่นับ (session ของคนที่ล็อกอินอยู่ก็ไม่มี) · จะให้นับได้ต้องพาเบราว์เซอร์ไปเริ่ม /auth/google แบบ top-level ก่อน ซึ่งผู้ใช้เห็น
+      if (req.session.oauthState) hit(fails, req.ip ?? 'unknown');
       return void backToApp(res, mailboxUserId != null, 'expired');
     }
     req.session.oauthState = undefined;
@@ -192,12 +207,12 @@ authRouter.get('/google/callback', async (req, res) => {
     req.session.reconnectMailboxId = undefined;
     // ผู้ใช้กดยกเลิก/ไม่อนุญาตในหน้าของ Google — Google ส่ง ?error= กลับมาแทน code
     if (error !== undefined) {
-      callbackFailed(`Google ตอบ error=${JSON.stringify(error).slice(0, 100)}`, req);
+      logAuthFailure(`Google ตอบ error=${JSON.stringify(error).slice(0, 100)}`, req);
       if (mailboxUserId != null) return void res.redirect('/accounts?gmail=denied');
       return void res.redirect(error === 'access_denied' ? '/?auth_error=access_denied' : '/?auth_error=failed');
     }
     if (typeof code !== 'string') {
-      callbackFailed('callback ไม่มี code', req);
+      logAuthFailure('callback ไม่มี code', req);
       return void backToApp(res, mailboxUserId != null, 'failed');
     }
 
@@ -304,6 +319,12 @@ authRouter.get('/google/callback', async (req, res) => {
     }
     if (rejected) await discardToken();
 
+    // session id ใหม่ทุกครั้งที่ล็อกอิน (store ลบแถวเดิม) — กัน session fixation: sid ที่ถูกฝังไว้ก่อนล็อกอินใช้ต่อไม่ได้
+    // ไม่มีค่าอื่นต้องพกข้าม — oauthState/addMailbox/reconnectMailboxId ล้างไปแล้วข้างบน
+    // ลำดับ regenerate → audit → userId: regenerate ล้ม = ไม่มีบันทึกว่าล็อกอินทั้งที่ไม่สำเร็จ
+    // audit ล้ม = session ใหม่ยังไม่มี userId (ไม่ได้ล็อกอิน) ไม่มีทางเข้าระบบได้โดยไม่มีร่องรอย
+    await new Promise<void>((resolve, reject) => req.session.regenerate((err) => (err ? reject(err) : resolve())));
+
     // เก็บแค่อีเมล/ชื่อ — ห้ามใส่ token หรือ refresh_token_enc ลง audit_log เด็ดขาด
     // (คลาสเดียวกับบั๊ก pdf_password_enc รั่วเข้า before_data ที่เจอใน Slice 8)
     await audit(auditable, {
@@ -314,10 +335,6 @@ authRouter.get('/google/callback', async (req, res) => {
       after: { email: info.email, display_name: info.name ?? '', gmail_connected: gmailConnected },
       ip: req.ip ?? null,
     });
-
-    // session id ใหม่ทุกครั้งที่ล็อกอิน (store ลบแถวเดิม) — กัน session fixation: sid ที่ถูกฝังไว้ก่อนล็อกอินใช้ต่อไม่ได้
-    // ไม่มีค่าอื่นต้องพกข้าม — oauthState/addMailbox/reconnectMailboxId ล้างไปแล้วข้างบน
-    await new Promise<void>((resolve, reject) => req.session.regenerate((err) => (err ? reject(err) : resolve())));
     req.session.userId = userId;
     res.redirect(hasGmail ? '/' : '/?gmail=not_granted');
   } catch (e) {
