@@ -78,10 +78,11 @@ reportsRouter.get('/reports/summary', requireUser(async (req, res, user) => {
   // all-time ต่อ user ไม่ผูกกับเดือนที่เลือก — parse_failed/checksum_failed ไม่มี period ให้ผูกกับเดือนได้ (migration 002)
   // นับเป็นไฟล์ (การ์ดแสดง "N ไฟล์") — ไฟล์เดียวที่ผูกบัญชีไม่ได้ถูกเขียน parse_failed ใต้หลายบัญชี (src/worker.ts)
   // pdf_sha256 เป็น null ได้ในแถวเก่า นับแถวนั้นแยกตาม id
+  // ไฟล์ว่าง (reason no_data, src/parsers/scb.ts) ไม่นับและไม่ขึ้นในรายการ — ไม่มีอะไรให้นำเข้าหรือให้ใครแก้
   const statementHealth = await query<{ status: string; n: number }>(
     `select st.status, count(distinct coalesce(st.pdf_sha256, st.id::text))::int as n
      from statement st join bank_account a on a.id = st.bank_account_id
-     where a.user_id = $1
+     where a.user_id = $1 and st.error_detail->>'reason' is distinct from 'no_data'
      group by st.status`,
     [user.id],
   );
@@ -99,6 +100,7 @@ reportsRouter.get('/reports/summary', requireUser(async (req, res, user) => {
             st.error_detail -> 'reason' as error_reason, st.created_at
      from statement st join bank_account a on a.id = st.bank_account_id
      where a.user_id = $1 and st.status in ('parse_failed', 'checksum_failed')
+       and st.error_detail->>'reason' is distinct from 'no_data'
      order by st.created_at desc
      limit 50`,
     [user.id],

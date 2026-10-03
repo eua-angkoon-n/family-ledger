@@ -51,6 +51,7 @@
 - เก็บ statement ไม่ซ้ำ 38 PDF (`pdf_sha256` ไม่ซ้ำ 38 ค่า)
 - `parsed` 36 statement
 - `checksum_failed` 2 statement — ทั้งสองไม่มีรายการและไม่มี opening balance จึงตรวจยอดไม่ได้
+  (ตั้งแต่ 1.5.2 ไฟล์ว่างแบบนี้ติด `error_detail.reason = 'no_data'` และแดชบอร์ด/ผล sync ไม่นับเป็นปัญหา)
 - เขียน `txn` 78 แถว, จำนวนเงินต่ำสุด 1 สตางค์
 - dedup รายการที่ทับกัน 39 แถว
 - full sync รอบถัดไป: `statements_inserted: 0`; จำนวน statement/txn ไม่เพิ่ม

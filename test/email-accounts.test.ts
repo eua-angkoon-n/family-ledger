@@ -311,6 +311,15 @@ test('email accounts: sync กับ token ที่ใช้ไม่ได้ 
     )).rows[0]!.reason;
     assert.equal(reason, 'pdftotext_failed');
 
+    // ไฟล์ว่าง: gate ไม่ผ่านเหมือนเดิม แต่ reason มาจาก parser ให้แดชบอร์ดกรองออกได้
+    assert.equal(await writeParsedStatement(mailboxId, a, 'msg', 'att', 'sha-empty', '/tmp/x.pdf', {
+      ...parsed, checksumValid: false, checksumReason: 'no_data' as const,
+    }), true);
+    const empty = (await db.pool.query<{ status: string; reason: string }>(
+      `select status, error_detail->>'reason' as reason from statement where pdf_sha256 = 'sha-empty'`,
+    )).rows;
+    assert.deepEqual(empty, [{ status: 'checksum_failed', reason: 'no_data' }]);
+
     // ข้ามไฟล์ (ฟังก์ชันเดียวกับที่ worker เรียก) → ล้างทุกแถวในกล่องนี้ และลบ PDF ที่ไม่มีแถวชี้
     const dir = await mkdtemp(join(tmpdir(), 'ledger-skip-'));
     const skipped = join(dir, 'msg_1.pdf');
