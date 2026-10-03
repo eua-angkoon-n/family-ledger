@@ -1,4 +1,5 @@
-import { useEffect, useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   Alert,
   Box,
@@ -109,11 +110,13 @@ type HeaderProps = {
   action?: ReactNode;
   level?: 1 | 2;
   id?: string;
+  /** -1 = หัวข้อที่โค้ดย้าย focus มาหา (ลิงก์ `#id` จากหน้าอื่น) — screen reader รู้ว่ามาถึงส่วนไหน */
+  tabIndex?: number;
 };
 
 export const APP_NAME = 'Hyacinthia Ledger';
 
-export function PageHeader({ title, description, action, level = 2, id }: HeaderProps) {
+export function PageHeader({ title, description, action, level = 2, id, tabIndex }: HeaderProps) {
   // ชื่อแท็บตามหน้า (WCAG 2.4.2) — ทุกหน้าที่ล็อกอินแล้วมี PageHeader level 1 ตัวเดียว จึงตั้งที่นี่ที่เดียว
   useEffect(() => {
     if (level === 1) document.title = `${title} · ${APP_NAME}`;
@@ -126,7 +129,7 @@ export function PageHeader({ title, description, action, level = 2, id }: Header
     >
       <Box sx={{ minWidth: 0 }}>
         <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
-          <Typography component={level === 1 ? 'h1' : 'h2'} variant={level === 1 ? 'h1' : 'h2'} id={id}>
+          <Typography component={level === 1 ? 'h1' : 'h2'} variant={level === 1 ? 'h1' : 'h2'} id={id} tabIndex={tabIndex}>
             {title}
           </Typography>
           {/* ปุ่มคู่มือขึ้นเฉพาะหัวข้อระดับหน้า — หัวข้อย่อยในหน้า (level 2) ไม่ต้องมี
@@ -263,17 +266,22 @@ export function ConfirmDialog({
 }
 
 // info = ผลที่ไม่ใช่ทั้งสำเร็จและผิดพลาด เช่น ผู้ใช้กดยกเลิกเองในหน้าของ Google (สี info = muted ไม่ใช่สีสถานะใหม่)
+// warning = ทำสำเร็จแต่มีส่วนที่ต้องจัดการ (เช่นดึงอีเมลแล้วมีไฟล์ที่เปิดไม่ได้) — ควรมี action พาไปที่แก้
 // action = ปุ่มเดียวต่อท้ายข้อความ เช่น "เลิกทำ" — snackbar ไม่หายเอง (WCAG 2.2.1) ปิดด้วย X หรือ Esc
-export type Notice = { message: string; severity: 'success' | 'error' | 'info'; action?: { label: string; onClick: () => void } };
+export type Notice = { message: string; severity: 'success' | 'error' | 'info' | 'warning'; action?: { label: string; onClick: () => void } };
 
 // placement="top" ใช้ตอนมีแถบลอยด้านล่างจอ (แถบรายการที่เลือกในหน้าวางแผน) ไม่งั้น snackbar ทับปุ่มของแถบ
+// onExited = ปิดสนิทแล้ว — หน้าที่มีคิวผล (บัญชีของฉัน) แสดงอันถัดไปจากตรงนี้ ไม่ใช่สลับ notice ตอนเปิดค้าง
+// (Snackbar ตั้งเวลาปิดใหม่เฉพาะตอน open/autoHideDuration เปลี่ยน อันที่สองจะไม่หายเอง)
 export function FeedbackSnackbar({
   notice,
   onClose,
+  onExited,
   placement = 'bottom',
 }: {
   notice: Notice | null;
   onClose: () => void;
+  onExited?: () => void;
   placement?: 'top' | 'bottom';
 }) {
   // ข้อความล่าสุดค้างไว้ระหว่าง transition ตอนปิด — notice เป็น null ทันทีที่กดปิด แถบจึงเคยว่างก่อนหายไป
@@ -283,24 +291,37 @@ export function FeedbackSnackbar({
   return (
     <Snackbar
       open={Boolean(notice)}
-      autoHideDuration={notice?.action ? null : 4500}
+      // ข้อความยาว (เช่นผลดึงอีเมลที่มีชื่อกล่อง) อยู่นานขึ้นตามความยาว ~70ms/ตัวอักษร — สั้นกว่า ~64 ตัวอักษรยังเป็น 4.5 วินาทีเท่าเดิม
+      autoHideDuration={notice?.action ? null : Math.max(4500, (notice?.message.length ?? 0) * 70)}
       // มีปุ่ม action: ไม่หมดเวลา และคลิกที่อื่น (เช่นเลือกแถว) ไม่ปิด ไม่งั้นปุ่มเลิกทำหายก่อนได้กด — ปิดได้ด้วย X และ Esc
       onClose={(_, reason) => {
         if (reason === 'clickaway' && notice?.action) return;
         onClose();
       }}
       anchorOrigin={{ vertical: placement, horizontal: 'center' }}
+      slotProps={{ transition: { onExited } }}
     >
       {shown ? (
         <Alert
           severity={shown.severity}
           variant="filled"
           onClose={onClose}
+          // จอ < md: Snackbar แบบ center กว้างได้แค่ ~50vw (sm+ ยึด left 50%) หรือจอ − 16px (xs) — ข้อความตัดได้ทุกตัว (อีเมลยาว
+          // ไม่ดัน snackbar เกินจอ) และมีปุ่ม action = ปุ่มลงบรรทัดใต้ข้อความชิดขวา ไม่งั้นป้ายยาวบีบข้อความเหลือไม่กี่ตัวอักษร
+          // (message basis 0 + grow: อยู่บรรทัดเดียวกับไอคอน ไม่หล่นไปบรรทัดใหม่ทั้งก้อน) · ≥ md ไม่มีกฎเพิ่ม แถวเดียวเหมือนเดิม
+          sx={(theme) => ({
+            [theme.breakpoints.down('md')]: {
+              minWidth: 0,
+              '& .MuiAlert-message': { overflowWrap: 'anywhere', ...(shown.action && { flex: '1 1 0' }) },
+              ...(shown.action && { flexWrap: 'wrap', '& .MuiAlert-action': { flexBasis: '100%', paddingLeft: 0, paddingTop: 0 } }),
+            },
+          })}
           // action ของ Alert แทนที่ปุ่มปิดเดิม — ใส่ปุ่มปิดคืนเองคู่กัน · ระหว่างกำลังปิด (notice เป็น null) ปุ่ม action ไม่ทำงานซ้ำ
           action={
             shown.action && (
               <>
-                <Button color="inherit" onClick={notice?.action?.onClick}>{shown.action.label}</Button>
+                {/* ข้อความยาวบีบปุ่มจนป้ายตัดกลางคำ ("ไปที่แด/ชบอร์ด") — ป้ายไม่ตัดบรรทัด ข้อความไปตัดแทน */}
+                <Button color="inherit" onClick={notice?.action?.onClick} sx={{ whiteSpace: 'nowrap', flexShrink: 0 }}>{shown.action.label}</Button>
                 <IconButton color="inherit" aria-label="ปิด" onClick={onClose}><CloseRounded fontSize="small" /></IconButton>
               </>
             )
@@ -311,6 +332,23 @@ export function FeedbackSnackbar({
       ) : undefined}
     </Snackbar>
   );
+}
+
+/**
+ * The Deep Link Rule: ลิงก์ `<หน้า>#<hash>` จากหน้าอื่น — router ไม่เลื่อนให้ตอน client navigation และส่วนปลายทาง (หรือส่วนที่อยู่
+ * เหนือมัน) ยังเป็น skeleton จึงรอ `ready` (โหลดจบหรือพัง) ก่อน แล้วเลื่อน `scrollRef` (ตั้ง `scrollMarginTop: 80` กัน AppBar บัง)
+ * และ focus หัวข้อ `focusId` (tabIndex -1) ให้ screen reader รู้ว่ามาถึงไหน — ครั้งเดียวต่อ navigation (location.key)
+ * ปลายทางไม่อยู่ในหน้า (เช่น ไม่มีไฟล์ที่มีปัญหาแล้ว) = อยู่ที่หัวหน้าตามปกติ
+ */
+export function useHashTarget(hash: string, ready: boolean, scrollRef: RefObject<HTMLElement | null>, focusId: string) {
+  const location = useLocation();
+  const handledKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (location.hash !== hash || !ready || handledKeyRef.current === location.key) return;
+    handledKeyRef.current = location.key;
+    scrollRef.current?.scrollIntoView({ block: 'start' });
+    document.getElementById(focusId)?.focus({ preventScroll: true });
+  }, [location.hash, location.key, ready, hash, scrollRef, focusId]);
 }
 
 /** เปิด/พับของ Disclosure จำต่อเครื่อง — localStorage โดนบล็อกได้ (โหมดส่วนตัว) อ่านไม่ได้ = พับ เขียนไม่ได้ = จำแค่รอบนี้ */

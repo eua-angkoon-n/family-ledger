@@ -83,12 +83,12 @@ test('reports API + transaction list/detail', async (t) => {
   async function seedStatement(
     bankAccountId: number,
     gmailMessageId: string,
-    opts: { periodStart: string; periodEnd: string; status?: string },
+    opts: { periodStart: string; periodEnd: string; status?: string; pdfSha256?: string },
   ): Promise<number> {
     const row = await db.pool.query<{ id: number }>(
-      `insert into statement (bank_account_id, gmail_message_id, gmail_attachment_id, period_start, period_end, status)
-       values ($1, $2, $2, $3, $4, $5) returning id`,
-      [bankAccountId, gmailMessageId, opts.periodStart, opts.periodEnd, opts.status ?? 'parsed'],
+      `insert into statement (bank_account_id, gmail_message_id, gmail_attachment_id, period_start, period_end, status, pdf_sha256)
+       values ($1, $2, $2, $3, $4, $5, $6) returning id`,
+      [bankAccountId, gmailMessageId, opts.periodStart, opts.periodEnd, opts.status ?? 'parsed', opts.pdfSha256 ?? null],
     );
     return row.rows[0]!.id;
   }
@@ -160,6 +160,20 @@ test('reports API + transaction list/detail', async (t) => {
     assert.strictEqual(baseline.money_in_satang, 500_000);
     assert.strictEqual(baseline.money_out_satang, 300_000 + 150_000);
     assert.strictEqual(baseline.net_satang, baseline.money_in_satang - baseline.money_out_satang);
+  });
+
+  await t.test('statement_health นับไฟล์ — ไฟล์เดียวที่ค้าง parse_failed ใต้หลายบัญชีนับ 1, แถวไม่มี sha นับแยก', async () => {
+    const failed = { periodStart: '2026-08-01', periodEnd: '2026-08-31', status: 'parse_failed' };
+    await seedStatement(accountA1, 'msg-fail', { ...failed, pdfSha256: 'sha-shared' });
+    await seedStatement(accountA2, 'msg-fail', { ...failed, pdfSha256: 'sha-shared' });
+    await seedStatement(accountA1, 'msg-fail-old', failed);
+    const body = (await (await request('/api/reports/summary?month=2026-08')).json()) as {
+      statement_health: { status: string; n: number }[];
+      failed_statements: unknown[];
+    };
+    assert.equal(body.statement_health.find((s) => s.status === 'parse_failed')?.n, 2);
+    // รายการยังเป็นต่อแถว — แต่ละแถวมีปุ่มตั้งรหัสของบัญชีนั้น
+    assert.equal(body.failed_statements.length, 3);
   });
 
   await t.test('ข้อ 3: category-breakdown — 3-split นับครั้งเดียวต่อหมวด, 0-split ตกไป category_id: null, ผลรวมเท่า money_out_satang', async () => {

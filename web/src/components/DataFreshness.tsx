@@ -40,7 +40,7 @@ export default function DataFreshness({ accounts }: { accounts: AccountCoverage[
     <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ alignItems: { sm: 'center' }, justifyContent: 'space-between', mb: 2 }}>
         <Typography variant="h2" sx={{ fontSize: '1.25rem' }}>ความสดของข้อมูลแต่ละบัญชี</Typography>
-        <Button component={Link} to="/accounts" variant="outlined" size="small" sx={{ alignSelf: { xs: 'flex-start', sm: 'auto' } }}>
+        <Button component={Link} to="/accounts#mailboxes-heading" variant="outlined" size="small" sx={{ alignSelf: { xs: 'flex-start', sm: 'auto' } }}>
           ดึงอีเมลใหม่ที่บัญชีของฉัน
         </Button>
       </Stack>
@@ -70,7 +70,7 @@ export default function DataFreshness({ accounts }: { accounts: AccountCoverage[
                 )}
                 <Typography variant="body2" color="text.secondary" sx={dataTextSx}>
                   {a.latest_txn_date ? `รายการล่าสุด ${formatDate(a.latest_txn_date)}${calm ? '' : ` (${ago(a.latest_txn_date)})`}` : 'ยังไม่มีรายการ'}
-                  {a.last_synced_at && ` · ซิงก์ล่าสุด ${formatDateTime(a.last_synced_at)}`}
+                  {a.last_synced_at && ` · ดึงอีเมลล่าสุด ${formatDateTime(a.last_synced_at)}`}
                 </Typography>
                 {a.statement_behind && !a.reauth_required_at && (
                   <Typography variant="body2" sx={{ ...dataTextSx, color: 'warning.main' }}>{behindText(a)}</Typography>

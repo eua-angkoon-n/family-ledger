@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { Alert, Box, Button, Skeleton, Stack, Typography, useMediaQuery } from '@mui/material';
 import { useColorScheme, type Theme } from '@mui/material/styles';
 import { BarChart } from '@mui/x-charts/BarChart';
@@ -36,7 +36,7 @@ import MonthPicker, { currentMonth, shiftMonth, validMonth } from '../components
 import SummaryCard, { summaryRowSx } from '../components/SummaryCard.js';
 import { dataTextSx, tokens } from '../theme.js';
 import { formatBaht, formatDate, formatDateTime, formatDayMonth, formatMonth } from '../format.js';
-import { LoadError, PageHeader } from '../ui.js';
+import { LoadError, PageHeader, useHashTarget } from '../ui.js';
 
 function monthsBack(month: string, count: number): { from: string; to: string } {
   const [y, m] = month.split('-').map(Number) as [number, number];
@@ -80,13 +80,19 @@ function IssueCount({ n }: { n: number }) {
   );
 }
 
-// error_reason ที่ worker เขียนจริง (src/worker.ts): decrypt_failed / pdftotext_failed / checksum_failed หรือข้อความ
-// exception ของ parser (เช่น "ไม่พบชนิด KBank statement") — มีแค่รหัสผ่าน PDF ที่ผู้ใช้แก้เองได้ที่หน้าบัญชีของฉัน
-// ที่เหลือเป็นเรื่องของ parser/เซิร์ฟเวอร์ จึงบอกให้แจ้งผู้ดูแล ไม่มีปุ่มที่กดแล้วแก้ไม่ได้ (ข้อความดิบไม่แสดง เลข #id พอให้ผู้ดูแลตามได้)
+// error_reason ที่ worker เขียนจริง (src/worker.ts): decrypt_failed / pdftotext_failed / account_ambiguous / checksum_failed
+// หรือข้อความ exception ของ parser (เช่น "ไม่พบชนิด KBank statement") — ปุ่มแก้มีแค่รหัสผ่าน PDF (`?edit=` เปิดฟอร์มตั้งรหัสใหม่ของบัญชีนั้น)
+// account_ambiguous = เลขบัญชีที่เห็นในไฟล์ตรงกับหลายบัญชีของผู้ใช้ (บันทึกซ้ำใต้ทุกบัญชีที่ตรง) ผู้ใช้แก้เองที่หน้าบัญชีของฉันได้
+// แต่ไม่ใช่ที่บัญชีเดียว จึงไม่มีปุ่ม ข้อความบอกทางแทน · ที่เหลือเป็นเรื่องของ parser/เซิร์ฟเวอร์ จึงบอกให้แจ้งผู้ดูแล
+// (ข้อความดิบไม่แสดง เลข #id พอให้ผู้ดูแลตามได้) · ไฟล์ที่เปิดได้แต่เลขบัญชีไม่ตรงบัญชีใดเลย = statement ของบัญชีที่ไม่ได้เพิ่ม
+// worker ข้ามไป ไม่ขึ้นในรายการนี้
 function failureInfo(s: FailedStatement): { text: string; selfFix: boolean } {
   const reason = typeof s.error_reason === 'string' ? s.error_reason : '';
   if (reason === 'decrypt_failed') return { text: 'เปิดไฟล์ไม่ได้ เพราะรหัสผ่าน PDF ไม่ตรง', selfFix: true };
   if (reason === 'pdftotext_failed') return { text: 'อ่านข้อความในไฟล์ไม่ได้ — แจ้งผู้ดูแล', selfFix: false };
+  if (reason === 'account_ambiguous') {
+    return { text: 'เลขบัญชีในไฟล์ตรงกับบัญชีของคุณมากกว่าหนึ่งบัญชี — ตรวจเลขบัญชีที่ตั้งไว้ในหน้าบัญชีของฉัน', selfFix: false };
+  }
   if (s.status === 'checksum_failed') return { text: 'ยอดรวมในไฟล์ไม่ตรงกับรายการ — แจ้งผู้ดูแล', selfFix: false };
   return { text: 'ธนาคารเปลี่ยนรูปแบบไฟล์ ระบบยังอ่านไม่ได้ — แจ้งผู้ดูแล', selfFix: false };
 }
@@ -158,6 +164,7 @@ const sectionHeadingSx = { fontSize: '1.25rem', mb: 1.5 } as const;
 export default function Dashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { search } = useLocation();
   // ?month= ที่พิมพ์ไม่ครบ/ผิดรูปแบบไม่ยิง request — ใช้เดือนปัจจุบันแทน (ไม่ replace URL ทิ้ง ค่าที่คำนวณได้คือสิ่งที่ใช้จริง)
   const month = validMonth(searchParams.get('month'), currentMonth()) ?? currentMonth();
   const setMonth = (m: string) => setSearchParams((prev) => { const next = new URLSearchParams(prev); next.set('month', m); return next; });
@@ -219,6 +226,11 @@ export default function Dashboard() {
   const overdue = plan?.payment_status.overdue_count ?? 0;
   const behindCount = coverage?.filter((a) => a.statement_behind).length ?? 0;
 
+  // ไปรายการไฟล์ที่มีปัญหาในหน้านี้ (แถบ "ต้องจัดการ" + การ์ดตัวนับสองใบ) ผ่าน router: ได้ location.key ใหม่ทุกครั้ง useHashTarget
+  // จึงเลื่อน+focus หัวรายการ (anchor ธรรมดาเป็น pop ที่ key "default" ซ้ำกับตอนเปิดหน้าตรงด้วย hash นี้ จึงถูกข้าม) — ส่ง search
+  // ไปด้วย ไม่งั้น ?month= หาย
+  const failuresLink = { search, hash: '#statement-failures' };
+
   // แถบ "ต้องจัดการ": เฉพาะเรื่องที่ > 0 เป็นลิงก์ไปที่แก้ได้ ไม่มีเรื่องเลย = ไม่แสดงทั้งแถบ
   // นับเมื่อทั้งสามแหล่งโหลดเสร็จ (ที่ล้มเหลวข้ามไป ส่วนของมันแสดง LoadError เอง) — ระหว่างเปลี่ยนเดือนถ้ารอบก่อนมีแถบ
   // จอง skeleton สูงเท่าปุ่มไว้ เนื้อหาด้านล่างจะไม่กระโดดขึ้นแล้วลง
@@ -226,7 +238,7 @@ export default function Dashboard() {
   const issues = issuesReady
     ? [
         { label: 'บิลเกินกำหนด', n: overdue, to: `/planning?month=${month}` },
-        { label: 'statement ที่มีปัญหา', n: parseFailed + checksumFailed, to: '#statement-failures' },
+        { label: 'statement ที่มีปัญหา', n: parseFailed + checksumFailed, to: failuresLink },
         { label: 'บัญชีข้อมูลช้า', n: behindCount, to: '#data-freshness' },
         { label: 'ยังไม่จัดหมวด', n: summary?.uncategorised_count ?? 0, to: txnLink({ uncategorised: '1' }) },
         { label: 'ยังไม่ตรวจ', n: summary?.unreviewed_count ?? 0, to: txnLink({ review_status: 'unreviewed' }) },
@@ -234,6 +246,10 @@ export default function Dashboard() {
     : [];
   const hadIssues = useRef(false);
   if (issuesReady) hadIssues.current = issues.length > 0;
+  // `/dashboard#statement-failures` (ผลดึงอีเมลที่มีไฟล์มีปัญหาในหน้าบัญชีของฉัน) — รอทุกส่วนเหนือรายการ (แถบสถานะข้อมูล,
+  // แถบต้องจัดการ, การ์ด) โหลดจบ ไม่งั้นรายการเลื่อนหนีหลังเลื่อนไปแล้ว
+  const failuresRef = useRef<HTMLDivElement>(null);
+  useHashTarget('#statement-failures', issuesReady, failuresRef, 'statement-failures-heading');
 
   // กราฟว่างเพราะ statement ยังไม่มา ใช้ข้อความเดียวกับบรรทัดสถานะด้านบน แทน "ยังไม่มีข้อมูล" กลาง ๆ
   const pendingMessage = (fromMonth: string): string | undefined => {
@@ -284,9 +300,9 @@ export default function Dashboard() {
           // role="status" ไม่ใช่ alert (ค่าเริ่มต้นของ Alert): เป็นสถานะของหน้า ไม่ใช่เหตุด่วนที่ต้องขัดจังหวะ screen reader
           // ปุ่มเป็น primary เพราะเป็นทางออกเดียวของสถานะนี้
           <Alert severity="info" variant="outlined" role="status">
-            ยังไม่มีรายการจาก statement ในระบบ — เพิ่มบัญชีหรือสั่งดึงอีเมลที่หน้าบัญชีของฉัน
+            ยังไม่มีรายการจาก statement ในระบบ — เพิ่มบัญชี หรือกด "ดึงอีเมลใหม่" ที่หน้าบัญชีของฉัน
             <Box sx={{ mt: 1 }}>
-              <Button component={Link} to="/accounts" variant="contained" size="small">ไปที่บัญชีของฉัน</Button>
+              <Button component={Link} to="/accounts#mailboxes-heading" variant="contained" size="small">ไปที่บัญชีของฉัน</Button>
             </Box>
           </Alert>
         ) : latestMonth < month ? (
@@ -323,8 +339,8 @@ export default function Dashboard() {
           {issues.map((i) => {
             // span ครอบ: Button เป็น inline-flex ช่องว่างล้วนระหว่างลูก flex ถูกทิ้ง ป้ายกับตัวเลขจะติดกัน
             const label = <span>{i.label} <Box component="span" sx={dataTextSx}>{i.n.toLocaleString('th-TH')}</Box></span>;
-            // ส่วนในหน้าเดียวกันเป็น anchor ธรรมดา (router ไม่เลื่อนไปหา #id ให้)
-            return i.to.startsWith('#') ? (
+            // #statement-failures เป็น failuresLink (ผ่าน router) · #data-freshness ยังไม่มี useHashTarget จึงเป็น anchor ธรรมดาให้ browser เลื่อนเอง (router ไม่เลื่อนไปหา #id ให้)
+            return typeof i.to === 'string' && i.to.startsWith('#') ? (
               <Button key={i.label} href={i.to} variant="outlined" color="warning" size="small" endIcon={<ChevronRightRounded />}>{label}</Button>
             ) : (
               <Button key={i.label} component={Link} to={i.to} variant="outlined" color="warning" size="small" endIcon={<ChevronRightRounded />}>{label}</Button>
@@ -442,7 +458,7 @@ export default function Dashboard() {
                   value={summary && <IssueCount n={parseFailed} />}
                   caption="ไฟล์"
                   captionInline
-                  to={parseFailed > 0 ? '#statement-failures' : undefined}
+                  to={parseFailed > 0 ? failuresLink : undefined}
                 />
                 <SummaryCard
                   dense
@@ -452,7 +468,7 @@ export default function Dashboard() {
                   value={summary && <IssueCount n={checksumFailed} />}
                   caption="ไฟล์"
                   captionInline
-                  to={checksumFailed > 0 ? '#statement-failures' : undefined}
+                  to={checksumFailed > 0 ? failuresLink : undefined}
                 />
                 <SummaryCard
                   dense
@@ -471,6 +487,7 @@ export default function Dashboard() {
                 // warning ให้ตรงกับการ์ดตัวนับด้านบน — แต่ละแถวบอกสาเหตุเป็นภาษาคน และมีปุ่มเฉพาะแถวที่ผู้ใช้แก้เองได้
                 // เป็น section ที่มีชื่อ ไม่ใช่ role="alert" (ค่าเริ่มต้นของ Alert) — รายการคงที่ ไม่ใช่เหตุด่วนให้ screen reader ขัดจังหวะ
                 <Alert
+                  ref={failuresRef}
                   id="statement-failures"
                   component="section"
                   role="region"
@@ -480,7 +497,7 @@ export default function Dashboard() {
                   // หลายบรรทัด: ไอคอนอยู่แนวหัวข้อ ไม่ลอยกลางกล่อง (theme ตั้ง Alert ให้จัดกลางสำหรับข้อความบรรทัดเดียว)
                   sx={{ mt: 2, scrollMarginTop: 80, alignItems: 'flex-start' }}
                 >
-                  <Typography component="h3" variant="h2" id="statement-failures-heading" sx={{ fontSize: '1rem', lineHeight: 1.5, mb: 1 }}>
+                  <Typography component="h3" variant="h2" id="statement-failures-heading" tabIndex={-1} sx={{ fontSize: '1rem', lineHeight: 1.5, mb: 1 }}>
                     statement ที่มีปัญหา — นับทุกเดือน ไม่ผูกกับเดือนที่เลือก
                   </Typography>
                   <Stack spacing={1}>
@@ -494,7 +511,7 @@ export default function Dashboard() {
                             {' · '}{s.account_nickname} · {info.text} · รับเมื่อ <Box component="span" sx={dataTextSx}>{formatDateTime(s.created_at)}</Box>
                           </Typography>
                           {info.selfFix && (
-                            <Button component={Link} to="/accounts" variant="outlined" color="inherit" size="small" sx={{ flexShrink: 0, alignSelf: { xs: 'flex-start', sm: 'center' } }}>
+                            <Button component={Link} to={`/accounts?edit=${s.bank_account_id}`} aria-label={`ตั้งรหัสผ่าน PDF ใหม่ ของ ${s.account_nickname}`} variant="outlined" color="inherit" size="small" sx={{ flexShrink: 0, alignSelf: { xs: 'flex-start', sm: 'center' } }}>
                               ตั้งรหัสผ่าน PDF ใหม่
                             </Button>
                           )}
@@ -502,7 +519,7 @@ export default function Dashboard() {
                       );
                     })}
                     {summary.failed_statements.length > 5 && (
-                      <Typography variant="body2">และอีก {summary.failed_statements.length - 5} ไฟล์</Typography>
+                      <Typography variant="body2">และอีก {summary.failed_statements.length - 5} รายการ</Typography>
                     )}
                   </Stack>
                 </Alert>

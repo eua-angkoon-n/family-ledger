@@ -76,8 +76,10 @@ reportsRouter.get('/reports/summary', requireUser(async (req, res, user) => {
   const summary = rows[0]!;
 
   // all-time ต่อ user ไม่ผูกกับเดือนที่เลือก — parse_failed/checksum_failed ไม่มี period ให้ผูกกับเดือนได้ (migration 002)
+  // นับเป็นไฟล์ (การ์ดแสดง "N ไฟล์") — ไฟล์เดียวที่ผูกบัญชีไม่ได้ถูกเขียน parse_failed ใต้หลายบัญชี (src/worker.ts)
+  // pdf_sha256 เป็น null ได้ในแถวเก่า นับแถวนั้นแยกตาม id
   const statementHealth = await query<{ status: string; n: number }>(
-    `select st.status, count(*)::int as n
+    `select st.status, count(distinct coalesce(st.pdf_sha256, st.id::text))::int as n
      from statement st join bank_account a on a.id = st.bank_account_id
      where a.user_id = $1
      group by st.status`,

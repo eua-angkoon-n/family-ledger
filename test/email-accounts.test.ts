@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
+import { existsSync } from 'node:fs';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { createTestDb } from './helpers/db.js';
 
@@ -23,12 +28,15 @@ test('email accounts: sync กับ token ที่ใช้ไม่ได้ 
   const { HttpError } = await import('../src/http.js');
   const { encrypt } = await import('../src/crypto.js');
   const { emailAccountsRouter } = await import('../src/routes/email-accounts.js');
+  const { countStatements, failedAccountTargets, matchAccounts, skipStatementFile, syncEmailAccount, writeParseFailed, writeParsedStatement, writePending } = await import('../src/worker.js');
 
   // Google ปลอมเฉพาะ token endpoint กับ messages.list — คำขออื่น (เรียก test server เอง) ส่งต่อ fetch จริง
   const realFetch = globalThis.fetch;
   let tokenResponse = () => Response.json({ access_token: 'access-token' });
   let tokenCalls = 0;
   const listQueries: string[] = [];
+  // listGate ค้างรอบ sync ไว้ที่ messages.list ให้ทดสอบการเรียกซ้อนได้แน่นอน ไม่ขึ้นกับจังหวะเวลา
+  let listGate: Promise<void> = Promise.resolve();
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input));
     if (url.href === 'https://oauth2.googleapis.com/token') {
@@ -37,6 +45,7 @@ test('email accounts: sync กับ token ที่ใช้ไม่ได้ 
     }
     if (url.href.startsWith('https://gmail.googleapis.com/gmail/v1/users/me/messages?')) {
       listQueries.push(url.searchParams.get('q')!);
+      await listGate;
       return Response.json({});
     }
     return realFetch(input, init);
@@ -96,6 +105,9 @@ test('email accounts: sync กับ token ที่ใช้ไม่ได้ 
     const startedAt = Date.now();
     const res = await sync();
     assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), {
+      messages_scanned: 0, statements_inserted: 0, statements_failed: 0, skipped: 0, already_running: false,
+    });
     const after = Math.floor((lastSynced.getTime() - 2 * 24 * 60 * 60 * 1000) / 1000);
     assert.deepEqual(listQueries.sort(), banks.map((b) => `from:${b.sender_email} after:${after}`).sort());
     const synced = (await mailbox()).last_synced_at!.getTime();
@@ -107,6 +119,56 @@ test('email accounts: sync กับ token ที่ใช้ไม่ได้ 
     const res = await sync({ full: true });
     assert.equal(res.status, 200);
     assert.deepEqual(listQueries.sort(), banks.map((b) => `from:${b.sender_email}`).sort());
+  });
+
+  const hold = () => {
+    let release!: () => void;
+    listGate = new Promise<void>((r) => (release = r));
+    return release;
+  };
+  const untilIdle = async () => {
+    // รอบที่ค้างอยู่จบเมื่อเรียกใหม่แล้วไม่ได้ already_running (ตัวที่เรียกนี้ก็ดึงแบบ incremental จบไปด้วย)
+    for (let i = 0; i < 200; i++) {
+      if (!(await syncEmailAccount(mailboxId)).already_running) return;
+      await delay(10);
+    }
+    assert.fail('sync ไม่จบใน 2 วินาที');
+  };
+
+  await t.test('ขอ full ระหว่างกำลังดึง → already_running แล้วรัน full ต่อท้ายเมื่อรอบแรกจบ', async () => {
+    const release = hold();
+    listQueries.length = 0;
+    const first = syncEmailAccount(mailboxId);
+    while (!listQueries.length) await delay(5);
+
+    const res = await sync({ full: true });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), {
+      messages_scanned: 0, statements_inserted: 0, statements_failed: 0, skipped: 0, already_running: true,
+    });
+
+    listQueries.length = 0;
+    release();
+    assert.equal((await first).already_running, false);
+    await untilIdle();
+    for (const b of banks) assert.ok(listQueries.includes(`from:${b.sender_email}`), `full ที่รอต้องค้น ${b.sender_email} โดยไม่มี after:`);
+  });
+
+  await t.test('ขอแบบไม่ full ระหว่างกำลังดึง → already_running และไม่ถูกจำไว้รันซ้ำ', async () => {
+    const release = hold();
+    const first = syncEmailAccount(mailboxId);
+    assert.equal((await syncEmailAccount(mailboxId)).already_running, true);
+    release();
+    await first;
+    // ถ้ามีรอบต่อท้าย มันเริ่ม (เข้า running) ทันทีใน finally ของรอบแรก — เรียกตอนนี้ต้องไม่ชน
+    assert.equal((await syncEmailAccount(mailboxId)).already_running, false);
+  });
+
+  await t.test('countStatements: ไฟล์ที่พัง (รวมไฟล์เดิมที่ยังพัง) ไม่นับเป็น statement ใหม่', () => {
+    // parse_failed ถูกเขียนทับทุกรอบที่เจอไฟล์เดิม — เคยนับเป็น inserted ทุกรอบ
+    assert.deepEqual(countStatements(['parse_failed']), { inserted: 0, failed: 1 });
+    assert.deepEqual(countStatements(['parse_failed', 'parse_failed', 'parsed', 'checksum_failed', 'pending']), { inserted: 2, failed: 3 });
+    assert.deepEqual(countStatements([]), { inserted: 0, failed: 0 });
   });
 
   await t.test('Google ล่มชั่วคราว (503) → 502 และไม่ตั้ง reauth_required_at', async () => {
@@ -135,5 +197,109 @@ test('email accounts: sync กับ token ที่ใช้ไม่ได้ 
     const rows = (await res.json()) as { id: number; reauth_required_at: string | null }[];
     assert.equal(res.status, 200);
     assert.ok(rows.find((r) => r.id === mailboxId)?.reauth_required_at);
+  });
+
+  await t.test('failedAccountTargets: ไฟล์ที่ผูกบัญชีไม่ได้ลงบัญชีตามชื่อไฟล์ ไม่งั้นลงทุกบัญชี', () => {
+    const a = { account_number: '123-4-56231-7' };
+    const b = { account_number: '999-9-99999-9' };
+    const file = 'statement_xxx-x-x6231-x.pdf';
+    assert.deepEqual(failedAccountTargets([a], 'anything.pdf'), [a]);
+    assert.deepEqual(failedAccountTargets([a, b], file), [a]);
+    assert.deepEqual(failedAccountTargets([a, b], 'statement.pdf'), [a, b]);
+  });
+
+  await t.test('matchAccounts: ไม่ตรงเลย = ข้าม, ตรงหลายบัญชี = กำกวม, โทเค็นแรกที่ตรงบัญชีเดียวชนะ', () => {
+    const a = { account_number: '123-4-56231-7' };
+    const b = { account_number: '9999962319' };
+    const c = { account_number: '111-1-11111-1' };
+    const mask = 'xxx-x-x6231-x';
+    assert.deepEqual(matchAccounts([a, c], [mask]), [a]);
+    assert.deepEqual(matchAccounts([c], [mask]), []);
+    assert.deepEqual(matchAccounts([a, b, c], [mask]), [a, b]);
+    assert.deepEqual(matchAccounts([a, b, c], [mask, '1234562317']), [a]);
+    assert.deepEqual(matchAccounts([a, b, c], []), []);
+  });
+
+  await t.test('อ่านสำเร็จ/พังซ้ำใต้บัญชีชุดใหม่/ข้ามไฟล์ → ล้าง parse_failed ของไฟล์เดียวกันใต้บัญชีอื่นในกล่องเดียวกันเท่านั้น', async () => {
+    const bankId = (await db.pool.query<{ id: number }>(`select id from bank where lower(name) = 'scb'`)).rows[0]!.id;
+    const otherMailbox = (
+      await db.pool.query<{ id: number }>(
+        `insert into email_account (user_id, email, refresh_token_enc) values ($1, 'other@example.com', $2) returning id`,
+        [userId, encrypt('refresh-token')],
+      )
+    ).rows[0]!.id;
+    const account = async (mailbox: number, no: string) =>
+      (await db.pool.query<{ id: number }>(
+        `insert into bank_account (user_id, bank_id, email_account_id, nickname, account_number, pdf_password_enc)
+         values ($1, $2, $3, $4, $4, $5) returning id`,
+        [userId, bankId, mailbox, no, encrypt('pw')],
+      )).rows[0]!.id;
+    const [a, b, c, other] = [
+      await account(mailboxId, '111-1-11111-1'),
+      await account(mailboxId, '222-2-22222-2'),
+      await account(mailboxId, '333-3-33333-3'),
+      await account(otherMailbox, '444-4-44444-4'),
+    ];
+    // แบบที่ worker เขียนเมื่อรหัสของทุกบัญชีเปิดไม่ได้: gmail id เดียวกันหลายบัญชี (unique ผูก bank_account_id จึงเขียนได้)
+    const failUnder = (accountId: number, sha: string) =>
+      db.pool.query(
+        `insert into statement (bank_account_id, gmail_message_id, gmail_attachment_id, pdf_sha256, status, error_detail)
+         values ($1, 'msg', 'att', $2, 'parse_failed', '{"reason":"decrypt_failed"}')`,
+        [accountId, sha],
+      );
+    const rows = async (sha: string) =>
+      (await db.pool.query<{ bank_account_id: number; status: string }>(
+        'select bank_account_id, status from statement where pdf_sha256 = $1 order by bank_account_id',
+        [sha],
+      )).rows;
+
+    for (const id of [a, b, other]) await failUnder(id, 'sha-parsed');
+    const parsed = {
+      layout: 'monthly' as const, accountNumber: '111-1-11111-1', periodStart: '2026-08-01', periodEnd: '2026-08-31',
+      openingBalanceSatang: 0, closingBalanceSatang: 0, transactions: [], checksumValid: true,
+    };
+    assert.equal(await writeParsedStatement(mailboxId, a, 'msg', 'att', 'sha-parsed', '/tmp/x.pdf', parsed), true);
+    // แถวของ a ถูกทับเป็น parsed (dedup `status <> 'parse_failed'` จะข้ามไฟล์นี้รอบหน้า), b หาย, กล่องอื่นไม่ถูกแตะ
+    assert.deepEqual(await rows('sha-parsed'), [
+      { bank_account_id: a, status: 'parsed' },
+      { bank_account_id: other, status: 'parse_failed' },
+    ]);
+
+    for (const id of [a, b]) await failUnder(id, 'sha-pending');
+    assert.equal(await writePending(mailboxId, c, 'msg', 'att', 'sha-pending', '/tmp/x.pdf', 'text'), true);
+    assert.deepEqual(await rows('sha-pending'), [{ bank_account_id: c, status: 'pending' }]);
+
+    // พังซ้ำแต่เป้าแคบลง (ชื่อไฟล์ชี้ a) → แถวของ b หาย, a ได้ reason ใหม่, กล่องอื่นไม่ถูกแตะ
+    for (const id of [a, b, other]) await failUnder(id, 'sha-refail');
+    assert.equal(await writeParseFailed(mailboxId, [a], 'msg', 'att', 'sha-refail', '/tmp/x.pdf', 'pdftotext_failed'), true);
+    assert.deepEqual(await rows('sha-refail'), [
+      { bank_account_id: a, status: 'parse_failed' },
+      { bank_account_id: other, status: 'parse_failed' },
+    ]);
+    const reason = (await db.pool.query<{ reason: string }>(
+      `select error_detail->>'reason' as reason from statement where pdf_sha256 = 'sha-refail' and bank_account_id = $1`,
+      [a],
+    )).rows[0]!.reason;
+    assert.equal(reason, 'pdftotext_failed');
+
+    // ข้ามไฟล์ (ฟังก์ชันเดียวกับที่ worker เรียก) → ล้างทุกแถวในกล่องนี้ และลบ PDF ที่ไม่มีแถวชี้
+    const dir = await mkdtemp(join(tmpdir(), 'ledger-skip-'));
+    const skipped = join(dir, 'msg_1.pdf');
+    await writeFile(skipped, '%PDF-');
+    for (const id of [a, b, other]) await failUnder(id, 'sha-skip');
+    await skipStatementFile(mailboxId, 'sha-skip', skipped);
+    assert.deepEqual(await rows('sha-skip'), [{ bank_account_id: other, status: 'parse_failed' }]);
+    assert.equal(existsSync(skipped), false, 'PDF ที่ข้ามต้องไม่ค้างบนดิสก์');
+
+    // ยังมีแถวชี้ path เดียวกัน (เช่นบัญชีที่ย้ายไปกล่องอื่นแล้ว) → ไม่ลบไฟล์
+    const kept = join(dir, 'msg_2.pdf');
+    await writeFile(kept, '%PDF-');
+    await db.pool.query(
+      `insert into statement (bank_account_id, gmail_message_id, gmail_attachment_id, pdf_sha256, raw_pdf_path, status)
+       values ($1, 'msg', 'att', 'sha-kept', $2, 'parsed')`,
+      [other, kept],
+    );
+    await skipStatementFile(mailboxId, 'sha-kept', kept);
+    assert.equal(existsSync(kept), true);
   });
 });

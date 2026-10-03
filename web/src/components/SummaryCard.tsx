@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, type To } from 'react-router-dom';
 import { Box, ButtonBase, IconButton, Paper, Skeleton, Stack, Tooltip, Typography } from '@mui/material';
 import type { SxProps, Theme } from '@mui/material/styles';
 import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded';
@@ -12,8 +12,11 @@ type SummaryCardProps = {
   icon?: ReactNode;
   value: ReactNode;
   caption?: ReactNode;
-  /** การ์ดที่เป็นทางไปหน้าอื่น — path ของ router (เป็นลิงก์จริง กดกลาง/เปิดแท็บใหม่ได้) หรือ `#id` ในหน้าเดียวกัน */
-  to?: string;
+  /**
+   * การ์ดที่เป็นทางไปหน้าอื่น — `To` ของ router (เป็นลิงก์จริง กดกลาง/เปิดแท็บใหม่ได้) · ส่วนในหน้าเดียวกันที่มี `useHashTarget`
+   * ส่ง `{ search, hash }` (The Deep Link Rule) ส่วน string `#id` = anchor ธรรมดาให้ browser เลื่อนเอง (ส่วนที่ไม่มี useHashTarget)
+   */
+  to?: To;
   /** action ที่ไม่ใช่การนำทาง (หน้าภาษียังใช้อยู่) — นำทางให้ใช้ `to` */
   onClick?: () => void;
   disabled?: boolean;
@@ -131,7 +134,7 @@ export default function SummaryCard({ title, icon, value, caption, to, onClick, 
       },
       '@media (prefers-reduced-motion: reduce)': { transition: 'none', '&:hover': { transform: 'none' } },
     };
-    if (to != null && to.startsWith('#')) return <ButtonBase href={to} sx={sx}>{content}</ButtonBase>;
+    if (typeof to === 'string' && to.startsWith('#')) return <ButtonBase href={to} sx={sx}>{content}</ButtonBase>;
     if (to != null) return <ButtonBase component={Link} to={to} sx={sx}>{content}</ButtonBase>;
     return <ButtonBase onClick={onClick} sx={sx}>{content}</ButtonBase>;
   }

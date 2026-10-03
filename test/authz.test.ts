@@ -173,9 +173,6 @@ test('cross-user authorization: Slice 4A endpoints', async (t) => {
     assert.equal(row.nickname, 'บัญชีทดสอบ');
   });
 
-  // หมายเหตุ: เคสนี้ PATCH สำเร็จจริง จะเห็น stderr "[worker] reprocess account=... ล้มเหลว" เพราะ
-  // backfill แบบ fire-and-forget ถอดรหัส 'enc:x' (ไม่ใช่ ciphertext จริง) ไม่ได้ — ถูก .catch() ดักไว้แล้ว
-  // ไม่ทำให้ test fail แค่ noise ที่คาดไว้ ไม่ต้องตามไล่
   await t.test('2b. PATCH /api/accounts/:id — ส่ง user_id ของ B มาในตัว ก็ยังแก้บัญชีตัวเองไม่เปลี่ยนเจ้าของ', async () => {
     await loginAs(userA);
     const res = await request(`/api/accounts/${accountA}`, json({ user_id: userB, nickname: 'ชื่อใหม่ A' }));
@@ -840,6 +837,9 @@ test('cross-user authorization: Slice 4A endpoints', async (t) => {
     assert.ok(onlyB.rows.length > 0 && onlyB.rows.every((r) => r.user_id === userB));
   });
 
+  // หมายเหตุ: POST และ PATCH pdf_password ในเคสนี้สั่งอ่านเมลใหม่ จะเห็น stderr "[worker] ... ล้มเหลว" เพราะ
+  // backfill แบบ fire-and-forget ถอดรหัส 'enc:refresh-token' (ไม่ใช่ ciphertext จริง) ไม่ได้ — ถูก .catch() ดักไว้แล้ว
+  // ไม่ทำให้ test fail แค่ noise ที่คาดไว้ ไม่ต้องตามไล่
   await t.test('44. audit_log ห้ามมีความลับ — สร้าง/แก้บัญชีธนาคารแล้วรหัสผ่าน PDF ต้องไม่หลุดเข้า log', async () => {
     await loginAs(userA);
     const created = await request('/api/accounts', post({
