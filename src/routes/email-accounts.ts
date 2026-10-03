@@ -26,7 +26,7 @@ emailAccountsRouter.post('/email-accounts/:id/sync', requireUser(async (req, res
   try {
     summary = await syncEmailAccount(emailAccountId, { full });
   } catch (e) {
-    if (e instanceof GmailReauthRequiredError) throw new HttpError(409, 'ต้องเชื่อม Gmail ใหม่ก่อนซิงก์กล่องนี้');
+    if (e instanceof GmailReauthRequiredError) throw new HttpError(409, 'ต้องเชื่อม Gmail ใหม่ก่อนดึงอีเมลของกล่องนี้');
     if (e instanceof GmailUnavailableError) {
       console.error(`[sync] mailbox=${emailAccountId}`, e);
       throw new HttpError(502, 'ติดต่อ Google ไม่ได้ชั่วคราว ลองใหม่ภายหลัง');

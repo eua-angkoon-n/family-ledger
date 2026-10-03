@@ -308,6 +308,13 @@ const theme = createTheme({
             '&.MuiButton-outlined': { backgroundColor: 'transparent', borderColor: theme.vars.palette.action.disabledBackground },
             '&.MuiButton-contained': { backgroundColor: theme.vars.palette.action.disabledBackground },
           },
+          // busy (+ aria-disabled) = ป้าย "กำลัง…" ที่ต้องอ่านได้ — action.disabled เหลือ ~1.5:1 ใช้สีตัวอักษรรอง (ยังดูไม่ active)
+          // outlined/text บน card/popover 4.88/5.66 · contained บนพื้น disabledBackground ตัวอักษรรองเหลือ 4.25 บน card
+          // (สว่าง) จึงใช้ text.primary: 5.11 บน card, 4.94 บน background — aria-disabled ที่ไม่ busy ยังเป็นสี disabled เดิม
+          '&[aria-disabled="true"][aria-busy="true"]': {
+            color: theme.vars.palette.text.secondary,
+            '&.MuiButton-contained': { color: theme.vars.palette.text.primary },
+          },
         }),
       },
     },

@@ -35,28 +35,56 @@ type Bank = {
 
 type BankAccountCandidate = { id: number; bank_id: number; account_number: string; pdf_password_enc: string };
 
-export type SyncSummary = { messages_scanned: number; statements_inserted: number; skipped: number };
+// ตรงกับ SyncSummary ใน web/src/api.ts — แก้ที่หนึ่งต้องแก้อีกที่
+export type SyncSummary = {
+  messages_scanned: number;
+  statements_inserted: number;
+  statements_failed: number;
+  skipped: number;
+  already_running: boolean;
+};
+
+type StatementStatus = 'pending' | 'parsed' | 'checksum_failed' | 'parse_failed';
+
+/** สถานะที่ไฟล์แนบของอีเมลหนึ่งฉบับจบลงในรอบนี้ → ยอดสรุป
+ *  ไฟล์ที่อ่านสำเร็จไปแล้วในรอบก่อนไม่อยู่ในรายการ (ข้ามด้วย pdf_sha256) แต่ไฟล์ที่ยังพังอยู่อยู่ทุกรอบ จึงนับเป็น failed ไม่ใช่ inserted */
+export function countStatements(statuses: StatementStatus[]): { inserted: number; failed: number } {
+  const failed = statuses.filter((s) => s === 'parse_failed' || s === 'checksum_failed').length;
+  return { inserted: statuses.length - failed, failed };
+}
 
 /** ขอ access token ไม่สำเร็จแบบชั่วคราว (5xx/เน็ตหลุด) — แยกจาก error ของ DB/โค้ด ให้ route ตอบ 502 ได้ถูกตัว */
 export class GmailUnavailableError extends Error {}
 
 // ponytail: กัน sync ซ้อนต่อกล่องอีเมลเดียวด้วย memory Set พอสำหรับ instance เดียว
 // ถ้าสเกลหลาย instance ค่อยย้ายไป pg_advisory_lock ต่อ email_account_id
+// pendingFull ก็อยู่ใน memory เหมือนกัน — โปรเซสตายระหว่างรอ = คำขอ full ที่ค้างหาย (รอบชั่วโมงยังดึงแบบ incremental ต่อ)
 const running = new Set<number>();
+const pendingFull = new Set<number>();
 
 export async function syncEmailAccount(emailAccountId: number, opts: { full?: boolean } = {}): Promise<SyncSummary> {
-  const empty = { messages_scanned: 0, statements_inserted: 0, skipped: 0 };
-  if (running.has(emailAccountId)) return empty;
+  if (running.has(emailAccountId)) {
+    // ขอ full ชนรอบที่กำลังวิ่ง (เช่น เพิ่งแก้รหัสผ่าน PDF ระหว่างรอบชั่วโมง) — จำไว้รันต่อท้าย ไม่งั้นคำขอหายเงียบ
+    if (opts.full) pendingFull.add(emailAccountId);
+    return { messages_scanned: 0, statements_inserted: 0, statements_failed: 0, skipped: 0, already_running: true };
+  }
   running.add(emailAccountId);
   try {
     return await doSync(emailAccountId, opts.full === true);
   } finally {
     running.delete(emailAccountId);
+    if (pendingFull.delete(emailAccountId)) {
+      syncEmailAccount(emailAccountId, { full: true }).catch((e) =>
+        console.error(`[worker] full ที่รอต่อท้าย mailbox=${emailAccountId} ล้มเหลว:`, e),
+      );
+    }
   }
 }
 
 async function doSync(emailAccountId: number, requestFull: boolean): Promise<SyncSummary> {
-  const summary: SyncSummary = { messages_scanned: 0, statements_inserted: 0, skipped: 0 };
+  const summary: SyncSummary = {
+    messages_scanned: 0, statements_inserted: 0, statements_failed: 0, skipped: 0, already_running: false,
+  };
 
   const { rows } = await query<{
     id: number; user_id: number; refresh_token_enc: string; last_synced_at: Date | null; reauth_required_at: Date | null;
@@ -102,10 +130,11 @@ async function doSync(emailAccountId: number, requestFull: boolean): Promise<Syn
   for (const messageId of messageIds) {
     summary.messages_scanned++;
     try {
-      const inserted = await processMessage(accessToken, messageId, emailAccountId, banks);
-      // statements_inserted นับไฟล์ ไม่ใช่อีเมล เพราะ SCB ย้อนหลังแนบหลาย statement ใน message เดียว
+      const { inserted, failed } = countStatements(await processMessage(accessToken, messageId, emailAccountId, banks));
+      // statements_* นับไฟล์ ไม่ใช่อีเมล เพราะ SCB ย้อนหลังแนบหลาย statement ใน message เดียว
       summary.statements_inserted += inserted;
-      if (inserted === 0) summary.skipped++;
+      summary.statements_failed += failed;
+      if (!inserted && !failed) summary.skipped++;
     } catch (e) {
       console.error(`[worker] mailbox=${emailAccountId} message=${messageId} ล้มเหลว:`, e);
       summary.skipped++;
@@ -315,7 +344,7 @@ async function processMessage(
   messageId: string,
   emailAccountId: number,
   banks: Bank[],
-): Promise<number> {
+): Promise<StatementStatus[]> {
   const message = await getMessage(accessToken, messageId);
   const payload: GmailPayload = message.payload;
   const headers = payload.headers ?? [];
@@ -324,18 +353,18 @@ async function processMessage(
   const senderAddr = fromAddress(from);
 
   const bank = banks.find((b) => b.sender_email.toLowerCase() === senderAddr);
-  if (!bank) return 0;
+  if (!bank) return [];
 
   if (!dkimPasses(headers, bank.sender_domain)) {
     console.warn(`[worker] DKIM ไม่ผ่าน mailbox=${emailAccountId} message=${messageId} bank=${bank.name}`);
-    return 0;
+    return [];
   }
 
   const subjectOk = new RegExp(bank.subject_monthly).test(subject) || new RegExp(bank.subject_ondemand).test(subject);
-  if (!subjectOk) return 0;
+  if (!subjectOk) return [];
 
   const attachments = pickPdfAttachments(payload, bank.attachment_filename_pattern);
-  if (!attachments.length) return 0;
+  if (!attachments.length) return [];
 
   const candidates = (
     await query<BankAccountCandidate>(
@@ -347,12 +376,12 @@ async function processMessage(
 
   if (!candidates.length) {
     console.warn(`[worker] ไม่มีบัญชีที่ผูกกับธนาคารนี้ mailbox=${emailAccountId} bank=${bank.name}`);
-    return 0;
+    return [];
   }
 
   const dir = join(env.pdfStorageDir, String(emailAccountId));
   await mkdir(dir, { recursive: true });
-  let inserted = 0;
+  const statuses: StatementStatus[] = [];
 
   for (let index = 0; index < attachments.length; index++) {
     const attachment = attachments[index]!;
@@ -363,12 +392,16 @@ async function processMessage(
     }
     const pdfSha256 = createHash('sha256').update(pdfBuf).digest('hex');
     // Gmail attachmentId เปลี่ยนได้ระหว่าง messages.get; hash ของไฟล์ต้นฉบับคือ identity ที่คงที่
-    const duplicate = await query(
-      `select 1 from statement s join bank_account a on a.id = s.bank_account_id
+    const duplicate = await query<{ status: StatementStatus }>(
+      `select s.status from statement s join bank_account a on a.id = s.bank_account_id
        where a.email_account_id = $1 and s.pdf_sha256 = $2 and s.status <> 'parse_failed'`,
       [emailAccountId, pdfSha256],
     );
-    if (duplicate.rowCount) continue;
+    if (duplicate.rowCount) {
+      // checksum_failed ไม่ถูกลองใหม่ แต่ยังเป็นไฟล์ที่พังอยู่ — นับให้ผู้ใช้เห็น ส่วนไฟล์ที่อ่านแล้วไม่นับซ้ำ
+      if (duplicate.rows.some((r) => r.status === 'checksum_failed')) statuses.push('checksum_failed');
+      continue;
+    }
     const pdfPath = join(dir, `${messageId}_${index + 1}.pdf`);
     await writeFile(pdfPath, pdfBuf);
 
@@ -376,7 +409,7 @@ async function processMessage(
       const extracted = await extractText(pdfPath, decrypt(account.pdf_password_enc));
       if (!extracted.ok) {
         if (candidates.length === 1) {
-          if (await writeParseFailed(account.id, messageId, attachment.attachmentId, pdfSha256, pdfPath, extracted.reason)) inserted++;
+          if (await writeParseFailed(account.id, messageId, attachment.attachmentId, pdfSha256, pdfPath, extracted.reason)) statuses.push('parse_failed');
           break;
         }
         continue;
@@ -397,7 +430,7 @@ async function processMessage(
             pdfSha256,
             pdfPath,
             error instanceof Error ? error.message : 'parse_failed',
-          )) inserted++;
+          )) statuses.push('parse_failed');
           break;
         }
         const resolved = resolveAccount(candidates, parsed.accountNumber);
@@ -405,19 +438,19 @@ async function processMessage(
           console.warn(`[worker] เลขบัญชีใน statement ไม่ตรงหรือกำกวม mailbox=${emailAccountId} message=${messageId}`);
           break;
         }
-        if (await writeParsedStatement(resolved.id, messageId, attachment.attachmentId, pdfSha256, pdfPath, parsed)) inserted++;
+        if (await writeParsedStatement(resolved.id, messageId, attachment.attachmentId, pdfSha256, pdfPath, parsed)) statuses.push(parsed.checksumValid ? 'parsed' : 'checksum_failed');
         break;
       }
 
       if (candidates.length === 1) {
-        if (await writePending(account.id, messageId, attachment.attachmentId, pdfSha256, pdfPath, extracted.text)) inserted++;
+        if (await writePending(account.id, messageId, attachment.attachmentId, pdfSha256, pdfPath, extracted.text)) statuses.push('pending');
         break;
       }
       const resolved = findMaskedAccountCandidates(extracted.text)
         .map((token) => resolveAccount(candidates, token))
         .find((candidate): candidate is BankAccountCandidate => candidate != null);
       if (resolved) {
-        if (await writePending(resolved.id, messageId, attachment.attachmentId, pdfSha256, pdfPath, extracted.text)) inserted++;
+        if (await writePending(resolved.id, messageId, attachment.attachmentId, pdfSha256, pdfPath, extracted.text)) statuses.push('pending');
         break;
       }
       console.warn(
@@ -426,7 +459,7 @@ async function processMessage(
       break;
     }
   }
-  return inserted;
+  return statuses;
 }
 
 export function startWorker(): void {
@@ -439,7 +472,7 @@ export function startWorker(): void {
         const summary = await syncEmailAccount(id);
         if (summary.messages_scanned) {
           console.log(
-            `[worker] mailbox=${id} scanned=${summary.messages_scanned} inserted=${summary.statements_inserted} skipped=${summary.skipped}`,
+            `[worker] mailbox=${id} scanned=${summary.messages_scanned} inserted=${summary.statements_inserted} failed=${summary.statements_failed} skipped=${summary.skipped}`,
           );
         }
       } catch (e) {

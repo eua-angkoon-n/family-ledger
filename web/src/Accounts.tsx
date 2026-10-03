@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Alert,
   Box,
@@ -32,7 +33,7 @@ import MailOutlineRounded from '@mui/icons-material/MailOutlineRounded';
 import SyncRounded from '@mui/icons-material/SyncRounded';
 import VisibilityOffRounded from '@mui/icons-material/VisibilityOffRounded';
 import VisibilityRounded from '@mui/icons-material/VisibilityRounded';
-import { del, patch, post, req, type Account, type Bank, type EmailAccount, type SyncSummary, type TaxEntity, type TaxEntityType } from './api.js';
+import { del, patch, post, req, type Account, type AccountSaveResponse, type Bank, type EmailAccount, type SyncSummary, type TaxEntity, type TaxEntityType } from './api.js';
 import { TAX_PAGES_ENABLED } from './features.js';
 import { createFormFieldChangeHandler } from './form.js';
 import { formatDateTime } from './format.js';
@@ -87,12 +88,19 @@ export default function Accounts() {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
+  // บัญชีที่ถามค้างไว้จน dialog ปิดสนิท — ไม่งั้นชื่อในคำถามว่างเป็น “” ระหว่าง fade ออก
   const [archiving, setArchiving] = useState<Account | null>(null);
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const [archiveError, setArchiveError] = useState('');
   const [syncing, setSyncing] = useState<ReadonlySet<number>>(new Set());
   const [notice, setNotice] = useState<Notice | null>(null);
   // ผลสำเร็จที่เกิดตอน modal/dialog เปิดอยู่ — `#root` เป็น aria-hidden จนปิดสนิท จึงแสดงจาก onExited (เหมือนหน้าแผนผ่อน)
   const pendingNoticeRef = useRef<Notice | null>(null);
+  // dialog ใด ๆ ของหน้าเปิดอยู่ (จนถึง onExited) — ผลที่มาทีหลังแบบ async (ดึงอีเมล) จึงเข้าคิวแทนการขึ้นใต้ #root ที่ aria-hidden
+  const dialogOpenRef = useRef(false);
+  // เปิดฟอร์มแก้ไขจากลิงก์ `?edit=` (ไฟล์ที่เปิดไม่ได้บนแดชบอร์ด) — focus ช่องรหัสผ่าน PDF แทนช่องแรก
+  const [focusPassword, setFocusPassword] = useState(false);
+  const navigate = useNavigate();
   const addButtonRef = useRef<HTMLButtonElement>(null);
   // แถวที่เก็บเข้าคลังหายไปพร้อมปุ่มต้นทาง — หลัง dialog ปิดสนิทส่ง focus ไปปุ่ม "เพิ่มบัญชี"
   const focusAddAfterExitRef = useRef(false);
@@ -132,24 +140,31 @@ export default function Accounts() {
   const retry = () => void reload();
 
   const flushNotice = () => {
+    dialogOpenRef.current = false;
     const pending = pendingNoticeRef.current;
     pendingNoticeRef.current = null;
     if (pending) setNotice(pending);
+  };
+  const announce = (next: Notice) => {
+    if (dialogOpenRef.current) pendingNoticeRef.current = next;
+    else setNotice(next);
   };
 
   const setFormField = createFormFieldChangeHandler(setForm);
   const setEntityFormField = createFormFieldChangeHandler(setEntityForm);
 
-  const openForm = (id: number | null, values: typeof EMPTY) => {
+  const openForm = (id: number | null, values: typeof EMPTY, focusPdf = false) => {
     setEditingId(id);
     setForm(values);
     setFormInitial(values);
     setShowPassword(false);
     setFormError('');
+    setFocusPassword(focusPdf);
+    dialogOpenRef.current = true;
     setModalOpen(true);
   };
 
-  const openEdit = (account: Account) => openForm(account.id, {
+  const openEdit = (account: Account, focusPdf = false) => openForm(account.id, {
     bank_id: String(account.bank_id),
     email_account_id: String(account.email_account_id),
     nickname: account.nickname,
@@ -157,7 +172,42 @@ export default function Accounts() {
     pdf_password: '',
     promptpay_id: account.promptpay_id ?? '',
     default_tax_entity_id: account.default_tax_entity_id == null ? '' : String(account.default_tax_entity_id),
-  });
+  }, focusPdf);
+
+  const openArchive = (account: Account) => {
+    setArchiveError('');
+    setArchiving(account);
+    dialogOpenRef.current = true;
+    setArchiveOpen(true);
+  };
+
+  // `/accounts?edit=<id>` เปิดฟอร์มแก้บัญชีนั้นหลังโหลดรายชื่อเสร็จ แล้วลบ query ทิ้ง (refresh/back ไม่เปิดซ้ำ)
+  // ไม่พบ (เก็บเข้าคลังแล้ว/ลิงก์เก่า) = แจ้งเฉย ๆ ไม่ใช่ error
+  const [searchParams, setSearchParams] = useSearchParams();
+  const editParam = searchParams.get('edit');
+  useEffect(() => {
+    if (editParam == null || accounts == null) return;
+    setSearchParams((params) => {
+      params.delete('edit');
+      return params;
+    }, { replace: true });
+    const target = accounts.find((a) => String(a.id) === editParam);
+    if (target) openEdit(target, true);
+    else setNotice({ message: 'ไม่พบบัญชีที่ลิงก์ชี้มา อาจถูกเก็บเข้าคลังไปแล้ว', severity: 'info' });
+  }, [editParam, accounts]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // `/accounts#mailboxes-heading` (ข้อมูลช้า → ดึงอีเมล) — router ไม่เลื่อนให้ตอน client navigation และส่วนนี้อยู่ใต้ตาราง
+  // ที่ยังเป็น skeleton จึงรอทั้งสองส่วนโหลดจบ (หรือพัง) ก่อนเลื่อน แล้ว focus หัวข้อให้ screen reader รู้ว่ามาถึงไหน
+  const location = useLocation();
+  const mailboxesSectionRef = useRef<HTMLElement>(null);
+  const handledHashKeyRef = useRef<string | null>(null);
+  const sectionsSettled = (accounts != null || loadErrors.accounts != null) && (mailboxes != null || loadErrors.mailboxes != null);
+  useEffect(() => {
+    if (location.hash !== '#mailboxes-heading' || !sectionsSettled || handledHashKeyRef.current === location.key) return;
+    handledHashKeyRef.current = location.key;
+    mailboxesSectionRef.current?.scrollIntoView({ block: 'start' });
+    document.getElementById('mailboxes-heading')?.focus({ preventScroll: true });
+  }, [location.hash, location.key, sectionsSettled]);
 
   const saveAccount = async () => {
     setFormError('');
@@ -167,10 +217,16 @@ export default function Accounts() {
     // ห้ามส่ง '' — server อ่านเป็นเลข 0 แล้วตอบ 400
     const body = TAX_PAGES_ENABLED ? { ...fields, default_tax_entity_id: taxEntityId ? Number(taxEntityId) : null } : fields;
     try {
-      if (editingId) await patch(`/api/accounts/${editingId}`, body);
-      else await post('/api/accounts', body);
+      const saved = editingId
+        ? await patch<AccountSaveResponse>(`/api/accounts/${editingId}`, body)
+        : await post<AccountSaveResponse>('/api/accounts', body);
+      // resync = server เริ่มอ่าน statement ทั้งกล่องใหม่เบื้องหลัง (เพิ่มบัญชี / เปลี่ยนธนาคาร เลขบัญชี รหัสผ่าน PDF หรือกล่องอีเมล)
+      const email = mailboxes?.find((m) => m.id === saved.email_account_id)?.email;
+      const done = editingId ? 'บันทึกการแก้ไขแล้ว' : 'เพิ่มบัญชีธนาคารแล้ว';
       pendingNoticeRef.current = {
-        message: editingId ? 'บันทึกการแก้ไขบัญชีแล้ว' : 'เพิ่มบัญชีธนาคารแล้ว ระบบกำลังดึง statement ย้อนหลังให้',
+        message: saved.resync
+          ? `${done} ระบบกำลังอ่าน statement ของกล่อง ${email ?? 'อีเมลนี้'} ใหม่ทั้งหมด ผลจะเข้ามาในไม่กี่นาที`
+          : done,
         severity: 'success',
       };
       setModalOpen(false);
@@ -192,7 +248,7 @@ export default function Accounts() {
       setAccounts((rows) => rows && rows.filter((a) => a.id !== archivedId));
       pendingNoticeRef.current = { message: `เก็บบัญชี “${archiving.nickname}” เข้าคลังแล้ว`, severity: 'success' };
       focusAddAfterExitRef.current = true;
-      setArchiving(null);
+      setArchiveOpen(false);
     } catch (e) {
       setArchiveError(errorText(e, 'เก็บบัญชีเข้าคลังไม่สำเร็จ'));
     } finally {
@@ -217,24 +273,29 @@ export default function Accounts() {
       const summary = await post<SyncSummary>(`/api/email-accounts/${mailbox.id}/sync`, {});
       const rows = await fetchMailboxes();
       if (rows) setMailboxes(rows);
-      const fresh = rows?.find((m) => m.id === mailbox.id);
-      const count = summary.statements_inserted;
-      // กล่องที่กำลังดึงอยู่แล้ว (เช่นดึงย้อนหลังหลังเพิ่มบัญชี) server ตอบ 0 ทันทีโดยไม่ขยับเวลาดึงล่าสุด
-      // ส่วนการดึงจริงขยับเวลานี้ทุกครั้ง — แยกจาก "ไม่มี statement ใหม่" ได้ด้วยเวลานี้
-      const alreadyRunning = count === 0 && summary.messages_scanned === 0 && fresh != null && fresh.last_synced_at === mailbox.last_synced_at;
-      setNotice(
-        count > 0
-          ? { message: `${mailbox.email}: ได้ statement ใหม่ ${count.toLocaleString('th-TH')} ไฟล์`, severity: 'success' }
-          : alreadyRunning
-            ? { message: `${mailbox.email}: ระบบกำลังดึงอีเมลของกล่องนี้อยู่แล้ว statement ที่พบจะเข้ามาเอง ลองดูอีกครั้งในอีกสักครู่`, severity: 'info' }
-            : { message: `${mailbox.email}: ไม่มี statement ใหม่`, severity: 'success' },
+      const read = summary.statements_inserted;
+      const failed = summary.statements_failed;
+      const readText = `อ่าน statement ใหม่สำเร็จ ${read.toLocaleString('th-TH')} ไฟล์`;
+      announce(
+        summary.already_running
+          ? { message: `${mailbox.email}: ระบบกำลังดึงอีเมลของกล่องนี้อยู่แล้ว statement ที่พบจะเข้ามาเอง`, severity: 'info' }
+          // นับรวมไฟล์เดิมที่ยังเปิดไม่ได้ — สาเหตุและทางแก้ทีละไฟล์อยู่ที่แดชบอร์ด (มี action = snackbar ไม่หายเอง)
+          : failed > 0
+            ? {
+                message: `${mailbox.email}: ${read > 0 ? `${readText} · ` : ''}เปิดไม่ได้ ${failed.toLocaleString('th-TH')} ไฟล์ ดูสาเหตุที่แดชบอร์ด`,
+                severity: 'warning',
+                action: { label: 'ไปที่แดชบอร์ด', onClick: () => navigate('/dashboard') },
+              }
+            : read > 0
+              ? { message: `${mailbox.email}: ${readText}`, severity: 'success' }
+              : { message: `${mailbox.email}: ไม่มี statement ใหม่`, severity: 'success' },
       );
     } catch (e) {
       // 409 = server ตั้งให้กล่องนี้ต้องเชื่อม Gmail ใหม่แล้ว โหลดซ้ำแล้วแถวเปลี่ยนเป็นปุ่ม "เชื่อม Gmail ใหม่" เอง · 502 = ข้อความของ server
       const rows = await fetchMailboxes();
       if (rows?.find((m) => m.id === mailbox.id)?.reauth_required_at) focusReconnectRef.current = mailbox.id;
       if (rows) setMailboxes(rows);
-      setNotice({ message: errorText(e, 'ดึงอีเมลไม่สำเร็จ'), severity: 'error' });
+      announce({ message: errorText(e, 'ดึงอีเมลไม่สำเร็จ'), severity: 'error' });
     } finally {
       setSyncingFor(mailbox.id, false);
     }
@@ -245,6 +306,7 @@ export default function Accounts() {
     setEntityForm(values);
     setEntityInitial(values);
     setEntityError('');
+    dialogOpenRef.current = true;
     setEntityModalOpen(true);
   };
 
@@ -287,12 +349,17 @@ export default function Accounts() {
     TAX_PAGES_ENABLED && taxEntities == null && loadErrors.taxEntities,
   ].filter(Boolean).join(' • ');
 
+  // กล่องเดียว (หรือไม่มี) = ทุกบัญชีอยู่กล่องเดียวกัน คอลัมน์อีเมลซ้ำทุกแถวเปล่า ๆ · โหลดกล่องไม่ได้ = คงคอลัมน์ไว้
+  const showEmail = mailboxes == null || mailboxes.length > 1;
+  // ยังไม่มีกล่องอีเมลเลย = ฟอร์มเพิ่มบัญชีเลือกกล่องไม่ได้ ทางแรกจึงเป็นเชื่อม Gmail
+  const noMailbox = mailboxes != null && mailboxes.length === 0;
+
   return (
     <Box>
       <PageHeader
         level={1}
         id="accounts-heading"
-        title="บัญชีธนาคารของฉัน"
+        title="บัญชีของฉัน"
         description="จัดการบัญชีและกล่องอีเมลที่ระบบใช้รับข้อมูลจาก statement"
         action={<Button ref={addButtonRef} variant="contained" startIcon={<AddRounded />} onClick={() => openForm(null, EMPTY)} sx={{ whiteSpace: 'nowrap' }}>เพิ่มบัญชี</Button>}
       />
@@ -303,11 +370,15 @@ export default function Accounts() {
             headingLevel={2}
             icon={<AccountBalanceRounded sx={{ fontSize: 40 }} />}
             title="ยังไม่มีบัญชีธนาคาร"
-            description="เพิ่มบัญชีและเลือกกล่องอีเมลที่รับ statement เพื่อเริ่มนำเข้ารายการโดยอัตโนมัติ"
-            action={<Button variant="contained" startIcon={<AddRounded />} onClick={() => openForm(null, EMPTY)}>เพิ่มบัญชีแรก</Button>}
+            description={noMailbox
+              ? 'เชื่อมกล่อง Gmail ที่รับ statement จากธนาคารก่อน แล้วจึงเพิ่มบัญชีและเลือกกล่องนั้น ระบบจะนำเข้ารายการให้อัตโนมัติ'
+              : 'เพิ่มบัญชีและเลือกกล่องอีเมลที่รับ statement เพื่อเริ่มนำเข้ารายการโดยอัตโนมัติ'}
+            action={noMailbox
+              ? <Button variant="contained" startIcon={<MailOutlineRounded />} href="/auth/google?add=1">เชื่อม Gmail</Button>
+              : <Button variant="contained" startIcon={<AddRounded />} onClick={() => openForm(null, EMPTY)}>เพิ่มบัญชีแรก</Button>}
           />
         ) : (
-          // < md เหลือ ชื่อเล่น · จัดการ — ธนาคาร · เลขบัญชี และกล่องอีเมลพับเป็นบรรทัดรองใต้ชื่อ (Tables ใน DESIGN.md)
+          // < md เหลือ ชื่อเล่น · จัดการ — ธนาคาร · เลขบัญชี และกล่องอีเมล (เมื่อมีหลายกล่อง) พับเป็นบรรทัดรองใต้ชื่อ (Tables ใน DESIGN.md)
           // ไม่มี minWidth จึงไม่ล้นกล่องทุกขนาดจอ — ไม่ใส่ tabIndex (กล่องที่ไม่มีอะไรให้เลื่อนไม่ควรเป็นจุดแวะของ Tab แบบหน้า กยศ.)
           <TableContainer
             component={Paper}
@@ -323,7 +394,7 @@ export default function Accounts() {
                   <TableCell>ชื่อเล่น</TableCell>
                   <TableCell sx={MD_UP}>ธนาคาร</TableCell>
                   <TableCell sx={MD_UP}>เลขที่บัญชี</TableCell>
-                  <TableCell sx={MD_UP}>กล่องอีเมล</TableCell>
+                  {showEmail && <TableCell sx={MD_UP}>กล่องอีเมล</TableCell>}
                   <TableCell align="right">จัดการ</TableCell>
                 </TableRow>
               </TableHead>
@@ -336,12 +407,12 @@ export default function Accounts() {
                         <Typography variant="body2" color="text.secondary">
                           {account.bank_name}{SEP}<Box component="span" sx={dataTextSx}>{account.account_number}</Box>
                         </Typography>
-                        <Typography variant="body2" color="text.secondary" sx={dataTextSx}>{account.email}</Typography>
+                        {showEmail && <Typography variant="body2" color="text.secondary" sx={dataTextSx}>{account.email}</Typography>}
                       </Box>
                     </TableCell>
                     <TableCell sx={MD_UP}>{account.bank_name}</TableCell>
                     <TableCell sx={{ ...MD_UP, ...dataTextSx }}>{account.account_number}</TableCell>
-                    <TableCell sx={{ ...MD_UP, ...dataTextSx, overflowWrap: 'anywhere' }}>{account.email}</TableCell>
+                    {showEmail && <TableCell sx={{ ...MD_UP, ...dataTextSx, overflowWrap: 'anywhere' }}>{account.email}</TableCell>}
                     <TableCell align="right" sx={{ py: 0.5 }}>
                       <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end', alignItems: 'center' }}>
                         <RowIconButton label={`แก้ไข ${account.nickname}`} tooltip="แก้ไข" onClick={() => openEdit(account)}>
@@ -352,10 +423,7 @@ export default function Accounts() {
                           label={`เก็บเข้าคลัง ${account.nickname}`}
                           tooltip="เก็บเข้าคลัง"
                           color="error"
-                          onClick={() => {
-                            setArchiveError('');
-                            setArchiving(account);
-                          }}
+                          onClick={() => openArchive(account)}
                         >
                           <ArchiveOutlined fontSize="small" />
                         </RowIconButton>
@@ -387,17 +455,19 @@ export default function Accounts() {
           }}
         >
           <Stack spacing={2.5}>
-            <Typography color="text.secondary" sx={descriptionSx}>
-              ก่อนเพิ่มบัญชี ให้ขอ statement ย้อนหลังจากธนาคารส่งเข้ากล่องอีเมลของคุณ ระบบจะใช้เป็นข้อมูลตั้งต้น
-            </Typography>
+            {!editingId && (
+              <Typography color="text.secondary" sx={descriptionSx}>
+                ก่อนเพิ่มบัญชี ให้ขอ statement ย้อนหลังจากธนาคารส่งเข้ากล่องอีเมลของคุณ ระบบจะใช้เป็นข้อมูลตั้งต้น
+              </Typography>
+            )}
             {formLoadError && <LoadError message={formLoadError} onRetry={retry} />}
             <Box component="fieldset" sx={{ m: 0, p: 0, minWidth: 0, border: 0 }}>
               <FormLabel component="legend" sx={{ mb: 1.5, color: 'text.primary', fontWeight: 600 }}>การเชื่อมต่อ statement</FormLabel>
               <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 16rem), 1fr))' }}>
-                <TextField select label="ธนาคาร" helperText="เลือกธนาคารเจ้าของบัญชี" value={form.bank_id} onChange={setFormField('bank_id')} required autoFocus>
+                <TextField select label="ธนาคาร" helperText="เลือกธนาคารเจ้าของบัญชี" value={form.bank_id} onChange={setFormField('bank_id')} required autoFocus={!editingId}>
                   <MenuItem value=""><em>— เลือก —</em></MenuItem>
                   {(banks ?? []).filter((bank) => bank.is_active || String(bank.id) === form.bank_id).map((bank) => (
-                    <MenuItem key={bank.id} value={bank.id}>{bank.name}</MenuItem>
+                    <MenuItem key={bank.id} value={String(bank.id)}>{bank.name}</MenuItem>
                   ))}
                 </TextField>
                 {/* ลิงก์ต่อกล่องอีเมลพาออกจากหน้า (ค่าที่กรอกหาย) จึงไม่อยู่ในฟอร์ม — ปุ่มอยู่ที่ส่วนกล่องอีเมล */}
@@ -411,26 +481,21 @@ export default function Accounts() {
                 >
                   <MenuItem value=""><em>— เลือก —</em></MenuItem>
                   {(mailboxes ?? []).map((mailbox) => (
-                    <MenuItem key={mailbox.id} value={mailbox.id} sx={dataTextSx}>{mailbox.email}</MenuItem>
+                    <MenuItem key={mailbox.id} value={String(mailbox.id)} sx={dataTextSx}>{mailbox.email}</MenuItem>
                   ))}
                 </TextField>
-              </Box>
-            </Box>
-            <Box component="fieldset" sx={{ m: 0, p: 0, minWidth: 0, border: 0 }}>
-              <FormLabel component="legend" sx={{ mb: 1.5, color: 'text.primary', fontWeight: 600 }}>รายละเอียดบัญชี</FormLabel>
-              <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 16rem), 1fr))' }}>
-                <TextField label="ชื่อเล่น" helperText="ชื่อที่ช่วยให้จำบัญชีนี้ได้ง่าย" value={form.nickname} onChange={setFormField('nickname')} required slotProps={{ htmlInput: { maxLength: 60 } }} />
-                <TextField label="เลขที่บัญชี" helperText="กรอกตามที่แสดงใน statement" value={form.account_number} onChange={setFormField('account_number')} required slotProps={{ htmlInput: { maxLength: 40 } }} />
+                {/* รหัสเปิดไฟล์คือข้อมูลการเชื่อมต่อ — ไฟล์ที่เปิดไม่ได้บนแดชบอร์ดลิงก์มาที่ช่องนี้ (`?edit=` → autoFocus) */}
                 <TextField
                   type={showPassword ? 'text' : 'password'}
                   label="รหัสผ่านเปิดไฟล์ statement"
-                  // PATCH ที่ช่องนี้ว่าง server คงรหัสเดิมไว้ (src/routes/accounts.ts)
+                  // PATCH ที่ช่องนี้ว่าง server คงรหัสเดิมไว้ (src/routes/accounts.ts) · คำใบ้ตามคู่มือ (guides.ts)
                   helperText={editingId
-                    ? 'เว้นว่างไว้ = ใช้รหัสเดิม · ระบบเก็บแบบเข้ารหัสและไม่แสดงกลับอีก'
-                    : 'รหัสเปิดไฟล์ PDF ที่ธนาคารส่งมา · ระบบเก็บแบบเข้ารหัสและไม่แสดงกลับอีก'}
+                    ? 'เว้นว่างไว้ = ใช้รหัสเดิม · ธนาคารตั้งให้ มักเป็นเลขบัตรประชาชนหรือวันเกิด · ระบบเก็บแบบเข้ารหัสและไม่แสดงกลับอีก'
+                    : 'รหัสเปิดไฟล์ PDF ที่ธนาคารตั้งให้ มักเป็นเลขบัตรประชาชนหรือวันเกิด · ระบบเก็บแบบเข้ารหัสและไม่แสดงกลับอีก'}
                   value={form.pdf_password}
                   onChange={setFormField('pdf_password')}
                   required={!editingId}
+                  autoFocus={focusPassword}
                   autoComplete="new-password"
                   slotProps={{
                     input: {
@@ -445,6 +510,13 @@ export default function Accounts() {
                     },
                   }}
                 />
+              </Box>
+            </Box>
+            <Box component="fieldset" sx={{ m: 0, p: 0, minWidth: 0, border: 0 }}>
+              <FormLabel component="legend" sx={{ mb: 1.5, color: 'text.primary', fontWeight: 600 }}>รายละเอียดบัญชี</FormLabel>
+              <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 16rem), 1fr))' }}>
+                <TextField label="ชื่อเล่น" helperText="ชื่อที่ช่วยให้จำบัญชีนี้ได้ง่าย" value={form.nickname} onChange={setFormField('nickname')} required slotProps={{ htmlInput: { maxLength: 60 } }} />
+                <TextField label="เลขที่บัญชี" helperText="กรอกตามที่แสดงใน statement" value={form.account_number} onChange={setFormField('account_number')} required slotProps={{ htmlInput: { maxLength: 40 } }} />
                 <TextField label="พร้อมเพย์ (ไม่บังคับ)" helperText="ใช้ช่วยจับคู่รายการโอนภายในครอบครัว" value={form.promptpay_id} onChange={setFormField('promptpay_id')} slotProps={{ htmlInput: { maxLength: 40 } }} />
                 {TAX_PAGES_ENABLED && (
                   <TextField
@@ -456,7 +528,7 @@ export default function Accounts() {
                   >
                     <MenuItem value=""><em>— ไม่กำหนด —</em></MenuItem>
                     {(taxEntities ?? []).filter((e) => e.is_active || String(e.id) === form.default_tax_entity_id).map((e) => (
-                      <MenuItem key={e.id} value={e.id}>{e.display_name}</MenuItem>
+                      <MenuItem key={e.id} value={String(e.id)}>{e.display_name}</MenuItem>
                     ))}
                   </TextField>
                 )}
@@ -467,19 +539,25 @@ export default function Accounts() {
         </Box>
       </Modal>
       <ConfirmDialog
-        open={archiving != null}
+        open={archiveOpen}
         title="เก็บบัญชีเข้าคลัง"
         description={
-          <>
-            เก็บบัญชี “{archiving?.nickname ?? ''}” เข้าคลังหรือไม่? บัญชีจะหายจากหน้านี้และจากช่องเลือกบัญชี หยุดรับ statement ใหม่
-            และไม่นับในยอดคงเหลือรวม ส่วน statement และรายการเดิมยังอยู่ครบ (ยังเห็นในหน้าธุรกรรม) — ตอนนี้ยังไม่มีปุ่มเอากลับ
-            {archiveError && <Alert severity="error" sx={{ mt: 2 }}>{archiveError}</Alert>}
-          </>
+          <Stack spacing={1.5}>
+            <Typography sx={descriptionSx}>เก็บบัญชี “{archiving?.nickname}” เข้าคลังหรือไม่?</Typography>
+            <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
+              <li>หายจากหน้านี้และจากช่องเลือกบัญชี</li>
+              <li>หยุดรับ statement ใหม่</li>
+              <li>ไม่นับในยอดคงเหลือรวม</li>
+              <li>statement และรายการเดิมยังอยู่ครบ (ยังเห็นในหน้าธุรกรรม)</li>
+            </Box>
+            <Typography sx={descriptionSx}>ตอนนี้ยังไม่มีปุ่มเอากลับ</Typography>
+            {archiveError && <Alert severity="error">{archiveError}</Alert>}
+          </Stack>
         }
         confirmLabel="เก็บเข้าคลัง"
         confirmColor="error"
         busy={submitting}
-        onClose={() => setArchiving(null)}
+        onClose={() => setArchiveOpen(false)}
         onConfirm={() => void archiveAccount()}
         onExited={() => {
           if (focusAddAfterExitRef.current) {
@@ -490,10 +568,12 @@ export default function Accounts() {
         }}
       />
 
-      <Box component="section" aria-labelledby="mailboxes-heading" sx={{ mt: 5 }}>
+      {/* scrollMarginTop = ความสูง AppBar แบบ sticky (เหมือน #statement-failures ของแดชบอร์ด) — ลิงก์ #mailboxes-heading */}
+      <Box component="section" ref={mailboxesSectionRef} aria-labelledby="mailboxes-heading" sx={{ mt: 5, scrollMarginTop: 80 }}>
         <PageHeader
           level={2}
           id="mailboxes-heading"
+          tabIndex={-1}
           title="กล่องอีเมล"
           description='กล่อง Gmail ที่ระบบค้นเฉพาะอีเมล statement จากธนาคาร ระบบดึงให้เองทุกชั่วโมง หรือกด "ดึงอีเมลใหม่" เพื่อดึงทันที'
           action={<Button variant="outlined" startIcon={<AddRounded />} href="/auth/google?add=1" sx={{ whiteSpace: 'nowrap' }}>ต่อกล่องอีเมลอื่นเพิ่ม</Button>}
@@ -508,7 +588,8 @@ export default function Accounts() {
             />
           ) : (
             // แถวแบบ DataFreshness แทนตาราง — มีไม่กี่กล่อง ไม่ต้องเลื่อนแนวนอนที่ 320px
-            <Paper component="ul" variant="outlined" sx={{ mt: 3, mb: 0, mx: 0, px: 2, py: 0, listStyle: 'none' }}>
+            // role="list": Safari ทิ้ง list semantics ของ <ul> ที่ listStyle none
+            <Paper component="ul" role="list" variant="outlined" sx={{ mt: 3, mb: 0, mx: 0, px: 2, py: 0, listStyle: 'none' }}>
               {rows.map((mailbox) => {
                 const busy = syncing.has(mailbox.id);
                 return (

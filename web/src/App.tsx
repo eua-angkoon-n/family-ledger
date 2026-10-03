@@ -92,7 +92,7 @@ function GmailBanner({ mailboxes }: { mailboxes: EmailAccount[] | null }) {
       <Box sx={{ mt: 1 }}>
         {broken.length === 1
           ? <Button variant="outlined" color="inherit" href={`/auth/google?reconnect=${broken[0].id}`}>เชื่อม Gmail ใหม่</Button>
-          : <Button variant="outlined" color="inherit" component={Link} to="/accounts">เชื่อม Gmail ใหม่</Button>}
+          : <Button variant="outlined" color="inherit" component={Link} to="/accounts#mailboxes-heading">เชื่อม Gmail ใหม่</Button>}
       </Box>
     </Alert>
   );

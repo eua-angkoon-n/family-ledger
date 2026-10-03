@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import test from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { createTestDb } from './helpers/db.js';
 
@@ -23,12 +24,15 @@ test('email accounts: sync กับ token ที่ใช้ไม่ได้ 
   const { HttpError } = await import('../src/http.js');
   const { encrypt } = await import('../src/crypto.js');
   const { emailAccountsRouter } = await import('../src/routes/email-accounts.js');
+  const { countStatements, syncEmailAccount } = await import('../src/worker.js');
 
   // Google ปลอมเฉพาะ token endpoint กับ messages.list — คำขออื่น (เรียก test server เอง) ส่งต่อ fetch จริง
   const realFetch = globalThis.fetch;
   let tokenResponse = () => Response.json({ access_token: 'access-token' });
   let tokenCalls = 0;
   const listQueries: string[] = [];
+  // listGate ค้างรอบ sync ไว้ที่ messages.list ให้ทดสอบการเรียกซ้อนได้แน่นอน ไม่ขึ้นกับจังหวะเวลา
+  let listGate: Promise<void> = Promise.resolve();
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input));
     if (url.href === 'https://oauth2.googleapis.com/token') {
@@ -37,6 +41,7 @@ test('email accounts: sync กับ token ที่ใช้ไม่ได้ 
     }
     if (url.href.startsWith('https://gmail.googleapis.com/gmail/v1/users/me/messages?')) {
       listQueries.push(url.searchParams.get('q')!);
+      await listGate;
       return Response.json({});
     }
     return realFetch(input, init);
@@ -96,6 +101,9 @@ test('email accounts: sync กับ token ที่ใช้ไม่ได้ 
     const startedAt = Date.now();
     const res = await sync();
     assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), {
+      messages_scanned: 0, statements_inserted: 0, statements_failed: 0, skipped: 0, already_running: false,
+    });
     const after = Math.floor((lastSynced.getTime() - 2 * 24 * 60 * 60 * 1000) / 1000);
     assert.deepEqual(listQueries.sort(), banks.map((b) => `from:${b.sender_email} after:${after}`).sort());
     const synced = (await mailbox()).last_synced_at!.getTime();
@@ -107,6 +115,56 @@ test('email accounts: sync กับ token ที่ใช้ไม่ได้ 
     const res = await sync({ full: true });
     assert.equal(res.status, 200);
     assert.deepEqual(listQueries.sort(), banks.map((b) => `from:${b.sender_email}`).sort());
+  });
+
+  const hold = () => {
+    let release!: () => void;
+    listGate = new Promise<void>((r) => (release = r));
+    return release;
+  };
+  const untilIdle = async () => {
+    // รอบที่ค้างอยู่จบเมื่อเรียกใหม่แล้วไม่ได้ already_running (ตัวที่เรียกนี้ก็ดึงแบบ incremental จบไปด้วย)
+    for (let i = 0; i < 200; i++) {
+      if (!(await syncEmailAccount(mailboxId)).already_running) return;
+      await delay(10);
+    }
+    assert.fail('sync ไม่จบใน 2 วินาที');
+  };
+
+  await t.test('ขอ full ระหว่างกำลังดึง → already_running แล้วรัน full ต่อท้ายเมื่อรอบแรกจบ', async () => {
+    const release = hold();
+    listQueries.length = 0;
+    const first = syncEmailAccount(mailboxId);
+    while (!listQueries.length) await delay(5);
+
+    const res = await sync({ full: true });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), {
+      messages_scanned: 0, statements_inserted: 0, statements_failed: 0, skipped: 0, already_running: true,
+    });
+
+    listQueries.length = 0;
+    release();
+    assert.equal((await first).already_running, false);
+    await untilIdle();
+    for (const b of banks) assert.ok(listQueries.includes(`from:${b.sender_email}`), `full ที่รอต้องค้น ${b.sender_email} โดยไม่มี after:`);
+  });
+
+  await t.test('ขอแบบไม่ full ระหว่างกำลังดึง → already_running และไม่ถูกจำไว้รันซ้ำ', async () => {
+    const release = hold();
+    const first = syncEmailAccount(mailboxId);
+    assert.equal((await syncEmailAccount(mailboxId)).already_running, true);
+    release();
+    await first;
+    // ถ้ามีรอบต่อท้าย มันเริ่ม (เข้า running) ทันทีใน finally ของรอบแรก — เรียกตอนนี้ต้องไม่ชน
+    assert.equal((await syncEmailAccount(mailboxId)).already_running, false);
+  });
+
+  await t.test('countStatements: ไฟล์ที่พัง (รวมไฟล์เดิมที่ยังพัง) ไม่นับเป็น statement ใหม่', () => {
+    // parse_failed ถูกเขียนทับทุกรอบที่เจอไฟล์เดิม — เคยนับเป็น inserted ทุกรอบ
+    assert.deepEqual(countStatements(['parse_failed']), { inserted: 0, failed: 1 });
+    assert.deepEqual(countStatements(['parse_failed', 'parse_failed', 'parsed', 'checksum_failed', 'pending']), { inserted: 2, failed: 3 });
+    assert.deepEqual(countStatements([]), { inserted: 0, failed: 0 });
   });
 
   await t.test('Google ล่มชั่วคราว (503) → 502 และไม่ตั้ง reauth_required_at', async () => {

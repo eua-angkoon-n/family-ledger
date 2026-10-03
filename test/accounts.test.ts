@@ -4,6 +4,9 @@ import test from 'node:test';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { createTestDb } from './helpers/db.js';
 
+// PATCH/POST ที่ส่ง pdf_password เข้ารหัสด้วย encrypt() — ต้องมีคีย์ dummy
+process.env.ENCRYPTION_KEY ??= '0'.repeat(64);
+
 // T6 (backend): DELETE /api/accounts/:id ต้อง archive (ไม่ลบจริง) เพราะ statement/txn
 // ผูก on delete cascade กับ bank_account — ลบจริงจะทำลายประวัติทั้งชุด
 test('archive account แทน hard delete', async (t) => {
@@ -93,6 +96,47 @@ test('archive account แทน hard delete', async (t) => {
     const body = (await res.json()) as { id: number }[];
     assert.equal(res.status, 200);
     assert.ok(body.some((a) => a.id === bankAccountId));
+  });
+
+  // resync=true = สั่งอ่านใหม่ทั้งกล่องอีเมล (backfill เบื้องหลังจะพังที่ decrypt 'enc:refresh-token' แล้วถูก .catch() ดักไว้ — noise ที่คาดไว้)
+  await t.test('PATCH สั่งอ่านเมลใหม่เฉพาะตอนเปลี่ยนธนาคาร/เลขบัญชี/รหัสผ่าน PDF/กล่องอีเมล', async () => {
+    const app = await listen(appFor(ownerId));
+    t.after(app.close);
+    const patch = async (body: Record<string, unknown>) => {
+      const res = await app.request(`/api/accounts/${bankAccountId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      assert.equal(res.status, 200);
+      return (await res.json()) as { id: number; email_account_id: number; resync: boolean };
+    };
+    assert.deepEqual(await patch({ nickname: 'ชื่อเล่นใหม่' }), { id: bankAccountId, email_account_id: emailAccountId, resync: false });
+    assert.equal((await patch({ promptpay_id: '0812345678' })).resync, false);
+    assert.equal((await patch({ account_number: 'xxx-x-x6231-x' })).resync, false, 'ส่งเลขเดิมซ้ำ ไม่ใช่การเปลี่ยน');
+    assert.equal((await patch({ pdf_password: '' })).resync, false, 'รหัสผ่านว่าง = ไม่เปลี่ยน');
+    assert.equal((await patch({ account_number: 'xxx-x-x9999-x' })).resync, true);
+    assert.equal((await patch({ pdf_password: 'รหัสใหม่' })).resync, true);
+    const otherMailbox = (await db.pool.query<{ id: number }>(
+      `insert into email_account (user_id, email, refresh_token_enc) values ($1, 'owner2@example.com', 'enc:x') returning id`,
+      [ownerId],
+    )).rows[0]!.id;
+    // ย้ายกล่อง → อ่านกล่องใหม่ที่บัญชีผูกหลังแก้
+    assert.deepEqual(await patch({ email_account_id: otherMailbox }), { id: bankAccountId, email_account_id: otherMailbox, resync: true });
+  });
+
+  await t.test('POST ตอบ id, email_account_id และ resync=true เสมอ', async () => {
+    const app = await listen(appFor(ownerId));
+    t.after(app.close);
+    const res = await app.request('/api/accounts', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ bank_id: bankId, email_account_id: emailAccountId, nickname: 'บัญชีรอง', account_number: '123-4-56789-0', pdf_password: 'x' }),
+    });
+    assert.equal(res.status, 201);
+    const body = (await res.json()) as { id: number; email_account_id: number; resync: boolean };
+    assert.equal(body.email_account_id, emailAccountId);
+    assert.equal(body.resync, true);
   });
 
   await t.test('user อื่น archive บัญชีไม่ใช่ของตัวเองไม่ได้ (404)', async () => {

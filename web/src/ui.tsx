@@ -109,11 +109,13 @@ type HeaderProps = {
   action?: ReactNode;
   level?: 1 | 2;
   id?: string;
+  /** -1 = หัวข้อที่โค้ดย้าย focus มาหา (ลิงก์ `#id` จากหน้าอื่น) — screen reader รู้ว่ามาถึงส่วนไหน */
+  tabIndex?: number;
 };
 
 export const APP_NAME = 'Hyacinthia Ledger';
 
-export function PageHeader({ title, description, action, level = 2, id }: HeaderProps) {
+export function PageHeader({ title, description, action, level = 2, id, tabIndex }: HeaderProps) {
   // ชื่อแท็บตามหน้า (WCAG 2.4.2) — ทุกหน้าที่ล็อกอินแล้วมี PageHeader level 1 ตัวเดียว จึงตั้งที่นี่ที่เดียว
   useEffect(() => {
     if (level === 1) document.title = `${title} · ${APP_NAME}`;
@@ -126,7 +128,7 @@ export function PageHeader({ title, description, action, level = 2, id }: Header
     >
       <Box sx={{ minWidth: 0 }}>
         <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
-          <Typography component={level === 1 ? 'h1' : 'h2'} variant={level === 1 ? 'h1' : 'h2'} id={id}>
+          <Typography component={level === 1 ? 'h1' : 'h2'} variant={level === 1 ? 'h1' : 'h2'} id={id} tabIndex={tabIndex}>
             {title}
           </Typography>
           {/* ปุ่มคู่มือขึ้นเฉพาะหัวข้อระดับหน้า — หัวข้อย่อยในหน้า (level 2) ไม่ต้องมี
@@ -263,8 +265,9 @@ export function ConfirmDialog({
 }
 
 // info = ผลที่ไม่ใช่ทั้งสำเร็จและผิดพลาด เช่น ผู้ใช้กดยกเลิกเองในหน้าของ Google (สี info = muted ไม่ใช่สีสถานะใหม่)
+// warning = ทำสำเร็จแต่มีส่วนที่ต้องจัดการ (เช่นดึงอีเมลแล้วมีไฟล์ที่เปิดไม่ได้) — ควรมี action พาไปที่แก้
 // action = ปุ่มเดียวต่อท้ายข้อความ เช่น "เลิกทำ" — snackbar ไม่หายเอง (WCAG 2.2.1) ปิดด้วย X หรือ Esc
-export type Notice = { message: string; severity: 'success' | 'error' | 'info'; action?: { label: string; onClick: () => void } };
+export type Notice = { message: string; severity: 'success' | 'error' | 'info' | 'warning'; action?: { label: string; onClick: () => void } };
 
 // placement="top" ใช้ตอนมีแถบลอยด้านล่างจอ (แถบรายการที่เลือกในหน้าวางแผน) ไม่งั้น snackbar ทับปุ่มของแถบ
 export function FeedbackSnackbar({
@@ -283,7 +286,8 @@ export function FeedbackSnackbar({
   return (
     <Snackbar
       open={Boolean(notice)}
-      autoHideDuration={notice?.action ? null : 4500}
+      // ข้อความยาว (เช่นผลดึงอีเมลที่มีชื่อกล่อง) อยู่นานขึ้นตามความยาว ~70ms/ตัวอักษร — สั้นกว่า ~64 ตัวอักษรยังเป็น 4.5 วินาทีเท่าเดิม
+      autoHideDuration={notice?.action ? null : Math.max(4500, (notice?.message.length ?? 0) * 70)}
       // มีปุ่ม action: ไม่หมดเวลา และคลิกที่อื่น (เช่นเลือกแถว) ไม่ปิด ไม่งั้นปุ่มเลิกทำหายก่อนได้กด — ปิดได้ด้วย X และ Esc
       onClose={(_, reason) => {
         if (reason === 'clickaway' && notice?.action) return;

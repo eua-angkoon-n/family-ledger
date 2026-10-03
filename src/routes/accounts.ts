@@ -59,7 +59,7 @@ accountsRouter.post('/accounts', requireUser(async (req, res, user) => {
   syncEmailAccount(emailAccountId, { full: true }).catch((e) =>
     console.error(`[worker] backfill mailbox=${emailAccountId} ล้มเหลว:`, e),
   );
-  res.status(201).json({ id: created.id });
+  res.status(201).json({ id: created.id, email_account_id: emailAccountId, resync: true });
 }));
 
 accountsRouter.patch('/accounts/:id', requireUser(async (req, res, user) => {
@@ -74,9 +74,11 @@ accountsRouter.patch('/accounts/:id', requireUser(async (req, res, user) => {
   const defaultTaxEntityId = hasDefaultTaxEntity && b.default_tax_entity_id != null ? id(b, 'default_tax_entity_id') : null;
   if (hasDefaultTaxEntity && defaultTaxEntityId != null) await assertOwnsTaxEntity(user.id, defaultTaxEntityId);
   const accountId = Number(req.params.id);
-  const updated = await tx(async (c) => {
-    const before = (await c.query(`select ${ACCOUNT_AUDIT_COLUMNS} from bank_account where id = $1 and user_id = $2`, [accountId, user.id])).rows[0];
-    const { rows } = await c.query<{ id: number; email_account_id: number }>(
+  const pdfPasswordChanged = !(b.pdf_password == null || b.pdf_password === '');
+  const { updated, resync } = await tx(async (c) => {
+    type Row = { id: number; bank_id: number; account_number: string; email_account_id: number };
+    const before = (await c.query<Row>(`select ${ACCOUNT_AUDIT_COLUMNS} from bank_account where id = $1 and user_id = $2`, [accountId, user.id])).rows[0];
+    const { rows } = await c.query<Row>(
       `update bank_account set
          bank_id = coalesce($3, bank_id),
          email_account_id = coalesce($4, email_account_id),
@@ -95,12 +97,13 @@ accountsRouter.patch('/accounts/:id', requireUser(async (req, res, user) => {
         b.account_number == null ? null : str(b, 'account_number', 40),
         hasPromptpay,
         hasPromptpay ? optionalStr(b, 'promptpay_id', 40) : null,
-        b.pdf_password == null || b.pdf_password === '' ? null : encrypt(str(b, 'pdf_password', 200)),
+        pdfPasswordChanged ? encrypt(str(b, 'pdf_password', 200)) : null,
         hasDefaultTaxEntity,
         defaultTaxEntityId,
       ],
     );
-    if (!rows[0]) throw new HttpError(404, 'ไม่พบบัญชี');
+    const after = rows[0];
+    if (!after || !before) throw new HttpError(404, 'ไม่พบบัญชี');
     // รหัสผ่าน PDF เปลี่ยนหรือไม่เก็บเป็น boolean ไม่ใช่ค่า — ต้องตรวจสอบได้ว่ามีคนเปลี่ยนแต่ห้ามเห็นค่า
     await audit(c, {
       userId: user.id,
@@ -108,15 +111,22 @@ accountsRouter.patch('/accounts/:id', requireUser(async (req, res, user) => {
       entityType: 'bank_account',
       entityId: accountId,
       before,
-      after: { ...rows[0], pdf_password_changed: !(b.pdf_password == null || b.pdf_password === '') },
+      after: { ...after, pdf_password_changed: pdfPasswordChanged },
       ip: req.ip ?? null,
     });
-    return rows[0];
+    // อ่านใหม่ทั้งกล่องเฉพาะฟิลด์ที่ worker ใช้จับคู่/ถอดรหัส statement — แก้ชื่อเล่น/พร้อมเพย์ไม่ต้องอ่านเมลซ้ำ
+    const resync = pdfPasswordChanged
+      || before.bank_id !== after.bank_id
+      || before.account_number !== after.account_number
+      || before.email_account_id !== after.email_account_id;
+    return { updated: after, resync };
   });
-  syncEmailAccount(updated.email_account_id, { full: true }).catch((e) =>
-    console.error(`[worker] reprocess account=${updated.id} ล้มเหลว:`, e),
-  );
-  res.json({ id: updated.id, email_account_id: updated.email_account_id });
+  if (resync) {
+    syncEmailAccount(updated.email_account_id, { full: true }).catch((e) =>
+      console.error(`[worker] reprocess account=${updated.id} ล้มเหลว:`, e),
+    );
+  }
+  res.json({ id: updated.id, email_account_id: updated.email_account_id, resync });
 }));
 
 accountsRouter.delete('/accounts/:id', requireUser(async (req, res, user) => {

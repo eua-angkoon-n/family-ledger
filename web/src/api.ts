@@ -41,9 +41,21 @@ export type Bank = {
 // reauth_required_at มีค่า = Google ปฏิเสธ refresh token (invalid_grant) ต้องเชื่อม Gmail ใหม่ผ่าน /auth/google?reconnect=<id>
 export type EmailAccount = { id: number; email: string; last_synced_at: string | null; reauth_required_at: string | null };
 
-// POST /api/email-accounts/:id/sync — รอจนซิงก์จบแล้วตอบสรุป · 409 = ต้องเชื่อม Gmail ใหม่ · 502 = Gmail ขัดข้องชั่วคราว
-// กล่องนี้กำลังซิงก์อยู่แล้ว (เช่น worker รอบชั่วโมง) server ตอบ 0 ทุกช่องทันที — แยกจาก "ไม่มีเมลใหม่" ไม่ได้
-export type SyncSummary = { messages_scanned: number; statements_inserted: number; skipped: number };
+// POST /api/email-accounts/:id/sync — รอจนดึงจบแล้วตอบสรุป · 409 = ต้องเชื่อม Gmail ใหม่ · 502 = Gmail ขัดข้องชั่วคราว
+// statements_inserted = statement ใหม่ที่อ่านสำเร็จ (ไม่นับไฟล์ที่เปิดไม่ได้ และไม่นับไฟล์เดิมที่อ่านซ้ำ)
+// statements_failed = ไฟล์ในรอบนี้ที่เปิด/อ่านไม่ได้ (รวมไฟล์เดิมที่ยังพังอยู่) — รายละเอียดดูที่แดชบอร์ด
+// already_running = กล่องนี้กำลังดึงอยู่แล้ว (เช่น worker รอบชั่วโมง) server ไม่ได้ดึงซ้ำ ตัวเลขอื่นเป็น 0
+export type SyncSummary = {
+  messages_scanned: number;
+  statements_inserted: number;
+  statements_failed: number;
+  skipped: number;
+  already_running: boolean;
+};
+
+// POST /api/accounts และ PATCH /api/accounts/:id — resync = ระบบเริ่มอ่าน statement ใหม่ทั้งกล่องอีเมลอยู่เบื้องหลัง
+// (เพิ่มบัญชีใหม่เสมอ · แก้เฉพาะตอนเปลี่ยนธนาคาร/เลขบัญชี/รหัสผ่าน PDF/กล่องอีเมล — แก้ชื่อเล่น/พร้อมเพย์ไม่อ่านใหม่)
+export type AccountSaveResponse = { id: number; email_account_id: number; resync: boolean };
 
 export type Account = {
   id: number;

@@ -286,7 +286,7 @@ export default function Dashboard() {
           <Alert severity="info" variant="outlined" role="status">
             ยังไม่มีรายการจาก statement ในระบบ — เพิ่มบัญชี หรือกด "ดึงอีเมลใหม่" ที่หน้าบัญชีของฉัน
             <Box sx={{ mt: 1 }}>
-              <Button component={Link} to="/accounts" variant="contained" size="small">ไปที่บัญชีของฉัน</Button>
+              <Button component={Link} to="/accounts#mailboxes-heading" variant="contained" size="small">ไปที่บัญชีของฉัน</Button>
             </Box>
           </Alert>
         ) : latestMonth < month ? (
@@ -494,7 +494,7 @@ export default function Dashboard() {
                             {' · '}{s.account_nickname} · {info.text} · รับเมื่อ <Box component="span" sx={dataTextSx}>{formatDateTime(s.created_at)}</Box>
                           </Typography>
                           {info.selfFix && (
-                            <Button component={Link} to="/accounts" variant="outlined" color="inherit" size="small" sx={{ flexShrink: 0, alignSelf: { xs: 'flex-start', sm: 'center' } }}>
+                            <Button component={Link} to={`/accounts?edit=${s.bank_account_id}`} aria-label={`ตั้งรหัสผ่าน PDF ใหม่ ของ ${s.account_nickname}`} variant="outlined" color="inherit" size="small" sx={{ flexShrink: 0, alignSelf: { xs: 'flex-start', sm: 'center' } }}>
                               ตั้งรหัสผ่าน PDF ใหม่
                             </Button>
                           )}
