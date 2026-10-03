@@ -1,7 +1,32 @@
+import type { Express, NextFunction, Request, Response } from 'express';
+
 export class HttpError extends Error {
   constructor(public status: number, message: string) {
     super(message);
   }
+}
+
+// เพดานไฟล์เอกสารภาษี — อยู่ที่นี่ไม่ใช่ routes/tax-documents.ts เพราะ errorHandler ข้างล่างใช้ข้อความเดียวกัน
+// (import จาก routes/ กลับเข้ามาจะวนเป็น circular กับ http.ts)
+export const MAX_FILE_BYTES = 10 * 1024 * 1024;
+export const FILE_TOO_LARGE = `ไฟล์ใหญ่เกิน ${MAX_FILE_BYTES / 1024 / 1024}MB`;
+
+/** error handler กลางของแอป — export ไว้ให้เทสต์ใช้ตัวจริงแทนการเขียนซ้ำ */
+export function errorHandler(err: unknown, req: Request, res: Response, _next: NextFunction): void {
+  if (err instanceof HttpError) return void res.status(err.status).json({ error: err.message });
+  // body เกินเพดานของ express.json ใน server.ts — body-parser โยน error ของมันเอง (ไม่ใช่ HttpError) ถ้าไม่จับจะกลายเป็น 500
+  if ((err as { type?: string }).type === 'entity.too.large') {
+    const message = req.originalUrl.startsWith('/api/tax-documents') ? FILE_TOO_LARGE : 'ข้อมูลที่ส่งมาใหญ่เกินไป';
+    return void res.status(413).json({ error: message });
+  }
+  const code = (err as { code?: string }).code;
+  if (code === '23505') return void res.status(409).json({ error: 'ข้อมูลซ้ำกับที่มีอยู่แล้ว' });
+  if (code === '23503') return void res.status(409).json({ error: 'ยังมีข้อมูลอื่นอ้างถึงอยู่ ลบไม่ได้' });
+  // CHECK constraint ที่ DB บังคับ (เช่น end_date < start_date, month_start ไม่ใช่วันที่ 1) เป็นข้อมูล
+  // ที่ผู้ใช้ส่งมาผิด ไม่ใช่บั๊กของระบบ — 400 ไม่ใช่ 500 route ที่มีข้อความเฉพาะเจาะจงกว่านี้ตรวจเองก่อนอยู่แล้ว
+  if (code === '23514') return void res.status(400).json({ error: 'ข้อมูลไม่ผ่านเงื่อนไขของระบบ' });
+  console.error(err);
+  res.status(500).json({ error: 'เกิดข้อผิดพลาดในระบบ' });
 }
 
 export type Body = Record<string, unknown>;
@@ -75,4 +100,24 @@ export function enumStr<T extends string>(body: Body, field: string, values: rea
     throw new HttpError(400, `${field} ต้องเป็นหนึ่งใน ${values.join(', ')}`);
   }
   return v as T;
+}
+
+/**
+ * header ความปลอดภัยของทุก response (API, ไฟล์ static, SPA fallback) — ต้องเรียกก่อน middleware ตัวอื่น
+ * CSP มีแค่ frame-ancestors (กัน clickjacking): ห้ามเติม script-src/style-src — index.html มีสคริปต์ inline
+ * ตั้งธีมก่อน paint และโหลด Google Fonts · HSTS เฉพาะ request ที่มาทาง https ผ่าน Caddy (ต้องตั้ง trust proxy)
+ * ไม่งั้น dev ที่ localhost จะถูก browser จำให้ใช้ https
+ */
+export function useSecurityHeaders(app: Express): void {
+  app.disable('x-powered-by');
+  app.use((req, res, next) => {
+    res.set({
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY',
+      'Content-Security-Policy': "frame-ancestors 'none'",
+      'Referrer-Policy': 'strict-origin-when-cross-origin',
+    });
+    if (req.secure) res.set('Strict-Transport-Security', 'max-age=31536000');
+    next();
+  });
 }

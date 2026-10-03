@@ -1,6 +1,6 @@
 import { Box, type SxProps, type Theme } from '@mui/material';
 import { formatBaht } from '../format.js';
-import { colors, dataTextSx } from '../theme.js';
+import { dataTextSx } from '../theme.js';
 
 type Tone = 'neutral' | 'income' | 'expense';
 
@@ -11,16 +11,20 @@ type MoneyProps = {
   sx?: SxProps<Theme>;
 };
 
+// path ของ palette — sx แปลงเป็น CSS var ของธีมที่ใช้อยู่
 const TONE_COLOR: Record<Tone, string | undefined> = {
   neutral: undefined,
-  income: colors.income,
-  expense: colors.expense,
+  income: 'success.main',
+  // ไม่ใช่ error.main — นั่นคือ destructive (error/การลบ) ไม่ได้แปลว่ารายจ่าย (The Money Color Rule)
+  expense: 'brand.expense',
 };
 
-// แสดงจำนวนเงิน — system-ui + tabular-nums เสมอ (Financial Clarity Rule) ห้าม iannnnn-DOG แตะที่นี่
+// แสดงจำนวนเงิน — dataTextSx เสมอ (Financial Clarity Rule); Poppins ไม่มี tnum ตัวเลขจึงยังกว้างไม่เท่ากัน
+// ติดลบมี "−" เสมอ (ไม่บอกด้วยสีอย่างเดียว — Semantic Color Rule) showSign เพิ่ม "+" ให้ค่าบวก ผู้เรียกที่อยากได้ค่าสัมบูรณ์ส่ง Math.abs มาเอง
 export default function Money({ satang, tone = 'neutral', showSign = false, sx }: MoneyProps) {
-  const sign = showSign ? (satang > 0 ? '+' : satang < 0 ? '−' : '') : '';
-  const color = TONE_COLOR[tone];
+  const sign = satang < 0 ? '−' : showSign && satang > 0 ? '+' : '';
+  // ศูนย์ไม่ใช่ทั้งรายรับและรายจ่าย — สีกลางเสมอ ไม่งั้น ฿0.00 สีเขียว/แดงอ่านเหมือนมีเงินเข้า/ออก
+  const color = satang === 0 ? undefined : TONE_COLOR[tone];
   return (
     <Box component="span" sx={{ ...dataTextSx, ...(color ? { color } : {}), ...sx }}>
       {sign}฿{formatBaht(Math.abs(satang))}

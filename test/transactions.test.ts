@@ -233,6 +233,104 @@ test('ledger classification API: category / annotation / split / transfer-match'
     assert.equal(expense.review_status, 'reviewed');
   });
 
+  await t.test('review (bulk): ตั้ง reviewed โดย classification เดิมไม่เปลี่ยน นับเฉพาะแถวที่เปลี่ยนจริง', async () => {
+    const accountId = await seedAccount('141-4-14141-4');
+    const statementId = await seedStatement(accountId, 'msg-bulk-review');
+    const seed = (direction: 'credit' | 'debit', runningBalance: number) =>
+      seedTxn(statementId, accountId, { txnDate: '2026-08-12', amount: 5000, direction, runningBalance });
+    const unreviewed = await seed('debit', 50000);
+    const bare = await seed('credit', 55000);
+    const flagged = await seed('debit', 45000);
+    const done = await seed('debit', 40000);
+    await db.pool.query(
+      `insert into txn_annotation (txn_id, classification, review_status, note) values ($1, 'excluded', 'unreviewed', 'โน้ตเดิม')`,
+      [unreviewed],
+    );
+    await db.pool.query('update txn set is_internal_transfer = true where id = $1', [flagged]);
+    await db.pool.query(
+      `insert into txn_annotation (txn_id, classification, review_status, reviewed_at)
+       values ($1, 'income', 'reviewed', '2026-08-01T00:00:00Z')`,
+      [done],
+    );
+    const doneBefore = (await db.pool.query('select reviewed_at, updated_at from txn_annotation where txn_id = $1', [done])).rows[0];
+
+    const res = await request('/api/transactions/review', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ txn_ids: [unreviewed, bare, flagged, done, unreviewed] }),
+    });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { reviewed: 1 });
+
+    const expected: Record<number, string> = {
+      [unreviewed]: 'excluded',
+      [bare]: 'income',
+      [flagged]: 'internal_transfer',
+      [done]: 'income',
+    };
+    for (const [txnId, classification] of Object.entries(expected)) {
+      const detail = (await (await request(`/api/transactions/${txnId}`)).json()) as {
+        classification: string;
+        review_status: string;
+      };
+      assert.equal(detail.classification, classification, `txn ${txnId}`);
+      assert.equal(detail.review_status, 'reviewed', `txn ${txnId}`);
+    }
+
+    const stored = await db.pool.query<{ txn_id: string; classification: string; note: string | null }>(
+      'select txn_id, classification, note from txn_annotation where txn_id = any($1)',
+      [[unreviewed, bare, flagged]],
+    );
+    const byId = new Map(stored.rows.map((r) => [Number(r.txn_id), r]));
+    assert.equal(byId.get(unreviewed)!.note, 'โน้ตเดิม');
+    assert.equal(byId.get(bare)!.classification, 'income');
+    // flag โอนภายในต้องไม่ถูกแช่ลง annotation — reject คู่โอนภายหลังต้องกลับเป็น expense ได้
+    assert.equal(byId.get(flagged)!.classification, 'expense');
+
+    const doneAfter = (await db.pool.query('select reviewed_at, updated_at from txn_annotation where txn_id = $1', [done])).rows[0];
+    assert.deepEqual(doneAfter, doneBefore);
+
+    const audited = await db.pool.query<{ entity_id: string }>(
+      `select entity_id from audit_log where action = 'txn.review' and entity_id = any($1)`,
+      [[unreviewed, bare, flagged, done]],
+    );
+    assert.deepEqual(audited.rows.map((r) => Number(r.entity_id)).sort((a, b) => a - b), [unreviewed, bare, flagged].sort((a, b) => a - b));
+  });
+
+  // insert สลับลำดับ id กับเวลาโดยตั้งใจ — ถ้าเรียงแค่ txn_date, id desc เทสต์นี้ต้องพัง
+  await t.test('list: ธุรกรรมวันเดียวกันเรียงเวลาล่าสุดก่อน แถวไม่มีเวลาอยู่ท้ายวัน', async () => {
+    const accountId = await seedAccount('151-5-15151-5');
+    const statementId = await seedStatement(accountId, 'msg-list-order');
+    const seed = (txnTime: string | undefined, runningBalance: number) =>
+      seedTxn(statementId, accountId, { txnDate: '2026-08-15', txnTime, amount: 1000, direction: 'debit', runningBalance });
+    const at0804 = await seed('08:04:00', 98000);
+    const at2211 = await seed('22:11:00', 96000);
+    const untimed = await seed(undefined, 95000);
+    const at0802 = await seed('08:02:00', 99000);
+    const at2209 = await seed('22:09:00', 97000);
+    const nextDay = await seedTxn(statementId, accountId, {
+      txnDate: '2026-08-16', txnTime: '00:01:00', amount: 1000, direction: 'debit', runningBalance: 94000,
+    });
+
+    const res = await request(`/api/transactions?month=2026-08&bank_account_id=${accountId}`);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { rows: { id: number }[] };
+    assert.deepEqual(body.rows.map((r) => Number(r.id)), [nextDay, at2211, at2209, at0804, at0802, untimed]);
+  });
+
+  await t.test('review (bulk): validation — ว่าง, เกิน 200, ไม่ใช่จำนวนเต็มบวก ได้ 400', async () => {
+    const bad = [{}, { txn_ids: [] }, { txn_ids: Array.from({ length: 201 }, (_, i) => i + 1) },
+      { txn_ids: [1.5] }, { txn_ids: ['1'] }, { txn_ids: [0] }, { txn_ids: [1e300] }, { txn_ids: 1 }];
+    for (const body of bad) {
+      const res = await request('/api/transactions/review', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      assert.equal(res.status, 400, JSON.stringify(body).slice(0, 50));
+    }
+  });
+
   await t.test('category: system + own, สร้างของตัวเองได้, PATCH is_active กรองได้', async () => {
     const list = await request('/api/categories');
     assert.equal(list.status, 200);

@@ -173,9 +173,6 @@ test('cross-user authorization: Slice 4A endpoints', async (t) => {
     assert.equal(row.nickname, 'บัญชีทดสอบ');
   });
 
-  // หมายเหตุ: เคสนี้ PATCH สำเร็จจริง จะเห็น stderr "[worker] reprocess account=... ล้มเหลว" เพราะ
-  // backfill แบบ fire-and-forget ถอดรหัส 'enc:x' (ไม่ใช่ ciphertext จริง) ไม่ได้ — ถูก .catch() ดักไว้แล้ว
-  // ไม่ทำให้ test fail แค่ noise ที่คาดไว้ ไม่ต้องตามไล่
   await t.test('2b. PATCH /api/accounts/:id — ส่ง user_id ของ B มาในตัว ก็ยังแก้บัญชีตัวเองไม่เปลี่ยนเจ้าของ', async () => {
     await loginAs(userA);
     const res = await request(`/api/accounts/${accountA}`, json({ user_id: userB, nickname: 'ชื่อใหม่ A' }));
@@ -631,11 +628,16 @@ test('cross-user authorization: Slice 4A endpoints', async (t) => {
     await loginAs(userA);
     assert.equal((await request(`/api/tax-documents/${taxDocB}`)).status, 404);
     assert.equal((await request(`/api/tax-documents/${taxDocB}/file`)).status, 404);
+    assert.equal((await request(`/api/tax-documents/${taxDocB}/file?inline=1`)).status, 404);
+    // เปิดดู inline ก็ต้องล็อกอิน — ข้อถัดไป loginAs ใหม่เอง
+    cookie = '';
+    assert.equal((await request(`/api/tax-documents/${taxDocB}/file?inline=1`)).status, 401);
   });
 
   await t.test('27. admin ดาวน์โหลด/เปิดเอกสารของ B ไม่ได้เหมือนกัน (404 ไม่ใช่สิทธิพิเศษ)', async () => {
     await loginAs(admin);
     assert.equal((await request(`/api/tax-documents/${taxDocB}/file`)).status, 404);
+    assert.equal((await request(`/api/tax-documents/${taxDocB}/file?inline=1`)).status, 404);
     assert.equal((await request(`/api/tax-documents/${taxDocB}`)).status, 404);
   });
 
@@ -840,6 +842,9 @@ test('cross-user authorization: Slice 4A endpoints', async (t) => {
     assert.ok(onlyB.rows.length > 0 && onlyB.rows.every((r) => r.user_id === userB));
   });
 
+  // หมายเหตุ: POST และ PATCH pdf_password ในเคสนี้สั่งอ่านเมลใหม่ จะเห็น stderr "[worker] ... ล้มเหลว" เพราะ
+  // backfill แบบ fire-and-forget ถอดรหัส 'enc:refresh-token' (ไม่ใช่ ciphertext จริง) ไม่ได้ — ถูก .catch() ดักไว้แล้ว
+  // ไม่ทำให้ test fail แค่ noise ที่คาดไว้ ไม่ต้องตามไล่
   await t.test('44. audit_log ห้ามมีความลับ — สร้าง/แก้บัญชีธนาคารแล้วรหัสผ่าน PDF ต้องไม่หลุดเข้า log', async () => {
     await loginAs(userA);
     const created = await request('/api/accounts', post({
@@ -862,6 +867,141 @@ test('cross-user authorization: Slice 4A endpoints', async (t) => {
       assert.ok(!payload.includes('ลับสุดยอด-1234'), 'รหัสผ่าน PDF ดิบหลุดเข้า audit_log');
       assert.ok(!payload.includes('ลับใหม่-5678'), 'รหัสผ่าน PDF ดิบหลุดเข้า audit_log');
       assert.ok(!payload.includes('pdf_password_enc'), 'ciphertext ของรหัสผ่าน PDF หลุดเข้า audit_log');
+    }
+  });
+
+  await t.test('45. POST /api/transactions/review — ปน txn ของ B มาแม้ตัวเดียว ต้อง 404 และไม่เปลี่ยนอะไรเลย', async () => {
+    const ownTxn = await seedTxn(stmtA, accountA, { amount: 3000, direction: 'debit', runningBalance: 87000 });
+    await db.pool.query(
+      `insert into txn_annotation (txn_id, classification, review_status) values ($1, 'expense', 'unreviewed')`,
+      [ownTxn],
+    );
+    await loginAs(userA);
+    const res = await request('/api/transactions/review', post({ txn_ids: [ownTxn, txnB] }));
+    assert.equal(res.status, 404);
+    const own = await db.pool.query('select review_status from txn_annotation where txn_id = $1', [ownTxn]);
+    assert.equal(own.rows[0]!.review_status, 'unreviewed');
+    const foreign = await db.pool.query('select count(*)::int as n from txn_annotation where txn_id = $1', [txnB]);
+    assert.equal(foreign.rows[0]!.n, 0);
+  });
+
+  // ---- รอบขัดหน้าระบบ: ป้ายผู้ใช้รออนุมัติ + จัดการธนาคาร (แอดมิน) ----
+  await t.test('46. GET /api/me — pending_user_count มีเฉพาะแอดมินที่ approved (คนอื่นไม่มี key เลย)', async () => {
+    const pendingAdmin = (
+      await db.pool.query<{ id: number }>(
+        `insert into app_user (google_sub, email, display_name, is_admin, status) values
+           ('google-sub-p1', 'p1@example.com', 'P1', false, 'pending'),
+           ('google-sub-p2', 'p2@example.com', 'P2', true, 'pending')
+         returning id`,
+      )
+    ).rows[1]!.id;
+    const me = async () => (await (await request('/api/me')).json()) as Record<string, unknown>;
+
+    await loginAs(admin);
+    assert.equal((await me()).pending_user_count, 2);
+    await loginAs(userA);
+    assert.ok(!('pending_user_count' in (await me())));
+    await loginAs(pendingAdmin); // is_admin แต่ยังไม่ approved
+    assert.ok(!('pending_user_count' in (await me())));
+    cookie = '';
+    assert.ok(!('pending_user_count' in (await me())));
+  });
+
+  // ธนาคารแยกของเคสนี้ — seed ตรง ๆ: กล่อง A 2 บัญชี, กล่อง B 1 บัญชี, กล่อง C มีแต่บัญชีที่เก็บเข้าคลัง,
+  // กล่อง D ต้องเชื่อม Gmail ใหม่ → อ่านใหม่ = 2 กล่อง (A, B) · account_count = 5 (นับที่เก็บเข้าคลังด้วย)
+  // token เป็น 'enc:refresh-token' — sync ที่สั่งแบบ fire-and-forget ตายที่ decrypt ไม่ยิง Google (noise เดียวกับข้อ 44)
+  const resyncBank = (
+    await db.pool.query<{ id: number }>(
+      `insert into bank (name, sender_email, sender_domain, subject_monthly, subject_ondemand, parser_key)
+       values ('ธนาคารทดสอบ', 'stmt@bank.example', 'bank.example', 'monthly', 'ondemand', 'scb') returning id`,
+    )
+  ).rows[0]!.id;
+  const emailC = await seedEmailAccount(userB, 'c@example.com');
+  const emailD = await seedEmailAccount(userA, 'd@example.com');
+  await db.pool.query('update email_account set reauth_required_at = now() where id = $1', [emailD]);
+  for (const [userId, mailbox, number, archived] of [
+    [userA, emailA, '5550000001', false],
+    [userA, emailA, '5550000002', false],
+    [userB, emailB, '5550000003', false],
+    [userB, emailC, '5550000004', true],
+    [userA, emailD, '5550000005', false],
+  ] as const) {
+    await db.pool.query(
+      `insert into bank_account (user_id, bank_id, email_account_id, nickname, account_number, pdf_password_enc, archived_at)
+       values ($1, $2, $3, 'บัญชีทดสอบ', $4, 'enc:x', case when $5 then now() end)`,
+      [userId, resyncBank, mailbox, number, archived],
+    );
+  }
+
+  await t.test('47. GET /api/admin/banks — แอดมินเท่านั้น และ account_count นับรวมบัญชีที่เก็บเข้าคลัง', async () => {
+    await loginAs(userA);
+    assert.equal((await request('/api/admin/banks')).status, 403);
+    await loginAs(admin);
+    const res = await request('/api/admin/banks');
+    assert.equal(res.status, 200);
+    const rows = (await res.json()) as { id: number; name: string; account_count: number }[];
+    assert.equal(rows.find((r) => r.id === resyncBank)?.account_count, 5);
+    const plain = (await (await request('/api/banks')).json()) as { id: number }[];
+    assert.deepEqual(rows.map((r) => r.id), plain.map((r) => r.id)); // ลำดับเดียวกับ /api/banks
+  });
+
+  await t.test('48. DELETE /api/banks/:id — มีบัญชีผูก = 409 บอกจำนวน, คนทั่วไป 403, id ที่ไม่มี = 204', async () => {
+    await loginAs(userA);
+    assert.equal((await request(`/api/banks/${resyncBank}`, { method: 'DELETE' })).status, 403);
+    await loginAs(admin);
+    const res = await request(`/api/banks/${resyncBank}`, { method: 'DELETE' });
+    assert.equal(res.status, 409);
+    assert.equal(((await res.json()) as { error: string }).error, 'ธนาคารนี้มีบัญชีผูกอยู่ 5 บัญชี ลบไม่ได้ — ปิดใช้งานแทน');
+    assert.equal((await db.pool.query('select 1 from bank where id = $1', [resyncBank])).rowCount, 1);
+    assert.equal((await request('/api/banks/999999', { method: 'DELETE' })).status, 204);
+  });
+
+  await t.test('49. PATCH /api/banks/:id — แก้รูปแบบ/เปิดกลับ สั่งอ่านใหม่เฉพาะกล่องที่มีบัญชีใช้งานและไม่ต้องเชื่อมใหม่', async () => {
+    const patch = async (body: Record<string, unknown>) => {
+      const res = await request(`/api/banks/${resyncBank}`, json(body));
+      assert.equal(res.status, 200);
+      return (await res.json()) as { name: string; resync_mailboxes: number };
+    };
+    await loginAs(userA);
+    assert.equal((await request(`/api/banks/${resyncBank}`, json({ name: 'ยึด' }))).status, 403);
+
+    // กล่องของผู้ใช้ที่ถูกปฏิเสธมีบัญชีใช้งานของธนาคารนี้ — ต้องไม่ถูกนับ/สั่งอ่านใหม่
+    const rejectedUser = (await db.pool.query<{ id: number }>(
+      `insert into app_user (google_sub, email, display_name, is_admin, status)
+       values ('google-sub-rejected', 'rejected@example.com', 'R', false, 'rejected') returning id`,
+    )).rows[0]!.id;
+    await db.pool.query(
+      `insert into bank_account (user_id, bank_id, email_account_id, nickname, account_number, pdf_password_enc)
+       values ($1, $2, $3, 'บัญชีทดสอบ', '5550000006', 'enc:x')`,
+      [rejectedUser, resyncBank, await seedEmailAccount(rejectedUser, 'rejected@example.com')],
+    );
+
+    await loginAs(admin);
+    // ฟอร์มส่งทุกฟิลด์ทุกครั้ง — ค่าเดิม (ตัวพิมพ์ต่างก็ถูก lowercase เหมือนเดิม) ไม่นับว่าเปลี่ยน
+    const renamed = await patch({ name: 'ธนาคารทดสอบ 2', sender_email: 'STMT@bank.example', subject_monthly: 'monthly', parser_key: 'scb' });
+    assert.equal(renamed.name, 'ธนาคารทดสอบ 2');
+    assert.equal(renamed.resync_mailboxes, 0);
+    assert.equal((await patch({ subject_monthly: 'monthly-v2' })).resync_mailboxes, 2);
+    assert.equal((await patch({ is_active: false })).resync_mailboxes, 0);
+    assert.equal((await patch({ is_active: true })).resync_mailboxes, 2);
+    assert.equal((await patch({ is_active: true })).resync_mailboxes, 0); // true→true ไม่ใช่การเปิดกลับ
+  });
+
+  await t.test('50. GET /api/audit-log ตัดทุก key *_enc (แถวเก่าก่อนแก้บั๊ก Slice 8) ทั้งของตัวเองและแอดมิน scope=all', async () => {
+    const legacy = (await db.pool.query<{ id: number }>(
+      `insert into audit_log (user_id, action, entity_type, entity_id, before_data, after_data)
+       values ($1, 'bank_account.archive', 'bank_account', 1,
+               '{"id": 1, "pdf_password_enc": "cipher-1", "nested": {"tax_id_enc": "cipher-2"}}',
+               '[{"id": 1, "refresh_token_enc": "cipher-3"}]') returning id`,
+      [userA],
+    )).rows[0]!.id;
+    for (const [who, query] of [[userA, ''], [admin, 'scope=all&']] as const) {
+      await loginAs(who);
+      const res = await request(`/api/audit-log?${query}entity_type=bank_account`);
+      assert.equal(res.status, 200);
+      const row = ((await res.json()) as { rows: { id: number; before_data: unknown; after_data: unknown }[] }).rows.find((r) => r.id === legacy);
+      assert.deepEqual(row?.before_data, { id: 1, nested: {} });
+      assert.deepEqual(row?.after_data, [{ id: 1 }]);
     }
   });
 });

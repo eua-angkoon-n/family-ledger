@@ -83,12 +83,12 @@ test('reports API + transaction list/detail', async (t) => {
   async function seedStatement(
     bankAccountId: number,
     gmailMessageId: string,
-    opts: { periodStart: string; periodEnd: string; status?: string },
+    opts: { periodStart: string; periodEnd: string; status?: string; pdfSha256?: string },
   ): Promise<number> {
     const row = await db.pool.query<{ id: number }>(
-      `insert into statement (bank_account_id, gmail_message_id, gmail_attachment_id, period_start, period_end, status)
-       values ($1, $2, $2, $3, $4, $5) returning id`,
-      [bankAccountId, gmailMessageId, opts.periodStart, opts.periodEnd, opts.status ?? 'parsed'],
+      `insert into statement (bank_account_id, gmail_message_id, gmail_attachment_id, period_start, period_end, status, pdf_sha256)
+       values ($1, $2, $2, $3, $4, $5, $6) returning id`,
+      [bankAccountId, gmailMessageId, opts.periodStart, opts.periodEnd, opts.status ?? 'parsed', opts.pdfSha256 ?? null],
     );
     return row.rows[0]!.id;
   }
@@ -162,6 +162,20 @@ test('reports API + transaction list/detail', async (t) => {
     assert.strictEqual(baseline.net_satang, baseline.money_in_satang - baseline.money_out_satang);
   });
 
+  await t.test('statement_health นับไฟล์ — ไฟล์เดียวที่ค้าง parse_failed ใต้หลายบัญชีนับ 1, แถวไม่มี sha นับแยก', async () => {
+    const failed = { periodStart: '2026-08-01', periodEnd: '2026-08-31', status: 'parse_failed' };
+    await seedStatement(accountA1, 'msg-fail', { ...failed, pdfSha256: 'sha-shared' });
+    await seedStatement(accountA2, 'msg-fail', { ...failed, pdfSha256: 'sha-shared' });
+    await seedStatement(accountA1, 'msg-fail-old', failed);
+    const body = (await (await request('/api/reports/summary?month=2026-08')).json()) as {
+      statement_health: { status: string; n: number }[];
+      failed_statements: unknown[];
+    };
+    assert.equal(body.statement_health.find((s) => s.status === 'parse_failed')?.n, 2);
+    // รายการยังเป็นต่อแถว — แต่ละแถวมีปุ่มตั้งรหัสของบัญชีนั้น
+    assert.equal(body.failed_statements.length, 3);
+  });
+
   await t.test('ข้อ 3: category-breakdown — 3-split นับครั้งเดียวต่อหมวด, 0-split ตกไป category_id: null, ผลรวมเท่า money_out_satang', async () => {
     const res = await request('/api/reports/category-breakdown?month=2026-08');
     assert.equal(res.status, 200);
@@ -176,7 +190,7 @@ test('reports API + transaction list/detail', async (t) => {
     assert.equal(row3?.total_satang, 30_000);
 
     const uncategorised = body.rows.find((r) => r.category_id === null);
-    assert.equal(uncategorised?.category_name, 'ไม่ได้จัดหมวด');
+    assert.equal(uncategorised?.category_name, 'ยังไม่จัดหมวด');
     assert.equal(uncategorised?.total_satang, 300_000);
     assert.equal(uncategorised?.txn_count, 1);
 
@@ -218,11 +232,32 @@ test('reports API + transaction list/detail', async (t) => {
     assert.equal(total, after.money_out_satang);
   });
 
+  await t.test('uncategorised=true ใช้นิยามเดียวกับ uncategorised_count ของแดชบอร์ด — คู่โอนภายในไม่ค้างในคิว', async () => {
+    type ListBody = { rows: { id: number }[]; total_count: number };
+    const summary = (await (await request('/api/reports/summary?month=2026-08')).json()) as { uncategorised_count: number };
+    const list = (await (await request('/api/transactions?month=2026-08&uncategorised=true')).json()) as ListBody;
+
+    // creditTxn1 + debitTxn1 (0 split ทั้งคู่) — debitTxn2 มี split, สองขาโอนที่ confirm แล้วไม่ต้องจัดหมวด
+    assert.equal(list.total_count, summary.uncategorised_count);
+    assert.equal(list.total_count, 2);
+    const ids = list.rows.map((r) => r.id);
+    assert.ok(ids.includes(creditTxn1) && ids.includes(debitTxn1));
+    assert.ok(!ids.includes(transferDebitLeg) && !ids.includes(transferCreditLeg));
+
+    // drill-down จากกลุ่ม "ยังไม่จัดหมวด" ของ category-breakdown ต้องได้จำนวนเท่าที่กลุ่มนั้นบอก
+    const breakdown = (await (await request('/api/reports/category-breakdown?month=2026-08')).json()) as {
+      rows: { category_id: number | null; txn_count: number }[];
+    };
+    const drill = (await (await request('/api/transactions?month=2026-08&direction=debit&uncategorised=true')).json()) as ListBody;
+    assert.equal(drill.total_count, breakdown.rows.find((r) => r.category_id === null)?.txn_count);
+  });
+
   // ---- ข้อ 5: accountCoverage / statement_behind — seed period_end สัมพัทธ์กับ current_date เท่านั้น ----
-  await t.test('ข้อ 5: statement_behind สัมพัทธ์กับ current_date — parsed ตรง threshold=false, เลยไปอีกเดือน=true, บัญชีใหม่เดือนนี้ไม่มี statement=false', async () => {
+  await t.test('ข้อ 5: statement_behind สัมพัทธ์กับ current_date — parsed ตรง threshold=false, ขาด 2 เดือน=true, บัญชีใหม่เดือนนี้ไม่มี statement=false', async () => {
+    // further_behind = สิ้นเดือน M-3 (ขาด 2 เดือน) — behind ทุกวันของเดือน ไม่ขึ้นกับช่วงผ่อนผันวันที่ 1–10
     const dates = await db.pool.query<{ threshold: string; further_behind: string; old_created_at: string }>(
       `select (date_trunc('month', current_date) - interval '1 day')::date as threshold,
-              (date_trunc('month', current_date) - interval '1 month' - interval '1 day')::date as further_behind,
+              (date_trunc('month', current_date) - interval '2 months' - interval '1 day')::date as further_behind,
               (date_trunc('month', current_date) - interval '6 months') as old_created_at`,
     );
     const { threshold, further_behind, old_created_at } = dates.rows[0]!;
@@ -239,21 +274,63 @@ test('reports API + transaction list/detail', async (t) => {
     const res = await request('/api/reports/data-coverage');
     assert.equal(res.status, 200);
     const body = (await res.json()) as {
-      rows: { bank_account_id: number; statement_behind: boolean; latest_parsed_period_end: string | null; parsed_statement_count: number }[];
+      rows: {
+        bank_account_id: number;
+        statement_behind: boolean;
+        statement_awaiting: boolean;
+        latest_parsed_period_end: string | null;
+        parsed_statement_count: number;
+      }[];
     };
 
     const onTimeRow = body.rows.find((r) => r.bank_account_id === accountOnTime);
     assert.equal(onTimeRow?.statement_behind, false);
+    assert.equal(onTimeRow?.statement_awaiting, false);
     assert.equal(onTimeRow?.latest_parsed_period_end, threshold);
 
     const behindRow = body.rows.find((r) => r.bank_account_id === accountBehind);
     assert.equal(behindRow?.statement_behind, true);
+    assert.equal(behindRow?.statement_awaiting, false);
     assert.equal(behindRow?.latest_parsed_period_end, further_behind);
 
     const newRow = body.rows.find((r) => r.bank_account_id === accountNew);
     assert.equal(newRow?.statement_behind, false);
+    assert.equal(newRow?.statement_awaiting, false);
     assert.equal(newRow?.parsed_statement_count, 0);
     assert.equal(newRow?.latest_parsed_period_end, null);
+  });
+
+  // ---- ช่วงผ่อนผันวันที่ 1–10: ส่ง today ตรงเข้า service ให้ผลไม่ขึ้นกับวันที่รันเทสต์ ----
+  await t.test('statement_awaiting/behind ตามช่วงผ่อนผัน — ขาดเดือนเดียวรอได้ถึงวันที่ 10, ขาด 2 เดือนช้าทันที, บัญชีใหม่ไม่เตือน', async () => {
+    const { accountCoverage } = await import('../src/services/report-query.js');
+    // เดือน M = มี.ค. 2030 → สิ้นเดือน M-1 = 2030-02-28, สิ้นเดือน M-2 = 2030-01-31
+    const old = '2029-01-01T00:00:00Z';
+    const missingLast = await seedAccount('666-6-66666-6', old);
+    await seedStatement(missingLast, 'msg-grace-last', { periodStart: '2030-01-01', periodEnd: '2030-01-31' });
+    const missingTwo = await seedAccount('777-7-77777-7', old);
+    await seedStatement(missingTwo, 'msg-grace-two', { periodStart: '2029-12-01', periodEnd: '2029-12-31' });
+    const neverParsed = await seedAccount('888-8-88888-8', old);
+    const createdThisMonth = await seedAccount('999-9-99999-9', '2030-03-01T12:00:00Z');
+
+    const at = async (today: string) => {
+      const rows = await accountCoverage(userId, today);
+      return (id: number) => {
+        const r = rows.find((x) => x.bank_account_id === id)!;
+        return { behind: r.statement_behind, awaiting: r.statement_awaiting };
+      };
+    };
+
+    const day2 = await at('2030-03-02');
+    assert.deepEqual(day2(missingLast), { behind: false, awaiting: true });
+    assert.deepEqual(day2(missingTwo), { behind: true, awaiting: false });
+    assert.deepEqual(day2(neverParsed), { behind: true, awaiting: false });
+    assert.deepEqual(day2(createdThisMonth), { behind: false, awaiting: false });
+
+    assert.deepEqual((await at('2030-03-10'))(missingLast), { behind: false, awaiting: true });
+
+    const day11 = await at('2030-03-11');
+    assert.deepEqual(day11(missingLast), { behind: true, awaiting: false });
+    assert.deepEqual(day11(createdThisMonth), { behind: false, awaiting: false });
   });
 
   await t.test('GET /transactions — ไม่ fan-out บน split, pagination ครบ, ตัวกรอง account ใช้ได้', async () => {

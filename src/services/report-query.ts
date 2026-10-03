@@ -20,8 +20,14 @@ end`;
 export const EFFECTIVE_REVIEW_STATUS_SQL = "coalesce(an.review_status, 'reviewed')";
 
 // รายงาน (summary/cash-flow/category-breakdown) ตัดทั้งคู่โอนภายในและรายการที่ผู้ใช้ excluded เอง —
-// แต่ list ธุรกรรม (TXN_FILTER_SQL) ต้องไม่ใช้ตัวนี้ ผู้ใช้ต้องยังเห็น internal transfer ในตารางได้ (§8.3/§8.4)
+// แต่ list ธุรกรรม (TXN_FILTER_SQL) ห้ามใช้ตัวนี้กรองทั้งรายการ ผู้ใช้ต้องยังเห็น internal transfer ในตารางได้ (§8.3/§8.4)
+// ยกเว้นผ่าน IS_UNCATEGORISED_SQL ด้านล่างเท่านั้น
 export const EXCLUDED_FROM_FLOW_SQL = `(${IS_INTERNAL_TRANSFER_SQL} or coalesce(an.classification, '') = 'excluded')`;
+
+// "ยังไม่จัดหมวด" นิยามเดียวทั้งระบบ: ไม่มี split และอยู่ใน flow รายรับ/รายจ่าย — คู่โอนภายใน/excluded ไม่ต้องจัดหมวด
+// ใช้ร่วมกันระหว่าง uncategorised_count ของ /reports/summary กับ filter uncategorised=true ของ /transactions
+// ถ้าแยกเขียนสองที่ chip หน้าธุรกรรมกับการ์ดแดชบอร์ดจะนับไม่ตรงกัน และคู่โอนจะค้างในคิวตลอดไป
+export const IS_UNCATEGORISED_SQL = `(not exists (select 1 from txn_split s where s.txn_id = t.id) and not ${EXCLUDED_FROM_FLOW_SQL})`;
 
 /**
  * "ผู้ใช้มี Tax Entity ที่ใช้งานอยู่แค่ตัวเดียว → คืน id ของตัวนั้น ไม่งั้นคืน NULL"
@@ -208,7 +214,7 @@ export const TXN_FILTER_SQL = `
     and ($4::bigint is null or t.bank_account_id = $4)
     and ($5::bigint is null or a.bank_id = $5)
     and ($6::bigint is null or exists (select 1 from txn_split s where s.txn_id = t.id and s.category_id = $6))
-    and ($7::boolean is false or not exists (select 1 from txn_split s2 where s2.txn_id = t.id))
+    and ($7::boolean is false or ${IS_UNCATEGORISED_SQL})
     and ($8::text is null or t.direction = $8)
     and ($9::text is null or a.account_purpose = $9)
     and ($10::boolean is null or (${IS_INTERNAL_TRANSFER_SQL}) = $10)
@@ -260,11 +266,20 @@ export type AccountCoverage = {
   parse_failed_count: number;
   checksum_failed_count: number;
   statement_behind: boolean;
+  statement_awaiting: boolean;
 };
+
+// ธนาคารส่ง statement รายเดือนช่วงต้นเดือนถัดไป — ถึงวันนี้ (รวม) ขาดแค่เดือนที่แล้วยังนับว่า "รอ" ไม่ใช่ "ช้า"
+const STATEMENT_GRACE_DAY = 10;
 
 // กติกาข้อมูลขาดช่วง (§8.1/§8.2): ระหว่างเดือน M เทียบ period_end ล่าสุดของ statement ที่ parsed แล้ว
 // กับ "วันสุดท้ายของเดือน M-1" เท่านั้น — เช็คเดือน M ตรง ๆ ผิด เพราะ statement ของเดือนนี้ยังไม่มีจนกว่าเดือนจะปิด
-// (ทุกบัญชีจะเตือน false ถาวร) ใช้ max(period_end) อย่างเดียว ไม่นับจำนวน statement เป็นตัวชี้วัด เพราะ migration 003
+// (ทุกบัญชีจะเตือน false ถาวร)
+// - statement_awaiting: ครอบถึงสิ้นเดือน M-2 แล้ว ขาดเฉพาะเดือน M-1 และวันนี้ยัง <= STATEMENT_GRACE_DAY
+// - statement_behind: ไม่ถึงสิ้นเดือน M-1 และไม่ใช่ awaiting — ขาด 2 เดือนขึ้นไปช้าทันที, ขาดเดือนเดียวช้าเมื่อพ้นช่วงผ่อนผัน
+//   ไม่มี statement parsed เลย = behind (awaiting เป็น false)
+// `today` (YYYY-MM-DD) ใช้แทน current_date ได้เพื่อเทสต์ — route ไม่ส่ง
+// ใช้ max(period_end) อย่างเดียว ไม่นับจำนวน statement เป็นตัวชี้วัด เพราะ migration 003
 // ถอด unique (bank_account_id, period_start, period_end) แล้ว — SCB ส่งไฟล์รายเดือนทับไฟล์ย้อนหลัง (on-demand)
 // ของช่วงเดียวกันได้ตามปกติ นับ statement ต่อเดือนพิสูจน์ความครบถ้วนไม่ได้ มีแต่ max(period_end) ที่มีความหมาย
 // guard a.created_at กันบัญชีที่เพิ่งเพิ่มเดือนนี้ไม่ให้เตือนเท็จ (ไม่มีคอลัมน์ opened_at ในสคีมา ใช้ created_at
@@ -274,9 +289,12 @@ export type AccountCoverage = {
 // อยู่เดือนไหน (period_start/period_end เป็น null ตาม migration 002)
 // ponytail: ถ้าต้องแม่นระดับวัน/ตรวจ gap ภายใน ให้ไปทาง range_agg(daterange(period_start, period_end)) ต่อบัญชี
 // (PG 16 รองรับ) — ยังไม่คุ้มความซับซ้อนตอนนี้
-export async function accountCoverage(userId: number): Promise<AccountCoverage[]> {
+export async function accountCoverage(userId: number, today?: string): Promise<AccountCoverage[]> {
   const { rows } = await query<AccountCoverage>(
-    `select
+    `with d as (
+       select coalesce($2::date, current_date) as today
+     )
+     select
        a.id as bank_account_id,
        a.nickname as account_nickname,
        b.id as bank_id,
@@ -293,18 +311,31 @@ export async function accountCoverage(userId: number): Promise<AccountCoverage[]
        count(*) filter (where st.status = 'parse_failed') as parse_failed_count,
        count(*) filter (where st.status = 'checksum_failed') as checksum_failed_count,
        case
-         when a.created_at >= date_trunc('month', current_date) then false
+         when a.created_at >= date_trunc('month', d.today) then false
+         -- ในช่วงผ่อนผันเส้นตายถอยไปสิ้นเดือน M-2 พ้นช่วงแล้วใช้สิ้นเดือน M-1
          else coalesce(max(st.period_end) filter (where st.status = 'parsed'), '-infinity'::date)
-              < (date_trunc('month', current_date) - interval '1 day')::date
-       end as statement_behind
+              < case when extract(day from d.today) <= ${STATEMENT_GRACE_DAY}
+                     then (date_trunc('month', d.today) - interval '1 month' - interval '1 day')::date
+                     else (date_trunc('month', d.today) - interval '1 day')::date
+                end
+       end as statement_behind,
+       case
+         when a.created_at >= date_trunc('month', d.today) then false
+         else extract(day from d.today) <= ${STATEMENT_GRACE_DAY}
+              and coalesce(max(st.period_end) filter (where st.status = 'parsed'), '-infinity'::date)
+                  >= (date_trunc('month', d.today) - interval '1 month' - interval '1 day')::date
+              and max(st.period_end) filter (where st.status = 'parsed')
+                  < (date_trunc('month', d.today) - interval '1 day')::date
+       end as statement_awaiting
      from bank_account a
+     cross join d
      join bank b on b.id = a.bank_id
      join email_account e on e.id = a.email_account_id
      left join statement st on st.bank_account_id = a.id
      where a.user_id = $1 and a.archived_at is null
-     group by a.id, b.id, e.id
+     group by a.id, b.id, e.id, d.today
      order by a.nickname`,
-    [userId],
+    [userId, today ?? null],
   );
   return rows;
 }

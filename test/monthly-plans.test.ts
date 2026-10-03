@@ -341,7 +341,9 @@ test('monthly planning API', async (t) => {
     const plan = await getPlan(MONTH_RECONCILE);
     await db.pool.query(
       `insert into monthly_plan_item (monthly_plan_id, kind, name, planned_amount_satang, due_date)
-       values ($1, 'expense', 'เลยกำหนด', 1000, current_date - 1), ($1, 'expense', 'ไม่มีกำหนด', 1000, null)`,
+       values ($1, 'expense', 'เลยกำหนด', 1000, current_date - 1), ($1, 'expense', 'ไม่มีกำหนด', 1000, null),
+              ($1, 'payroll_deduction', 'หักเลยวัน', 1000, current_date - 1),
+              ($1, 'reserve', 'กันเงินเลยวัน', 1000, current_date - 1)`,
       [
         (
           await db.pool.query<{ id: number }>('select id from monthly_plan where user_id = $1 and month_start = $2', [
@@ -354,6 +356,11 @@ test('monthly planning API', async (t) => {
     const withDates = await getPlan(MONTH_RECONCILE);
     assert.equal(itemNamed(withDates, 'เลยกำหนด').payment_state, 'overdue');
     assert.equal(itemNamed(withDates, 'ไม่มีกำหนด').payment_state, 'unpaid');
+    // รายการหัก/เงินกันไว้ไม่ใช่บิล — เลยวันก็ไม่ overdue และตารางต้องนับตรงกับ overdue_count
+    assert.equal(itemNamed(withDates, 'หักเลยวัน').payment_state, 'unpaid');
+    assert.equal(itemNamed(withDates, 'กันเงินเลยวัน').payment_state, 'unpaid');
+    assert.equal(withDates.payment_status.overdue_count, 1);
+    assert.equal(withDates.items.filter((i) => i.payment_state === 'overdue').length, withDates.payment_status.overdue_count);
   });
 
   await t.test('Reserve ลดเงินเหลือใช้ตามแผนแต่ไม่เป็น Expense และ mark paid ไม่สร้าง txn', async () => {

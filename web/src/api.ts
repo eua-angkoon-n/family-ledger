@@ -26,6 +26,9 @@ export type User = {
   status: 'pending' | 'approved' | 'rejected';
 };
 
+// GET /api/me — pending_user_count มีเฉพาะเมื่อผู้เรียกเป็นแอดมิน (จำนวนผู้ใช้ status = 'pending')
+export type MeResponse = { user: User | null; version: string; pending_user_count?: number };
+
 export type Bank = {
   id: number;
   name: string;
@@ -38,8 +41,31 @@ export type Bank = {
   is_active: boolean;
 };
 
+// GET /api/admin/banks (แอดมิน) — account_count = bank_account ทุกแถวที่ผูกธนาคารนี้ (รวมที่เก็บเข้าคลัง — FK กันลบ)
+export type AdminBank = Bank & { account_count: number };
+// PATCH /api/banks/:id — เปลี่ยนผู้ส่ง/โดเมน/หัวข้อ/ชื่อไฟล์/parser หรือเปิดใช้งานกลับ = server สั่งอ่านเมลใหม่ทั้งกล่อง
+// ของทุกกล่องที่มีบัญชี (ไม่เก็บเข้าคลัง) ของธนาคารนี้ อยู่เบื้องหลัง · resync_mailboxes = จำนวนกล่องที่สั่ง (0 = ไม่ได้สั่ง)
+export type BankUpdateResponse = Bank & { resync_mailboxes: number };
+// DELETE /api/banks/:id ที่ยังมีบัญชีผูก → 409 "ธนาคารนี้มีบัญชีผูกอยู่ N บัญชี ลบไม่ได้ — ปิดใช้งานแทน"
+
 // reauth_required_at มีค่า = Google ปฏิเสธ refresh token (invalid_grant) ต้องเชื่อม Gmail ใหม่ผ่าน /auth/google?reconnect=<id>
 export type EmailAccount = { id: number; email: string; last_synced_at: string | null; reauth_required_at: string | null };
+
+// POST /api/email-accounts/:id/sync — รอจนดึงจบแล้วตอบสรุป · 409 = ต้องเชื่อม Gmail ใหม่ · 502 = Gmail ขัดข้องชั่วคราว
+// statements_inserted = statement ใหม่ที่อ่านสำเร็จ (ไม่นับไฟล์ที่เปิดไม่ได้ และไม่นับไฟล์เดิมที่อ่านซ้ำ)
+// statements_failed = ไฟล์ในรอบนี้ที่เปิด/อ่านไม่ได้ (รวมไฟล์เดิมที่ยังพังอยู่) — รายละเอียดดูที่แดชบอร์ด
+// already_running = กล่องนี้กำลังดึงอยู่แล้ว (เช่น worker รอบชั่วโมง) server ไม่ได้ดึงซ้ำ ตัวเลขอื่นเป็น 0
+export type SyncSummary = {
+  messages_scanned: number;
+  statements_inserted: number;
+  statements_failed: number;
+  skipped: number;
+  already_running: boolean;
+};
+
+// POST /api/accounts และ PATCH /api/accounts/:id — resync = ระบบเริ่มอ่าน statement ใหม่ทั้งกล่องอีเมลอยู่เบื้องหลัง
+// (เพิ่มบัญชีใหม่เสมอ · แก้เฉพาะตอนเปลี่ยนธนาคาร/เลขบัญชี/รหัสผ่าน PDF/กล่องอีเมล — แก้ชื่อเล่น/พร้อมเพย์ไม่อ่านใหม่)
+export type AccountSaveResponse = { id: number; email_account_id: number; resync: boolean };
 
 export type Account = {
   id: number;
@@ -91,6 +117,10 @@ export type TxnListRow = {
   categories: TxnSplitInfo[];
   split_count: number;
 };
+
+// POST /api/transactions/review { txn_ids: number[] } (1–200 ตัว, ต้องเป็นของผู้ใช้ทั้งหมด) — ตั้ง review_status = reviewed
+// ทีละหลายแถวโดยไม่แตะ classification/note/ภาษี/การแยกยอด · reviewed = จำนวนแถวที่เปลี่ยนจริง (แถวที่ตรวจแล้วอยู่ก่อนไม่นับ)
+export type BulkReviewResponse = { reviewed: number };
 
 export type TxnListResponse = {
   from: string;
@@ -181,7 +211,10 @@ export type AccountCoverage = {
   pending_statement_count: number;
   parse_failed_count: number;
   checksum_failed_count: number;
+  /** ขาด statement เกินช่วงผ่อนผัน — ขาด 2 เดือนขึ้นไป หรือขาดเดือนที่แล้วและวันนี้เลยวันที่ 10 แล้ว */
   statement_behind: boolean;
+  /** ขาดเฉพาะ statement ของเดือนที่แล้วและยังอยู่ในช่วงผ่อนผัน (วันที่ 1–10) — "รอ statement" ไม่นับว่าช้า */
+  statement_awaiting: boolean;
 };
 
 export type FailedStatement = {
@@ -430,7 +463,8 @@ export const TAX_TREATMENT_LABEL: Record<TaxTreatment, string> = {
   excluded: 'ไม่นับรวม',
 };
 
-export type TaxBracketBreakdown = { upToSatang: number | null; rate: number; taxSatang: number };
+// incomeSatang = เงินได้สุทธิที่ตกอยู่ในขั้นนี้ — snapshot เก่าก่อน 1.5.0 ไม่มี field นี้ แต่หน้าเว็บไม่แสดงขั้นบันไดจาก snapshot
+export type TaxBracketBreakdown = { upToSatang: number | null; rate: number; taxSatang: number; incomeSatang: number };
 export type TaxEstimate = {
   ruleVersion: string;
   employmentIncomeSatang: number;
@@ -462,6 +496,10 @@ export type UnlinkedClaimSample = { id: number; deduction_type: string; claimed_
 
 export type TaxMissingDocument = {
   untreated_txn_count: number;
+  // แยกตามทิศเงินจาก untreated_txn_count (ผลรวมเท่ากัน): เงินเข้าที่ยังไม่ระบุ = อาจมีรายได้ตกหล่น (ประมาณการต่ำกว่าจริง)
+  // เงินออกที่ยังไม่ระบุ = อาจหักเป็นค่าใช้จ่ายได้ (ประมาณการได้แต่สูงกว่าจริง) — "ยังไม่ครบ" ดูเฉพาะฝั่งเงินเข้า
+  untreated_credit_count: number;
+  untreated_debit_count: number;
   unlinked_business_txn_count: number;
   unlinked_business_txn_samples: UnlinkedBusinessTxnSample[];
   draft_document_count: number;

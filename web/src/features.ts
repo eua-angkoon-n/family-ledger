@@ -5,3 +5,6 @@ export const TAX_PAGES_ENABLED: boolean = false;
 const TAX_PATHS: readonly string[] = ['/tax-documents', '/tax'];
 
 export const isPageEnabled = (path: string): boolean => TAX_PAGES_ENABLED || !TAX_PATHS.includes(path);
+
+// นำเข้าเอกสารภาษีจาก Gmail — ต้องตรงกับ TAX_GMAIL_ENABLED ใน src/routes/tax-documents.ts (server ตอบ 404 เมื่อปิด)
+export const TAX_GMAIL_IMPORT_ENABLED: boolean = false;

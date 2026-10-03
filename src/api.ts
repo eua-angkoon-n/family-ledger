@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { loadUser } from './auth.js';
+import { query } from './db.js';
 import { accountsRouter } from './routes/accounts.js';
 import { adminRouter } from './routes/admin.js';
 import { auditLogRouter } from './routes/audit-log.js';
@@ -30,9 +31,15 @@ export const api = Router();
 // รับความเสี่ยงนี้เพราะเจ้าของงานเลือก "แสดงมุมล่างขวาทุกหน้า" รวมหน้าเข้าสู่ระบบ และเลขเป็น semver
 // เปล่า ๆ ไม่มี git sha ไม่ผูกกับ CVE ของใคร ถ้าวันไหนอยากปิด: `...(user ? { version: APP_VERSION } : {})`
 // (ผลตามมา: badge หายจากหน้าเข้าสู่ระบบและหน้ารอโหลด แต่ยังอยู่ครบทุกหน้าหลังล็อกอิน)
+//
+// pending_user_count = ป้ายบนเมนูผู้ใช้ของแอดมิน — ใส่ key เฉพาะแอดมินที่ approved (คนอื่นไม่มี key เลย ไม่ใช่ 0)
 api.get('/me', async (req, res, next) => {
   try {
-    res.json({ user: await loadUser(req), version: APP_VERSION });
+    const user = await loadUser(req);
+    const pending = user?.is_admin && user.status === 'approved'
+      ? { pending_user_count: (await query<{ n: number }>("select count(*)::int as n from app_user where status = 'pending'")).rows[0]!.n }
+      : {};
+    res.json({ user, version: APP_VERSION, ...pending });
   } catch (e) {
     next(e);
   }

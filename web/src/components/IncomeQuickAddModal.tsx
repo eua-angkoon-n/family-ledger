@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, MenuItem, Stack, TextField, Typography } from '@mui/material';
+import { Alert, MenuItem, Stack, TextField, Typography } from '@mui/material';
 import { patch, post, req, type Account, type IncomeRecord, type TxnDetail } from '../api.js';
 import Modal from '../Modal.js';
-import { formatBaht, parseBahtToSatang } from '../format.js';
+import { amountFieldHelp as amountHelp } from '../ui.js';
+import { AMOUNT_FORMAT_HINT, formatBaht, parseBahtToSatang, todayInBangkok } from '../format.js';
 import Money from './Money.js';
 
 // สร้าง/แก้ไข "รายได้เต็ม" (income_record) ได้จากทุกที่ที่ผู้ใช้อยู่ ไม่ต้องข้ามไปหน้าวางแผน:
@@ -33,10 +34,6 @@ function amountOrNull(text: string): number | null {
   return parseBahtToSatang(text);
 }
 
-function todayInBangkok(): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-}
-
 function sumOfType(record: IncomeRecord | null, type: string): string {
   if (!record) return '';
   const total = record.deductions.filter((d) => d.deduction_type === type).reduce((s, d) => s + d.amount_satang, 0);
@@ -55,6 +52,9 @@ export default function IncomeQuickAddModal({ open, onClose, onSaved, txn, incom
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  // ค่าตอนเปิด (หรือตอนโหลดค่าเดิมเสร็จ) — ต่างจากนี้ = มีการแก้ค้าง Modal ถามก่อนปิด (The Unsaved Modal Rule)
+  const values = JSON.stringify([name, gross, incomeDate, accountId, socialSecurity, withholding]);
+  const [initialValues, setInitialValues] = useState(values);
 
   // โหมดแก้ไข: ดึงค่าเดิมมาเติมฟอร์ม (ไม่มี GET /income-records/:id — ดึงทั้งเดือนแล้วหาเอา)
   useEffect(() => {
@@ -73,6 +73,11 @@ export default function IncomeQuickAddModal({ open, onClose, onSaved, txn, incom
           setAccountId(row.bank_account_id == null ? '' : String(row.bank_account_id));
           setSocialSecurity(sumOfType(row, 'social_security'));
           setWithholding(sumOfType(row, 'withholding_tax'));
+          setInitialValues(JSON.stringify([
+            row.name, formatBaht(row.gross_amount_satang), row.income_date ?? todayInBangkok(),
+            row.bank_account_id == null ? '' : String(row.bank_account_id),
+            sumOfType(row, 'social_security'), sumOfType(row, 'withholding_tax'),
+          ]));
         }
       })
       .catch((e: Error) => { if (current) setError(e.message); })
@@ -86,8 +91,9 @@ export default function IncomeQuickAddModal({ open, onClose, onSaved, txn, incom
   const netSatang = grossSatang == null || ssSatang == null || whSatang == null ? null : grossSatang - ssSatang - whSatang;
 
   const save = async () => {
+    if (busy || loading) return;
     if (grossSatang == null || ssSatang == null || whSatang == null || netSatang == null) {
-      setError('กรอกจำนวนเงินให้ถูกต้อง ไม่เกิน 2 ตำแหน่งทศนิยม');
+      setError(`จำนวนเงินไม่ถูกต้อง — ${AMOUNT_FORMAT_HINT}`);
       return;
     }
     if (netSatang < 0) {
@@ -137,8 +143,15 @@ export default function IncomeQuickAddModal({ open, onClose, onSaved, txn, incom
   const title = editing ? 'แก้ไขรายได้เต็ม' : txn ? 'บันทึกเป็นรายได้เต็ม' : 'เพิ่มรายได้เต็มเอง';
 
   return (
-    <Modal open={open} title={title} onClose={onClose} busy={busy}>
-      <Stack component="form" spacing={2} onSubmit={(e) => { e.preventDefault(); void save(); }}>
+    <Modal
+      open={open}
+      title={title}
+      onClose={onClose}
+      busy={busy}
+      dirty={values !== initialValues}
+      footer={{ formId: 'income-quick-form', submitLabel: editing ? 'บันทึกการแก้ไข' : 'บันทึกรายได้เต็ม' }}
+    >
+      <Stack component="form" id="income-quick-form" spacing={2} onSubmit={(e) => { e.preventDefault(); void save(); }}>
         <Typography variant="body2" color="text.secondary">
           ภาษีต้องใช้ยอด "ก่อนหัก" — ถ้าสลิปเงินเดือนมีหักประกันสังคม/ภาษี ณ ที่จ่าย ให้กรอกเพิ่มด้วย
           {txn && <> ยอดที่เข้าบัญชีจริงคือ <Money satang={txn.amount_satang} /> ซึ่งเป็นยอดหลังหักแล้ว</>}
@@ -147,6 +160,7 @@ export default function IncomeQuickAddModal({ open, onClose, onSaved, txn, incom
         <TextField
           label="ยอดเต็มก่อนหัก (บาท)" required value={gross} onChange={(e) => setGross(e.target.value)}
           disabled={loading}
+          {...amountHelp(gross)}
           slotProps={{ htmlInput: { inputMode: 'decimal' } }}
         />
         <TextField
@@ -167,11 +181,13 @@ export default function IncomeQuickAddModal({ open, onClose, onSaved, txn, incom
         <TextField
           label="ประกันสังคม (บาท, ไม่บังคับ)" value={socialSecurity} onChange={(e) => setSocialSecurity(e.target.value)}
           disabled={loading}
+          {...amountHelp(socialSecurity)}
           slotProps={{ htmlInput: { inputMode: 'decimal' } }}
         />
         <TextField
           label="ภาษีหัก ณ ที่จ่าย (บาท, ไม่บังคับ)" value={withholding} onChange={(e) => setWithholding(e.target.value)}
           disabled={loading}
+          {...amountHelp(withholding)}
           slotProps={{ htmlInput: { inputMode: 'decimal' } }}
         />
         {netSatang != null && (
@@ -179,10 +195,10 @@ export default function IncomeQuickAddModal({ open, onClose, onSaved, txn, incom
             ยอดสุทธิหลังหัก: <Money satang={netSatang} tone={netSatang < 0 ? 'expense' : 'income'} />
           </Typography>
         )}
+        {netSatang != null && netSatang < 0 && (
+          <Typography variant="body2" color="error">ยอดหักรวมมากกว่ายอดเต็ม — ลดยอดหักก่อนบันทึก</Typography>
+        )}
         {error && <Alert severity="error">{error}</Alert>}
-        <Button type="submit" variant="contained" disabled={busy || loading} aria-busy={busy}>
-          {busy ? 'กำลังบันทึก…' : editing ? 'บันทึกการแก้ไข' : 'บันทึกรายได้เต็ม'}
-        </Button>
       </Stack>
     </Modal>
   );
