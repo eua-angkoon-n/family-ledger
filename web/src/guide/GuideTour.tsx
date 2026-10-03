@@ -9,6 +9,11 @@ const GAP = 12;
 /** ต้องอยู่เหนือ AppBar/Fab แต่ต่ำกว่า Dialog(1300) และ Snackbar(1400) ของ MUI */
 const Z = 1200;
 
+/** `**คำ**` ใน guides.ts = ตัวหนา — ใช้ทั้งการ์ดนี้และหน้า /help (`pages/Help.tsx`) */
+export function Emphasis({ text }: { text: string }) {
+  return <>{text.split(/\*\*(.+?)\*\*/).map((part, i) => (i % 2 === 1 ? <strong key={i}>{part}</strong> : part))}</>;
+}
+
 /**
  * Tour ไฮไลต์ทีละขั้น เขียนด้วย MUI ล้วน ไม่เพิ่ม dependency
  *
@@ -151,7 +156,7 @@ export function GuideTour({ guide, onClose }: { guide: Guide; onClose: () => voi
             <IconButton size="small" onClick={onClose} aria-label="ปิดคู่มือ"><CloseRounded /></IconButton>
           </Stack>
 
-          <Typography color="text.secondary" sx={descriptionSx}>{step.body}</Typography>
+          <Typography color="text.secondary" sx={descriptionSx}><Emphasis text={step.body} /></Typography>
 
           <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end', pt: 0.5 }}>
             {index > 0 && <Button color="inherit" onClick={back}>ย้อนกลับ</Button>}

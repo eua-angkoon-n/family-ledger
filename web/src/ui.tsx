@@ -96,6 +96,7 @@ export function VersionBadge({ version }: { version: string | null }) {
         pointerEvents: 'none',
         userSelect: 'none',
         zIndex: (theme) => theme.zIndex.fab,
+        displayPrint: 'none', // fixed = ซ้ำทุกหน้ากระดาษตอนพิมพ์ (คู่มือ, หน้าภาษี)
         ...dataTextSx,
       }}
     >

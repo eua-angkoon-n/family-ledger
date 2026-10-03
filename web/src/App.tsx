@@ -1,8 +1,9 @@
-import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useState, type ReactElement, type ReactNode } from 'react';
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import {
   Alert,
   AppBar,
+  Badge,
   Box,
   Button,
   Container,
@@ -40,13 +41,12 @@ import ReceiptLongRounded from '@mui/icons-material/ReceiptLongRounded';
 import ReceiptRounded from '@mui/icons-material/ReceiptRounded';
 import SchoolRounded from '@mui/icons-material/SchoolRounded';
 import SettingsRounded from '@mui/icons-material/SettingsRounded';
-import { req, type EmailAccount, type User } from './api.js';
+import { req, type EmailAccount, type MeResponse, type User } from './api.js';
 import Accounts from './Accounts.js';
-import Admin from './Admin.js';
 import ThemeModeToggle from './components/ThemeModeToggle.js';
 import { isPageEnabled } from './features.js';
 import { brandCopySx, dataTextSx, descriptionSx } from './theme.js';
-import { APP_NAME, FeedbackSnackbar, PageHeader, TableSkeleton, VersionBadge, type Notice } from './ui.js';
+import { APP_NAME, FeedbackSnackbar, TableSkeleton, VersionBadge, visuallyHiddenSx, type Notice } from './ui.js';
 
 // แยก chunk เฉพาะ Dashboard — เป็นหน้าเดียวที่ดึง @mui/x-charts (~600KB) เข้ามา หน้าอื่นไม่ต้องรอโหลดมันด้วย
 const Dashboard = lazy(() => import('./pages/Dashboard.js'));
@@ -58,8 +58,8 @@ const TaxDocuments = lazy(() => import('./pages/TaxDocuments.js'));
 const TaxSummary = lazy(() => import('./pages/TaxSummary.js'));
 const AuditLog = lazy(() => import('./pages/AuditLog.js'));
 const Help = lazy(() => import('./pages/Help.js'));
-
-type SettingsTab = 'banks' | 'users' | 'audit';
+// แอดมินเท่านั้น — ผู้ใช้ทั่วไปไม่ต้องโหลดโค้ดหน้าตั้งค่า
+const SettingsPage = lazy(() => import('./Admin.js'));
 
 // ?gmail=<code> ที่ OAuth callback ส่งกลับมาหลังเชื่อม/เชื่อม Gmail ใหม่ — โค้ดที่ไม่รู้จักไม่แสดงอะไร
 const GMAIL_NOTICE: Record<string, Notice> = {
@@ -98,7 +98,10 @@ function GmailBanner({ mailboxes }: { mailboxes: EmailAccount[] | null }) {
   );
 }
 
-const NAV_ITEMS = [
+// a11yLabel = ชื่อที่ screen reader อ่านเมื่อต่างจากชื่อที่เห็น (ตั้งค่า + จำนวนผู้ใช้รออนุมัติ)
+type NavItem = { path: string; label: string; icon: ReactElement; a11yLabel?: string };
+
+const NAV_ITEMS: NavItem[] = [
   { path: '/dashboard', label: 'แดชบอร์ด', icon: <AssessmentRounded /> },
   { path: '/transactions', label: 'ธุรกรรม', icon: <ReceiptLongRounded /> },
   { path: '/planning', label: 'วางแผน', icon: <EventRepeatRounded /> },
@@ -108,17 +111,28 @@ const NAV_ITEMS = [
   { path: '/accounts', label: 'บัญชีของฉัน', icon: <AccountBalanceRounded /> },
 ].filter((n) => isPageEnabled(n.path));
 
-// แอดมินเท่านั้น — ต่อท้ายเมนูทั้งใน tabs และ drawer
-const SETTINGS_ITEM = { path: '/settings', label: 'ตั้งค่า', icon: <SettingsRounded /> };
-
-type NavItem = (typeof NAV_ITEMS)[number];
+// แอดมินเท่านั้น — ต่อท้ายเมนูทั้งใน tabs และ drawer · มีผู้ใช้รออนุมัติ = ตัวนับ warning บนไอคอน (The Issue Count Rule)
+// ตัวเลขซ่อนจาก screen reader แล้วบอกเป็นประโยคในชื่อของเมนูแทน
+function settingsItem(pending: number): NavItem {
+  if (pending <= 0) return { path: '/settings', label: 'ตั้งค่า', icon: <SettingsRounded /> };
+  return {
+    path: '/settings',
+    label: 'ตั้งค่า',
+    a11yLabel: `ตั้งค่า (รออนุมัติ ${pending} คน)`,
+    icon: (
+      <Badge badgeContent={pending} max={99} color="warning" slotProps={{ badge: { 'aria-hidden': true } }}>
+        <SettingsRounded />
+      </Badge>
+    ),
+  };
+}
 
 // Tabs อ่าน value จากลูกตรง ๆ แล้ว clone ส่ง selected/onChange/indicator มาให้ — ใส่ Tooltip เป็นลูกของ Tabs ตรง ๆ
 // ไม่ได้ (value หาย tab ไม่ active) wrapper นี้จึงรับ value แล้วส่ง props ที่ Tabs ฉีดมาทั้งหมดต่อให้ Tab
 // iconOnly (900–1199px) ซ่อนชื่อเมนูไว้ใน Tooltip; aria-label ตั้งตลอดให้ชื่อที่ screen reader อ่านตรงกับชื่อเมนู
 function NavTab({ item, iconOnly, ...tabsProps }: { item: NavItem; iconOnly: boolean; value: string }) {
   return (
-    <Tooltip title={iconOnly ? item.label : ''}>
+    <Tooltip title={iconOnly ? (item.a11yLabel ?? item.label) : ''}>
       <Tab
         {...tabsProps}
         component={Link}
@@ -126,7 +140,7 @@ function NavTab({ item, iconOnly, ...tabsProps }: { item: NavItem; iconOnly: boo
         icon={item.icon}
         iconPosition="start"
         label={iconOnly ? undefined : item.label}
-        aria-label={item.label}
+        aria-label={item.a11yLabel ?? item.label}
         sx={{ minWidth: iconOnly ? 48 : 104 }}
       />
     </Tooltip>
@@ -135,6 +149,13 @@ function NavTab({ item, iconOnly, ...tabsProps }: { item: NavItem; iconOnly: boo
 
 // รายการที่เลือกใน drawer เหมือน tab ที่เลือก: พื้น sidebar-accent มาจาก theme ส่วนนี้ทำให้ไอคอนใช้สีตัวอักษรเดียวกัน
 const drawerItemSx = { '&.Mui-selected, &.Mui-selected .MuiListItemIcon-root': { color: 'brand.sidebarAccentForeground' } } as const;
+// ไอคอนคู่มือ/ประวัติบน AppBar ตอนอยู่หน้านั้น = สีเดียวกับ tab ที่เลือก · ring ใช้สีตัวอักษร (ring ของธีมบน sidebar-accent ไม่ผ่าน)
+const activeIconSx = {
+  bgcolor: 'brand.sidebarAccent',
+  color: 'brand.sidebarAccentForeground',
+  '&:hover': { bgcolor: 'brand.sidebarAccent' },
+  '&.Mui-focusVisible': { outlineColor: 'currentColor' },
+} as const;
 
 // Tabs ต้อง value ตรงกับ value ของ Tab ลูกเป๊ะ — ตัดเหลือ segment แรกของ path (ตัด query/segment ย่อยทิ้ง
 // เช่น /transactions?month=... ยังนับเป็น /transactions) ไม่ตรงกับ NAV_ITEMS/settings เลย = ไม่มี tab ไหน active
@@ -144,39 +165,6 @@ function activeNavPath(pathname: string): string | false {
   const top = '/' + (pathname.split('/')[1] ?? '');
   const known = [...NAV_ITEMS.map((n) => n.path), '/settings'] as string[];
   return known.includes(top) ? top : false;
-}
-
-function SettingsPage({ userId }: { userId: number }) {
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>('banks');
-  return (
-    <Box component="section" aria-labelledby="settings-heading">
-      <PageHeader
-        level={1}
-        id="settings-heading"
-        title="ตั้งค่า"
-        description="จัดการแหล่งข้อมูล สมาชิก และการเชื่อมต่อของ Hyacinthia Ledger"
-      />
-      <Tabs
-        value={settingsTab}
-        onChange={(_, value: SettingsTab) => setSettingsTab(value)}
-        variant="scrollable"
-        scrollButtons="auto"
-        aria-label="เมนูตั้งค่า"
-        sx={{ mt: 2, borderBottom: 1, borderColor: 'divider' }}
-      >
-        <Tab value="banks" label="ธนาคาร (แอดมิน)" />
-        <Tab value="users" label="ผู้ใช้ (แอดมิน)" />
-        <Tab value="audit" label="บันทึกระบบ (แอดมิน)" />
-      </Tabs>
-
-      {settingsTab === 'banks' && <Admin.Banks />}
-      {settingsTab === 'users' && <Admin.Users currentUserId={userId} />}
-      {/* ใช้คอมโพเนนต์เดียวกับหน้า /audit — ต่างกันแค่ variant ที่ส่ง scope=all ไปให้ API */}
-      {settingsTab === 'audit' && (
-        <Suspense fallback={<TableSkeleton rows={8} />}><AuditLog variant="admin" /></Suspense>
-      )}
-    </Box>
-  );
 }
 
 function AuthPanel({ children, version }: { children: ReactNode; version: string | null }) {
@@ -197,6 +185,8 @@ export default function App() {
   const routerLocation = useLocation();
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const [version, setVersion] = useState<string | null>(null);
+  // จำนวนผู้ใช้รออนุมัติ (มีค่าเฉพาะแอดมิน) — ตัวนับบนเมนูตั้งค่าและแท็บผู้ใช้
+  const [pendingUserCount, setPendingUserCount] = useState(0);
   const [loggingOut, setLoggingOut] = useState(false);
   // OAuth callback ส่งผลกลับมาเป็น ?auth_error= / ?gmail= — อ่านตอน render แรก (ก่อน `/` ถูก Navigate ไป /dashboard จน query หาย)
   const [oauthParams] = useState(() => new URLSearchParams(window.location.search));
@@ -228,13 +218,18 @@ export default function App() {
   }, [user?.status]);
 
   useEffect(() => {
-    req<{ user: User | null; version: string }>('/api/me')
+    req<MeResponse>('/api/me')
       .then((response) => {
         setUser(response.user);
         setVersion(response.version);
+        setPendingUserCount(response.pending_user_count ?? 0);
       })
       .catch(() => setUser(null));
   }, []);
+  // หลังแอดมินเปลี่ยนสถานะผู้ใช้ในหน้าตั้งค่า — อ่านเฉพาะตัวนับใหม่ (ตัวนับเป็นของเสริม โหลดไม่ได้คงค่าเดิม)
+  const refreshPendingUserCount = () => {
+    req<MeResponse>('/api/me').then((response) => setPendingUserCount(response.pending_user_count ?? 0)).catch(() => {});
+  };
 
   // หน้าก่อนเข้าระบบไม่มี PageHeader (ที่ตั้ง document.title ให้หน้าอื่น) — ตั้งชื่อแท็บที่นี่
   useEffect(() => {
@@ -319,13 +314,17 @@ export default function App() {
     );
   }
 
-  const navItems = user.is_admin ? [...NAV_ITEMS, SETTINGS_ITEM] : NAV_ITEMS;
+  const navItems = user.is_admin ? [...NAV_ITEMS, settingsItem(pendingUserCount)] : NAV_ITEMS;
   const activeNav = activeNavPath(routerLocation.pathname);
+  // คู่มือ/ประวัติไม่อยู่ใน tabs — ไอคอนบน AppBar และรายการใน drawer บอกเองว่าอยู่หน้านั้น (aria-current + พื้น sidebar-accent)
+  const topPath = '/' + (routerLocation.pathname.split('/')[1] ?? '');
+  const onHelp = topPath === '/help';
+  const onAudit = topPath === '/audit';
   const closeMenu = () => setMenuOpen(false);
 
   return (
     <Box sx={{ minHeight: '100vh' }}>
-      <AppBar position="sticky" color="transparent" elevation={0} sx={{ bgcolor: 'background.default', borderBottom: 1, borderColor: 'divider' }}>
+      <AppBar position="sticky" color="transparent" elevation={0} sx={{ bgcolor: 'background.default', borderBottom: 1, borderColor: 'divider', displayPrint: 'none' }}>
         <Container maxWidth="lg">
           <Toolbar disableGutters sx={{ minHeight: { xs: 56, sm: 64 }, gap: { xs: 0.5, sm: 2 } }}>
             <Stack direction="row" spacing={1} sx={{ mr: 'auto', alignItems: 'center' }}>
@@ -366,10 +365,28 @@ export default function App() {
             {isDesktop && (
               <>
                 <Tooltip title="คู่มือการใช้งาน">
-                  <IconButton color="inherit" aria-label="คู่มือการใช้งาน" component={Link} to="/help"><MenuBookRounded /></IconButton>
+                  <IconButton
+                    color="inherit"
+                    aria-label="คู่มือการใช้งาน"
+                    aria-current={onHelp ? 'page' : undefined}
+                    component={Link}
+                    to="/help"
+                    sx={onHelp ? activeIconSx : undefined}
+                  >
+                    <MenuBookRounded />
+                  </IconButton>
                 </Tooltip>
                 <Tooltip title="ประวัติการเปลี่ยนแปลง">
-                  <IconButton color="inherit" aria-label="ประวัติการเปลี่ยนแปลง" component={Link} to="/audit"><HistoryRounded /></IconButton>
+                  <IconButton
+                    color="inherit"
+                    aria-label="ประวัติการเปลี่ยนแปลง"
+                    aria-current={onAudit ? 'page' : undefined}
+                    component={Link}
+                    to="/audit"
+                    sx={onAudit ? activeIconSx : undefined}
+                  >
+                    <HistoryRounded />
+                  </IconButton>
                 </Tooltip>
                 <Tooltip title="ออกจากระบบ">
                   <span>
@@ -412,7 +429,12 @@ export default function App() {
                 sx={drawerItemSx}
               >
                 <ListItemIcon>{item.icon}</ListItemIcon>
-                <ListItemText primary={item.label} />
+                {/* ไม่ใช้ aria-label ที่ปุ่ม (จะทับข้อความที่เห็น) — ส่วนที่ต่างจากชื่อที่เห็นเป็นข้อความซ่อน */}
+                <ListItemText
+                  primary={item.a11yLabel
+                    ? <>{item.label}<Box component="span" sx={visuallyHiddenSx}>{item.a11yLabel.slice(item.label.length)}</Box></>
+                    : item.label}
+                />
               </ListItemButton>
             </ListItem>
           ))}
@@ -420,13 +442,13 @@ export default function App() {
         <Divider />
         <List>
           <ListItem disablePadding>
-            <ListItemButton component={Link} to="/help" onClick={closeMenu}>
+            <ListItemButton component={Link} to="/help" selected={onHelp} aria-current={onHelp ? 'page' : undefined} onClick={closeMenu} sx={drawerItemSx}>
               <ListItemIcon><MenuBookRounded /></ListItemIcon>
               <ListItemText primary="คู่มือการใช้งาน" />
             </ListItemButton>
           </ListItem>
           <ListItem disablePadding>
-            <ListItemButton component={Link} to="/audit" onClick={closeMenu}>
+            <ListItemButton component={Link} to="/audit" selected={onAudit} aria-current={onAudit ? 'page' : undefined} onClick={closeMenu} sx={drawerItemSx}>
               <ListItemIcon><HistoryRounded /></ListItemIcon>
               <ListItemText primary="ประวัติการเปลี่ยนแปลง" />
             </ListItemButton>
@@ -454,10 +476,16 @@ export default function App() {
             <Route path="/student-loan" element={<Box component="section" aria-labelledby="student-loan-heading"><StudentLoan /></Box>} />
             {isPageEnabled('/tax-documents') && <Route path="/tax-documents" element={<Box component="section" aria-labelledby="tax-documents-heading"><TaxDocuments /></Box>} />}
             {isPageEnabled('/tax') && <Route path="/tax" element={<Box component="section" aria-labelledby="tax-summary-heading"><TaxSummary /></Box>} />}
-            <Route path="/audit" element={<Box component="section" aria-labelledby="audit-log-heading"><AuditLog /></Box>} />
-            <Route path="/help" element={<Box component="section" aria-labelledby="help-heading"><Help /></Box>} />
+            {/* แอดมินสลับ "ของฉัน / ทุกคน" ที่ /audit เอง (?scope=all) — หน้าตั้งค่ามีแค่ลิงก์มา */}
+            <Route path="/audit" element={<Box component="section" aria-labelledby="audit-log-heading"><AuditLog isAdmin={user.is_admin} /></Box>} />
+            <Route path="/help" element={<Box component="section" aria-labelledby="help-heading"><Help isAdmin={user.is_admin} /></Box>} />
             <Route path="/accounts" element={<Box component="section" aria-labelledby="accounts-heading"><Accounts /></Box>} />
-            {user.is_admin && <Route path="/settings" element={<SettingsPage userId={user.id} />} />}
+            {user.is_admin && (
+              <Route
+                path="/settings"
+                element={<SettingsPage userId={user.id} pendingUserCount={pendingUserCount} onUsersChanged={refreshPendingUserCount} />}
+              />
+            )}
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </Suspense>

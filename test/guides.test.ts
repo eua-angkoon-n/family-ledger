@@ -9,7 +9,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 import { isPageEnabled, TAX_PAGES_ENABLED } from '../web/src/features.js';
-import { GUIDES, HELP_ORDER, guideForPath } from '../web/src/guide/guides.js';
+import { GUIDES, HELP_GROUPS, guideForPath, helpSections } from '../web/src/guide/guides.js';
 
 const WEB_SRC = join(import.meta.dirname, '..', 'web', 'src');
 
@@ -54,11 +54,41 @@ test('คู่มือ: ทุก path มี route จริงใน App.tsx
   for (const path of Object.keys(GUIDES)) {
     assert.ok(app.includes(`path="${path}"`), `GUIDES มี ${path} แต่ App.tsx ไม่มี route นี้`);
   }
+  const grouped = HELP_GROUPS.flatMap((g) => g.paths);
   assert.deepEqual(
-    [...HELP_ORDER].sort(),
+    [...grouped].sort(),
     Object.keys(GUIDES).sort(),
-    'HELP_ORDER กับ GUIDES ต้องมีชุด path เดียวกัน ไม่งั้นหน้า /help จะตกคู่มือของบางหน้าไป',
+    'HELP_GROUPS ต้องมีทุก path ของ GUIDES ครบและไม่ซ้ำ ไม่งั้นหน้า /help จะตกคู่มือของบางหน้าไป',
   );
+});
+
+const shownPaths = (isAdmin: boolean, query?: string) => helpSections(isAdmin, query).flatMap((g) => g.sections.map((s) => s.path));
+
+test('/help: แอดมินเห็นทุกหน้าที่เปิดอยู่ คนอื่นไม่เห็นหน้าตั้งค่าและขั้นของแอดมิน', () => {
+  assert.deepEqual(shownPaths(true).sort(), Object.keys(GUIDES).filter(isPageEnabled).sort());
+  assert.deepEqual(shownPaths(false).sort(), Object.keys(GUIDES).filter((p) => isPageEnabled(p) && p !== '/settings').sort());
+  assert.ok(!helpSections(false).some((g) => g.id === 'admin'), 'กลุ่ม "ผู้ดูแล" ต้องไม่ขึ้นให้คนที่ไม่ใช่แอดมิน');
+  const steps = (isAdmin: boolean) => helpSections(isAdmin).flatMap((g) => g.sections.flatMap((s) => s.steps));
+  assert.ok(steps(true).some((s) => s.adminOnly));
+  assert.ok(!steps(false).some((s) => s.adminOnly));
+  // tour ไม่รู้ว่าใครเป็นแอดมิน — ขั้น adminOnly ถูกข้ามได้เพราะชี้ element ที่ขึ้นเฉพาะแอดมินเท่านั้น ไม่มี selector = รั่วให้ทุกคน
+  for (const [path, guide] of Object.entries(GUIDES)) {
+    for (const step of guide.steps) assert.ok(!step.adminOnly || step.selector, `${path} ขั้น "${step.title}" เป็น adminOnly แต่ไม่มี selector`);
+  }
+});
+
+test('/help: ค้นหาไม่สนตัวพิมพ์ ค้นข้าม ** ได้ และไม่พบ = ว่าง', () => {
+  // ชื่อหน้าตรง = ทุกขั้นของหน้านั้น
+  const planning = helpSections(true, 'วางแผนรายเดือน').flatMap((g) => g.sections).find((s) => s.path === '/planning');
+  assert.equal(planning?.steps.length, GUIDES['/planning']!.steps.length);
+  // ตรงเฉพาะในเนื้อหาขั้น = เหลือเฉพาะขั้นนั้น · "กับ**เดือนอนาคต**" ใน guides.ts
+  const rule = helpSections(true, 'กับเดือนอนาคต').flatMap((g) => g.sections);
+  assert.deepEqual(rule.map((s) => [s.path, s.steps.length]), [['/planning', 1]]);
+  assert.ok(shownPaths(false, 'gmail').includes('/accounts'), 'ค้น "gmail" ต้องเจอ "Gmail"');
+  // คำที่มีเฉพาะในหน้าตั้งค่า: แอดมินเจอ คนอื่นไม่เจอ
+  assert.deepEqual(shownPaths(true, 'DKIM'), ['/settings']);
+  assert.deepEqual(shownPaths(false, 'DKIM'), []);
+  assert.deepEqual(helpSections(true, 'ไม่มีคำนี้ในคู่มือแน่นอน'), []);
 });
 
 test('คู่มือ: guideForPath ตัดเหลือ segment แรกเหมือน activeNavPath', () => {
@@ -70,7 +100,7 @@ test('คู่มือ: guideForPath ตัดเหลือ segment แร�
 });
 
 test('features: ปิดหน้าภาษีแล้วต้องหายจาก /help และหน้าอื่นยังอยู่ครบ', () => {
-  const shown = HELP_ORDER.filter(isPageEnabled);
+  const shown = shownPaths(true);
   for (const path of ['/tax', '/tax-documents']) {
     assert.equal(shown.includes(path), TAX_PAGES_ENABLED, `${path} ต้องขึ้นใน /help ก็ต่อเมื่อ TAX_PAGES_ENABLED`);
   }
