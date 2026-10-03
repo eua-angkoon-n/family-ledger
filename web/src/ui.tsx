@@ -306,6 +306,16 @@ export function FeedbackSnackbar({
           severity={shown.severity}
           variant="filled"
           onClose={onClose}
+          // จอ < md: Snackbar แบบ center กว้างได้แค่ ~50vw (sm+ ยึด left 50%) หรือจอ − 16px (xs) — ข้อความตัดได้ทุกตัว (อีเมลยาว
+          // ไม่ดัน snackbar เกินจอ) และมีปุ่ม action = ปุ่มลงบรรทัดใต้ข้อความชิดขวา ไม่งั้นป้ายยาวบีบข้อความเหลือไม่กี่ตัวอักษร
+          // (message basis 0 + grow: อยู่บรรทัดเดียวกับไอคอน ไม่หล่นไปบรรทัดใหม่ทั้งก้อน) · ≥ md ไม่มีกฎเพิ่ม แถวเดียวเหมือนเดิม
+          sx={(theme) => ({
+            [theme.breakpoints.down('md')]: {
+              minWidth: 0,
+              '& .MuiAlert-message': { overflowWrap: 'anywhere', ...(shown.action && { flex: '1 1 0' }) },
+              ...(shown.action && { flexWrap: 'wrap', '& .MuiAlert-action': { flexBasis: '100%', paddingLeft: 0, paddingTop: 0 } }),
+            },
+          })}
           // action ของ Alert แทนที่ปุ่มปิดเดิม — ใส่ปุ่มปิดคืนเองคู่กัน · ระหว่างกำลังปิด (notice เป็น null) ปุ่ม action ไม่ทำงานซ้ำ
           action={
             shown.action && (

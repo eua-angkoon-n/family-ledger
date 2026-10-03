@@ -80,14 +80,19 @@ function IssueCount({ n }: { n: number }) {
   );
 }
 
-// error_reason ที่ worker เขียนจริง (src/worker.ts): decrypt_failed / pdftotext_failed / checksum_failed หรือข้อความ
-// exception ของ parser (เช่น "ไม่พบชนิด KBank statement") — มีแค่รหัสผ่าน PDF ที่ผู้ใช้แก้เองได้ (`?edit=` เปิดฟอร์มตั้งรหัสใหม่)
-// ที่เหลือเป็นเรื่องของ parser/เซิร์ฟเวอร์ จึงบอกให้แจ้งผู้ดูแล ไม่มีปุ่มที่กดแล้วแก้ไม่ได้ (ข้อความดิบไม่แสดง เลข #id พอให้ผู้ดูแลตามได้)
-// ไฟล์ที่เปิดได้แต่เลขบัญชีไม่ตรงบัญชีใด = statement ของบัญชีที่ไม่ได้เพิ่ม worker ข้ามไป ไม่ขึ้นในรายการนี้
+// error_reason ที่ worker เขียนจริง (src/worker.ts): decrypt_failed / pdftotext_failed / account_ambiguous / checksum_failed
+// หรือข้อความ exception ของ parser (เช่น "ไม่พบชนิด KBank statement") — ปุ่มแก้มีแค่รหัสผ่าน PDF (`?edit=` เปิดฟอร์มตั้งรหัสใหม่ของบัญชีนั้น)
+// account_ambiguous = เลขบัญชีที่เห็นในไฟล์ตรงกับหลายบัญชีของผู้ใช้ (บันทึกซ้ำใต้ทุกบัญชีที่ตรง) ผู้ใช้แก้เองที่หน้าบัญชีของฉันได้
+// แต่ไม่ใช่ที่บัญชีเดียว จึงไม่มีปุ่ม ข้อความบอกทางแทน · ที่เหลือเป็นเรื่องของ parser/เซิร์ฟเวอร์ จึงบอกให้แจ้งผู้ดูแล
+// (ข้อความดิบไม่แสดง เลข #id พอให้ผู้ดูแลตามได้) · ไฟล์ที่เปิดได้แต่เลขบัญชีไม่ตรงบัญชีใดเลย = statement ของบัญชีที่ไม่ได้เพิ่ม
+// worker ข้ามไป ไม่ขึ้นในรายการนี้
 function failureInfo(s: FailedStatement): { text: string; selfFix: boolean } {
   const reason = typeof s.error_reason === 'string' ? s.error_reason : '';
   if (reason === 'decrypt_failed') return { text: 'เปิดไฟล์ไม่ได้ เพราะรหัสผ่าน PDF ไม่ตรง', selfFix: true };
   if (reason === 'pdftotext_failed') return { text: 'อ่านข้อความในไฟล์ไม่ได้ — แจ้งผู้ดูแล', selfFix: false };
+  if (reason === 'account_ambiguous') {
+    return { text: 'เลขบัญชีในไฟล์ตรงกับบัญชีของคุณมากกว่าหนึ่งบัญชี — ตรวจเลขบัญชีที่ตั้งไว้ในหน้าบัญชีของฉัน', selfFix: false };
+  }
   if (s.status === 'checksum_failed') return { text: 'ยอดรวมในไฟล์ไม่ตรงกับรายการ — แจ้งผู้ดูแล', selfFix: false };
   return { text: 'ธนาคารเปลี่ยนรูปแบบไฟล์ ระบบยังอ่านไม่ได้ — แจ้งผู้ดูแล', selfFix: false };
 }
@@ -221,6 +226,11 @@ export default function Dashboard() {
   const overdue = plan?.payment_status.overdue_count ?? 0;
   const behindCount = coverage?.filter((a) => a.statement_behind).length ?? 0;
 
+  // ไปรายการไฟล์ที่มีปัญหาในหน้านี้ (แถบ "ต้องจัดการ" + การ์ดตัวนับสองใบ) ผ่าน router: ได้ location.key ใหม่ทุกครั้ง useHashTarget
+  // จึงเลื่อน+focus หัวรายการ (anchor ธรรมดาเป็น pop ที่ key "default" ซ้ำกับตอนเปิดหน้าตรงด้วย hash นี้ จึงถูกข้าม) — ส่ง search
+  // ไปด้วย ไม่งั้น ?month= หาย
+  const failuresLink = { search, hash: '#statement-failures' };
+
   // แถบ "ต้องจัดการ": เฉพาะเรื่องที่ > 0 เป็นลิงก์ไปที่แก้ได้ ไม่มีเรื่องเลย = ไม่แสดงทั้งแถบ
   // นับเมื่อทั้งสามแหล่งโหลดเสร็จ (ที่ล้มเหลวข้ามไป ส่วนของมันแสดง LoadError เอง) — ระหว่างเปลี่ยนเดือนถ้ารอบก่อนมีแถบ
   // จอง skeleton สูงเท่าปุ่มไว้ เนื้อหาด้านล่างจะไม่กระโดดขึ้นแล้วลง
@@ -228,7 +238,7 @@ export default function Dashboard() {
   const issues = issuesReady
     ? [
         { label: 'บิลเกินกำหนด', n: overdue, to: `/planning?month=${month}` },
-        { label: 'statement ที่มีปัญหา', n: parseFailed + checksumFailed, to: { search, hash: '#statement-failures' } },
+        { label: 'statement ที่มีปัญหา', n: parseFailed + checksumFailed, to: failuresLink },
         { label: 'บัญชีข้อมูลช้า', n: behindCount, to: '#data-freshness' },
         { label: 'ยังไม่จัดหมวด', n: summary?.uncategorised_count ?? 0, to: txnLink({ uncategorised: '1' }) },
         { label: 'ยังไม่ตรวจ', n: summary?.unreviewed_count ?? 0, to: txnLink({ review_status: 'unreviewed' }) },
@@ -329,9 +339,7 @@ export default function Dashboard() {
           {issues.map((i) => {
             // span ครอบ: Button เป็น inline-flex ช่องว่างล้วนระหว่างลูก flex ถูกทิ้ง ป้ายกับตัวเลขจะติดกัน
             const label = <span>{i.label} <Box component="span" sx={dataTextSx}>{i.n.toLocaleString('th-TH')}</Box></span>;
-            // #statement-failures ผ่าน router: ได้ location.key ใหม่ทุกครั้ง useHashTarget จึงเลื่อน+focus หัวรายการ (anchor ธรรมดา
-            // เป็น pop ที่ key "default" ซ้ำกับตอนเปิดหน้าตรงด้วย hash นี้ จึงถูกข้าม) — ส่ง search ไปด้วย ไม่งั้น ?month= หาย
-            // #data-freshness ยังไม่มี useHashTarget จึงเป็น anchor ธรรมดาให้ browser เลื่อนเอง (router ไม่เลื่อนไปหา #id ให้)
+            // #statement-failures เป็น failuresLink (ผ่าน router) · #data-freshness ยังไม่มี useHashTarget จึงเป็น anchor ธรรมดาให้ browser เลื่อนเอง (router ไม่เลื่อนไปหา #id ให้)
             return typeof i.to === 'string' && i.to.startsWith('#') ? (
               <Button key={i.label} href={i.to} variant="outlined" color="warning" size="small" endIcon={<ChevronRightRounded />}>{label}</Button>
             ) : (
@@ -450,7 +458,7 @@ export default function Dashboard() {
                   value={summary && <IssueCount n={parseFailed} />}
                   caption="ไฟล์"
                   captionInline
-                  to={parseFailed > 0 ? '#statement-failures' : undefined}
+                  to={parseFailed > 0 ? failuresLink : undefined}
                 />
                 <SummaryCard
                   dense
@@ -460,7 +468,7 @@ export default function Dashboard() {
                   value={summary && <IssueCount n={checksumFailed} />}
                   caption="ไฟล์"
                   captionInline
-                  to={checksumFailed > 0 ? '#statement-failures' : undefined}
+                  to={checksumFailed > 0 ? failuresLink : undefined}
                 />
                 <SummaryCard
                   dense

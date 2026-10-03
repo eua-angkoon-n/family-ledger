@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { findMaskedAccountCandidates, resolveAccount } from './account-match.js';
+import { accountMatches, findMaskedAccountCandidates, resolveAccount } from './account-match.js';
 import { decrypt } from './crypto.js';
 import { pool, query, tx } from './db.js';
 import { env } from './env.js';
@@ -67,6 +67,19 @@ export function failedAccountTargets<T extends { account_number: string }>(candi
 const CLEAR_STALE_FAILED_SQL = `delete from statement s using bank_account a
   where a.id = s.bank_account_id and a.email_account_id = $1 and s.pdf_sha256 = $2
     and s.status = 'parse_failed' and s.bank_account_id <> all($3::bigint[])`;
+
+/** บัญชีเจ้าของ statement จากเลขบัญชีที่เห็นในไฟล์: 1 ตัว = เจ้าของ, ว่าง = statement ของบัญชีที่ผู้ใช้ไม่ได้เพิ่ม (ข้าม),
+ *  ≥2 = เลขที่เห็นซ้ำกันในบัญชีของผู้ใช้เอง (กำกวม ต้องลง parse_failed ไม่ใช่หายเงียบ)
+ *  หลายโทเค็น: โทเค็นแรกที่ตรงบัญชีเดียวชนะ (เหมือนเดิม) ไม่มีถึงรวมบัญชีของโทเค็นที่ตรงหลายบัญชี */
+export function matchAccounts<T extends { account_number: string }>(candidates: readonly T[], tokens: readonly string[]): T[] {
+  const ambiguous = new Set<T>();
+  for (const token of tokens) {
+    const hits = candidates.filter((a) => accountMatches(a.account_number, token));
+    if (hits.length === 1) return hits;
+    for (const hit of hits) ambiguous.add(hit);
+  }
+  return [...ambiguous];
+}
 
 /** ขอ access token ไม่สำเร็จแบบชั่วคราว (5xx/เน็ตหลุด) — แยกจาก error ของ DB/โค้ด ให้ route ตอบ 502 ได้ถูกตัว */
 export class GmailUnavailableError extends Error {}
@@ -253,6 +266,15 @@ export async function writeParseFailed(
     await client.query(CLEAR_STALE_FAILED_SQL, [emailAccountId, pdfSha256, bankAccountIds]);
     return written;
   });
+}
+
+/** ข้ามไฟล์ = ไม่ทิ้งร่องรอย: แถวพังที่ค้างจากรอบก่อน (เช่นตอนรหัสผิด) ต้องหาย ไม่งั้นค้างถาวร
+ *  และ PDF ที่เพิ่งเขียน (เปิดได้ด้วยรหัสของผู้ใช้แต่ไม่มีแถวชี้) ต้องถูกลบ — เว้นแต่ยังมีแถวอื่นชี้ path เดียวกัน
+ *  (เช่นบัญชีที่ย้ายไปกล่องอื่นแล้ว แถวเก่ายังชี้ไฟล์ในโฟลเดอร์ของกล่องนี้) */
+export async function skipStatementFile(emailAccountId: number, pdfSha256: string, pdfPath: string): Promise<void> {
+  await query(CLEAR_STALE_FAILED_SQL, [emailAccountId, pdfSha256, []]);
+  const referenced = await query('select 1 from statement where raw_pdf_path = $1 limit 1', [pdfPath]);
+  if (!referenced.rowCount) await rm(pdfPath, { force: true });
 }
 
 export async function writePending(
@@ -442,8 +464,6 @@ async function processMessage(
       const ids = accounts.map((a) => a.id);
       if (await writeParseFailed(emailAccountId, ids, messageId, attachment.attachmentId, pdfSha256, pdfPath, reason)) statuses.push('parse_failed');
     };
-    // ข้ามไฟล์ = ไม่ทิ้งร่องรอย: แถวพังที่เคยค้างจากรอบก่อน (เช่นตอนรหัสผิด) ต้องหายด้วย ไม่งั้นค้างถาวร
-    const skipFile = () => query(CLEAR_STALE_FAILED_SQL, [emailAccountId, pdfSha256, []]);
 
     let opened = false;
     for (const account of candidates) {
@@ -459,40 +479,30 @@ async function processMessage(
       opened = true;
 
       const parseFn = parsers[bank.parser_key as keyof typeof parsers];
+      let parsed: ParsedStatement | null = null;
       if (parseFn) {
-        let parsed: ParsedStatement;
         try {
           parsed = parseFn(extracted.text);
         } catch (error) {
           await failFile(failedAccountTargets(candidates, attachment.filename), error instanceof Error ? error.message : 'parse_failed');
           break;
         }
-        const resolved = resolveAccount(candidates, parsed.accountNumber);
-        if (!resolved) {
-          // statement ของบัญชีที่ผู้ใช้ไม่ได้เพิ่มไว้ก็มาเข้ากล่องนี้ได้ — ข้ามทั้งบัญชีเดียวและหลายบัญชี
-          // ถ้าบันทึกจะเป็นแถวพังค้างถาวรใต้บัญชีที่ไม่ใช่เจ้าของ
-          console.warn(`[worker] เลขบัญชีใน statement ไม่ตรงหรือกำกวม ข้ามไฟล์ mailbox=${emailAccountId} message=${messageId}`);
-          await skipFile();
-          break;
-        }
-        if (await writeParsedStatement(emailAccountId, resolved.id, messageId, attachment.attachmentId, pdfSha256, pdfPath, parsed)) statuses.push(parsed.checksumValid ? 'parsed' : 'checksum_failed');
-        break;
       }
-
-      const resolved = candidates.length === 1
-        ? account
-        : findMaskedAccountCandidates(extracted.text)
-            .map((token) => resolveAccount(candidates, token))
-            .find((candidate): candidate is BankAccountCandidate => candidate != null);
-      if (resolved) {
-        if (await writePending(emailAccountId, resolved.id, messageId, attachment.attachmentId, pdfSha256, pdfPath, extracted.text)) statuses.push('pending');
-        break;
+      // ยังไม่มี parser ของธนาคารนี้: กล่องที่มีบัญชีเดียวถือเป็นบัญชีนั้น ไม่งั้นหาจากโทเค็นเลขที่ถูกปิดบังในข้อความ
+      const owners = parsed
+        ? matchAccounts(candidates, [parsed.accountNumber])
+        : candidates.length === 1 ? [account] : matchAccounts(candidates, findMaskedAccountCandidates(extracted.text));
+      if (owners.length > 1) {
+        await failFile(owners, 'account_ambiguous');
+      } else if (!owners.length) {
+        // statement ของบัญชีที่ผู้ใช้ไม่ได้เพิ่มไว้ก็มาเข้ากล่องนี้ได้ — ถ้าบันทึกจะเป็นแถวพังค้างถาวรใต้บัญชีที่ไม่ใช่เจ้าของ
+        console.warn(`[worker] เลขบัญชีใน statement ไม่ตรงบัญชีใดในกล่อง ข้ามไฟล์ mailbox=${emailAccountId} message=${messageId}`);
+        await skipStatementFile(emailAccountId, pdfSha256, pdfPath);
+      } else if (parsed) {
+        if (await writeParsedStatement(emailAccountId, owners[0]!.id, messageId, attachment.attachmentId, pdfSha256, pdfPath, parsed)) statuses.push(parsed.checksumValid ? 'parsed' : 'checksum_failed');
+      } else if (await writePending(emailAccountId, owners[0]!.id, messageId, attachment.attachmentId, pdfSha256, pdfPath, extracted.text)) {
+        statuses.push('pending');
       }
-      // นโยบายเดียวกับ parser หาเลขบัญชีไม่เจอข้างบน
-      console.warn(
-        `[worker] ถอดรหัสผ่านด้วยรหัสของบัญชี ${account.id} แต่แยกไม่ออกว่าเป็นบัญชีไหน ข้ามไฟล์ mailbox=${emailAccountId} message=${messageId}`,
-      );
-      await skipFile();
       break;
     }
     // รหัสของทุกบัญชีเปิดไม่ได้ — reason เดียวกับกรณีบัญชีเดียวรหัสผิด แดชบอร์ดใช้ค่านี้โชว์ปุ่ม "ตั้งรหัสผ่าน PDF ใหม่"

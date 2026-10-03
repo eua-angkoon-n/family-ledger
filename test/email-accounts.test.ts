@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
+import { existsSync } from 'node:fs';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import express, { type NextFunction, type Request, type Response } from 'express';
@@ -24,7 +28,7 @@ test('email accounts: sync กับ token ที่ใช้ไม่ได้ 
   const { HttpError } = await import('../src/http.js');
   const { encrypt } = await import('../src/crypto.js');
   const { emailAccountsRouter } = await import('../src/routes/email-accounts.js');
-  const { countStatements, failedAccountTargets, syncEmailAccount, writeParseFailed, writeParsedStatement, writePending } = await import('../src/worker.js');
+  const { countStatements, failedAccountTargets, matchAccounts, skipStatementFile, syncEmailAccount, writeParseFailed, writeParsedStatement, writePending } = await import('../src/worker.js');
 
   // Google ปลอมเฉพาะ token endpoint กับ messages.list — คำขออื่น (เรียก test server เอง) ส่งต่อ fetch จริง
   const realFetch = globalThis.fetch;
@@ -204,6 +208,18 @@ test('email accounts: sync กับ token ที่ใช้ไม่ได้ 
     assert.deepEqual(failedAccountTargets([a, b], 'statement.pdf'), [a, b]);
   });
 
+  await t.test('matchAccounts: ไม่ตรงเลย = ข้าม, ตรงหลายบัญชี = กำกวม, โทเค็นแรกที่ตรงบัญชีเดียวชนะ', () => {
+    const a = { account_number: '123-4-56231-7' };
+    const b = { account_number: '9999962319' };
+    const c = { account_number: '111-1-11111-1' };
+    const mask = 'xxx-x-x6231-x';
+    assert.deepEqual(matchAccounts([a, c], [mask]), [a]);
+    assert.deepEqual(matchAccounts([c], [mask]), []);
+    assert.deepEqual(matchAccounts([a, b, c], [mask]), [a, b]);
+    assert.deepEqual(matchAccounts([a, b, c], [mask, '1234562317']), [a]);
+    assert.deepEqual(matchAccounts([a, b, c], []), []);
+  });
+
   await t.test('อ่านสำเร็จ/พังซ้ำใต้บัญชีชุดใหม่/ข้ามไฟล์ → ล้าง parse_failed ของไฟล์เดียวกันใต้บัญชีอื่นในกล่องเดียวกันเท่านั้น', async () => {
     const bankId = (await db.pool.query<{ id: number }>(`select id from bank where lower(name) = 'scb'`)).rows[0]!.id;
     const otherMailbox = (
@@ -266,9 +282,24 @@ test('email accounts: sync กับ token ที่ใช้ไม่ได้ 
     )).rows[0]!.reason;
     assert.equal(reason, 'pdftotext_failed');
 
-    // เป้าว่าง (SQL เดียวกับตอน worker ข้ามไฟล์ที่เลขบัญชีไม่ตรง) → ล้างทุกแถวในกล่องนี้ ไม่นับเป็น failed
+    // ข้ามไฟล์ (ฟังก์ชันเดียวกับที่ worker เรียก) → ล้างทุกแถวในกล่องนี้ และลบ PDF ที่ไม่มีแถวชี้
+    const dir = await mkdtemp(join(tmpdir(), 'ledger-skip-'));
+    const skipped = join(dir, 'msg_1.pdf');
+    await writeFile(skipped, '%PDF-');
     for (const id of [a, b, other]) await failUnder(id, 'sha-skip');
-    assert.equal(await writeParseFailed(mailboxId, [], 'msg', 'att', 'sha-skip', '/tmp/x.pdf', 'decrypt_failed'), false);
+    await skipStatementFile(mailboxId, 'sha-skip', skipped);
     assert.deepEqual(await rows('sha-skip'), [{ bank_account_id: other, status: 'parse_failed' }]);
+    assert.equal(existsSync(skipped), false, 'PDF ที่ข้ามต้องไม่ค้างบนดิสก์');
+
+    // ยังมีแถวชี้ path เดียวกัน (เช่นบัญชีที่ย้ายไปกล่องอื่นแล้ว) → ไม่ลบไฟล์
+    const kept = join(dir, 'msg_2.pdf');
+    await writeFile(kept, '%PDF-');
+    await db.pool.query(
+      `insert into statement (bank_account_id, gmail_message_id, gmail_attachment_id, pdf_sha256, raw_pdf_path, status)
+       values ($1, 'msg', 'att', 'sha-kept', $2, 'parsed')`,
+      [other, kept],
+    );
+    await skipStatementFile(mailboxId, 'sha-kept', kept);
+    assert.equal(existsSync(kept), true);
   });
 });

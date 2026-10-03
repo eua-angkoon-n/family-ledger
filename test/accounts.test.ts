@@ -20,6 +20,7 @@ test('archive account แทน hard delete', async (t) => {
 
   const { HttpError } = await import('../src/http.js');
   const { accountsRouter } = await import('../src/routes/accounts.js');
+  const { decrypt } = await import('../src/crypto.js');
 
   // แทน express-session ด้วย middleware จำลอง — ทดสอบ authorization/archive semantics ไม่ต้องผ่าน OAuth จริง
   function appFor(userId: number | undefined) {
@@ -70,7 +71,7 @@ test('archive account แทน hard delete', async (t) => {
 
   const bankAccount = await db.pool.query<{ id: number }>(
     `insert into bank_account (user_id, bank_id, email_account_id, nickname, account_number, pdf_password_enc)
-     values ($1, $2, $3, 'บัญชีหลัก', 'xxx-x-x6231-x', 'enc:pdf-password') returning id`,
+     values ($1, $2, $3, 'บัญชีหลัก', '987-6-54321-0', 'enc:pdf-password') returning id`,
     [ownerId, bankId, emailAccountId],
   );
   const bankAccountId = bankAccount.rows[0]!.id;
@@ -113,10 +114,16 @@ test('archive account แทน hard delete', async (t) => {
     };
     assert.deepEqual(await patch({ nickname: 'ชื่อเล่นใหม่' }), { id: bankAccountId, email_account_id: emailAccountId, resync: false });
     assert.equal((await patch({ promptpay_id: '0812345678' })).resync, false);
-    assert.equal((await patch({ account_number: 'xxx-x-x6231-x' })).resync, false, 'ส่งเลขเดิมซ้ำ ไม่ใช่การเปลี่ยน');
+    // เลขเดิมเก็บแบบมีขีด (ก่อน normalize) ส่งเลขเดียวกันแบบตัวเลขล้วน = ไม่ใช่การเปลี่ยน แต่เก็บใหม่เป็นตัวเลขล้วน
+    assert.equal((await patch({ account_number: '9876543210' })).resync, false, 'ส่งเลขเดิมซ้ำ ไม่ใช่การเปลี่ยน');
+    const stored = await db.pool.query<{ account_number: string }>('select account_number from bank_account where id = $1', [bankAccountId]);
+    assert.equal(stored.rows[0]!.account_number, '9876543210');
     assert.equal((await patch({ pdf_password: '' })).resync, false, 'รหัสผ่านว่าง = ไม่เปลี่ยน');
-    assert.equal((await patch({ account_number: 'xxx-x-x9999-x' })).resync, true);
-    assert.equal((await patch({ pdf_password: 'รหัสใหม่' })).resync, true);
+    assert.equal((await patch({ pdf_password: '   ' })).resync, false, 'รหัสผ่านช่องว่างล้วน = ไม่เปลี่ยน');
+    assert.equal((await patch({ account_number: '175-1-99999-9' })).resync, true);
+    assert.equal((await patch({ pdf_password: ' รหัสใหม่ ' })).resync, true);
+    const enc = await db.pool.query<{ pdf_password_enc: string }>('select pdf_password_enc from bank_account where id = $1', [bankAccountId]);
+    assert.equal(decrypt(enc.rows[0]!.pdf_password_enc), ' รหัสใหม่ ', 'ช่องว่างหัวท้ายเป็นส่วนของรหัส ห้าม trim');
     const otherMailbox = (await db.pool.query<{ id: number }>(
       `insert into email_account (user_id, email, refresh_token_enc) values ($1, 'owner2@example.com', 'enc:x') returning id`,
       [ownerId],
@@ -137,6 +144,45 @@ test('archive account แทน hard delete', async (t) => {
     const body = (await res.json()) as { id: number; email_account_id: number; resync: boolean };
     assert.equal(body.email_account_id, emailAccountId);
     assert.equal(body.resync, true);
+  });
+
+  await t.test('เลขบัญชีเก็บเป็นตัวเลขล้วน เลขซ้ำ (ต่างรูปแบบ) ได้ 409 รหัสผ่านไม่ถูก trim', async () => {
+    const app = await listen(appFor(ownerId));
+    t.after(app.close);
+    const send = async (method: string, path: string, body: Record<string, unknown>) => {
+      const res = await app.request(path, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      return { status: res.status, body: (await res.json()) as { id?: number; error?: string } };
+    };
+    const post = (fields: Record<string, unknown>) =>
+      send('POST', '/api/accounts', { bank_id: bankId, email_account_id: emailAccountId, nickname: 'บัญชีใหม่', pdf_password: 'x', ...fields });
+
+    const stored = await db.pool.query<{ account_number: string }>(`select account_number from bank_account where nickname = 'บัญชีรอง'`);
+    assert.equal(stored.rows[0]!.account_number, '1234567890');
+
+    for (const bad of ['abc', '123-x-4567', '---', '']) {
+      assert.deepEqual(await post({ account_number: bad }), { status: 400, body: { error: 'เลขที่บัญชีต้องเป็นตัวเลข' } }, bad);
+    }
+    assert.deepEqual(await post({ account_number: '123 4 56789-0' }), { status: 409, body: { error: 'มีบัญชีเลขนี้อยู่แล้ว' } });
+    // บัญชีเดิมที่เก็บแบบมีขีด (ก่อน normalize) unique index ไม่จับ แต่ต้องได้ 409 เหมือนกัน
+    await db.pool.query(
+      `insert into bank_account (user_id, bank_id, email_account_id, nickname, account_number, pdf_password_enc)
+       values ($1, $2, $3, 'บัญชีเก่า', '555-5-55555-5', 'enc:x')`,
+      [ownerId, bankId, emailAccountId],
+    );
+    assert.deepEqual(await post({ account_number: '5555555555' }), { status: 409, body: { error: 'มีบัญชีเลขนี้อยู่แล้ว' } });
+    assert.deepEqual(
+      await send('PATCH', `/api/accounts/${bankAccountId}`, { account_number: '555-5555555' }),
+      { status: 409, body: { error: 'มีบัญชีเลขนี้อยู่แล้ว' } },
+    );
+
+    for (const blank of [undefined, '', '   ']) {
+      const res = await post({ account_number: '7777777777', pdf_password: blank });
+      assert.deepEqual(res, { status: 400, body: { error: 'กรอกรหัสผ่านเปิดไฟล์ statement' } });
+    }
+    const created = await post({ account_number: '7777777777', pdf_password: '  pw  ' });
+    assert.equal(created.status, 201);
+    const enc = await db.pool.query<{ pdf_password_enc: string }>('select pdf_password_enc from bank_account where id = $1', [created.body.id]);
+    assert.equal(decrypt(enc.rows[0]!.pdf_password_enc), '  pw  ');
   });
 
   await t.test('user อื่น archive บัญชีไม่ใช่ของตัวเองไม่ได้ (404)', async () => {

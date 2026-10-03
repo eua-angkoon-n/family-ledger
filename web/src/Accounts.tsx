@@ -66,9 +66,36 @@ const SEP = <Box component="span" aria-hidden>{' · '}</Box>;
 // ตอนเพิ่งขึ้น · ฟังก์ชันระดับไฟล์ (ref คงที่) React จึงเรียกเฉพาะตอน mount ไม่ใช่ทุก render ระหว่างพิมพ์
 const revealOnMount = (el: HTMLElement | null) => el?.scrollIntoView({ block: 'nearest' });
 const accountEditId = (id: number) => `account-edit-${id}`;
-// ช่องข้อความที่บังคับกรอก — ช่องว่างล้วนผ่าน `required` ของ HTML ฟอร์มจึงเช็คเองหลัง trim (เรียงตามลำดับในฟอร์ม: ช่องแรกที่ว่างรับ focus)
-const FIELD_ID = { account_number: 'account-number', nickname: 'account-nickname' } as const;
-const BLANK_MESSAGE: Record<keyof typeof FIELD_ID, string> = { account_number: 'กรอกเลขที่บัญชี', nickname: 'กรอกชื่อเล่น' };
+// ฟอร์มบัญชีเป็น noValidate แล้วตรวจช่องบังคับเองทุกช่อง (error ไทยใต้ช่อง ไม่มีบับเบิลของเบราว์เซอร์ปน ช่องว่างล้วนนับเป็นว่าง)
+// id เรียงตามลำดับในฟอร์ม ช่องแรกที่ผิดรับ focus · select ใส่ id ที่ตัว combobox (SelectDisplayProps) — id ของ TextField select
+// ไปตกที่ input ที่ซ่อนอยู่ ซึ่ง focus แล้วไม่เห็นอะไร
+const FIELD_ID = {
+  bank_id: 'account-bank',
+  email_account_id: 'account-mailbox',
+  account_number: 'account-number',
+  pdf_password: 'account-pdf-password',
+  nickname: 'account-nickname',
+} as const;
+type Field = keyof typeof FIELD_ID;
+// ข้อความของ server เรื่องเลขบัญชี (src/routes/accounts.ts: 400 / 409) — req() ให้มาแค่ข้อความ ไม่มี status จึงจับจากข้อความ
+// แก้ฝั่งใดต้องแก้อีกฝั่งด้วย ไม่งั้นตกไปเป็น Alert บนสุดแทน error ของช่อง
+const NUMBER_NOT_DIGITS = 'เลขที่บัญชีต้องเป็นตัวเลข';
+const NUMBER_TAKEN = 'มีบัญชีเลขนี้อยู่แล้ว';
+const digitsOnly = (value: string) => value.replace(/\D/g, '');
+
+/** error ของแต่ละช่อง — key เรียงตามฟอร์ม key แรกคือช่องที่รับ focus */
+function accountFormErrors(f: typeof EMPTY, passwordRequired: boolean): Partial<Record<Field, string>> {
+  const errors: Partial<Record<Field, string>> = {};
+  if (f.bank_id === '') errors.bank_id = 'เลือกธนาคาร';
+  if (f.email_account_id === '') errors.email_account_id = 'เลือกกล่องอีเมล';
+  // ขีด/ช่องว่างแบบที่แอปธนาคารแสดงพิมพ์มาได้ ส่งไปเป็นตัวเลขล้วน (server เก็บแบบนั้น)
+  const number = f.account_number.trim();
+  if (number === '') errors.account_number = 'กรอกเลขที่บัญชี';
+  else if (!/^\d+$/.test(number.replace(/[\s-]/g, ''))) errors.account_number = NUMBER_NOT_DIGITS;
+  if (passwordRequired && f.pdf_password.trim() === '') errors.pdf_password = 'กรอกรหัสผ่านเปิดไฟล์ statement';
+  if (f.nickname.trim() === '') errors.nickname = 'กรอกชื่อเล่น';
+  return errors;
+}
 
 /**
  * The Section Failure Rule: ยังไม่เคยโหลดได้ = skeleton หรือ LoadError แทนที่ส่วนนั้น (ไม่ใช่ EmptyState)
@@ -95,8 +122,10 @@ export default function Accounts() {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
-  // กดบันทึกแล้วอย่างน้อยครั้งหนึ่ง — ช่องบังคับที่ว่างหลัง trim ขึ้น error ของช่องนั้นตั้งแต่ตอนนี้
+  // กดบันทึกแล้วอย่างน้อยครั้งหนึ่ง — ช่องที่ผิดขึ้น error ของช่องนั้นตั้งแต่ตอนนี้ และหายเองเมื่อแก้ถูก
   const [attempted, setAttempted] = useState(false);
+  // เลขบัญชีที่ server ปฏิเสธ (ซ้ำ / ไม่ใช่ตัวเลข) — error ค้างที่ช่องเลขบัญชีจนกว่าเลขในช่องจะเปลี่ยน
+  const [rejectedNumber, setRejectedNumber] = useState<{ digits: string; message: string } | null>(null);
   // บัญชีที่ถามค้างไว้จน dialog ปิดสนิท — ไม่งั้นชื่อในคำถามว่างเป็น “” ระหว่าง fade ออก
   const [archiving, setArchiving] = useState<Account | null>(null);
   const [archiveOpen, setArchiveOpen] = useState(false);
@@ -180,6 +209,7 @@ export default function Accounts() {
     setShowPassword(false);
     setFormError('');
     setAttempted(false);
+    setRejectedNumber(null);
     setFocusPassword(focusPdf);
     dialogOpenRef.current = true;
     setModalOpen(true);
@@ -225,20 +255,32 @@ export default function Accounts() {
   const sectionsSettled = (accounts != null || loadErrors.accounts != null) && (mailboxes != null || loadErrors.mailboxes != null);
   useHashTarget('#mailboxes-heading', sectionsSettled, mailboxesSectionRef, 'mailboxes-heading');
 
-  const blankError = (key: keyof typeof FIELD_ID) => (attempted && form[key].trim() === '' ? BLANK_MESSAGE[key] : undefined);
+  // มาจากลิงก์ซ่อม (`?edit=`) = มาเพื่อใส่รหัสใหม่ จึงบังคับเหมือนตอนเพิ่ม · แก้ปกติเว้นว่าง = ใช้รหัสเดิม
+  const passwordRequired = !editingId || focusPassword;
+  const fieldErrors = attempted ? accountFormErrors(form, passwordRequired) : {};
+  if (fieldErrors.account_number == null && rejectedNumber?.digits === digitsOnly(form.account_number)) {
+    fieldErrors.account_number = rejectedNumber.message;
+  }
 
   const saveAccount = async () => {
     setFormError('');
-    // รหัสผ่าน PDF ไม่ trim — ช่องว่างหัวท้ายก็เป็นส่วนของรหัสได้
-    const trimmed = { ...form, nickname: form.nickname.trim(), account_number: form.account_number.trim(), promptpay_id: form.promptpay_id.trim() };
-    const blank = (Object.keys(FIELD_ID) as (keyof typeof FIELD_ID)[]).find((key) => trimmed[key] === '');
-    if (blank) {
+    const invalid = Object.keys(accountFormErrors(form, passwordRequired))[0] as Field | undefined;
+    if (invalid) {
       setAttempted(true);
-      document.getElementById(FIELD_ID[blank])?.focus();
+      document.getElementById(FIELD_ID[invalid])?.focus();
       return;
     }
     setSubmitting(true);
-    const { default_tax_entity_id: taxEntityId, ...fields } = trimmed;
+    // รหัสผ่าน PDF ส่งตามที่พิมพ์ ไม่ trim (server ก็ไม่ trim — ช่องว่างหัวท้ายเป็นส่วนของรหัสได้) · ช่องว่างล้วนนับเป็นว่างเหมือน server:
+    // ส่ง '' = PATCH คงรหัสเดิม
+    const { default_tax_entity_id: taxEntityId, ...rest } = form;
+    const fields = {
+      ...rest,
+      nickname: form.nickname.trim(),
+      account_number: digitsOnly(form.account_number),
+      promptpay_id: form.promptpay_id.trim(),
+      pdf_password: form.pdf_password.trim() === '' ? '' : form.pdf_password,
+    };
     // หน้าภาษีปิด = ไม่ส่ง key นี้เลย: PATCH คงค่าเดิม (server เช็ค hasOwnProperty) POST ได้ null
     // ห้ามส่ง '' — server อ่านเป็นเลข 0 แล้วตอบ 400
     const body = TAX_PAGES_ENABLED ? { ...fields, default_tax_entity_id: taxEntityId ? Number(taxEntityId) : null } : fields;
@@ -258,7 +300,12 @@ export default function Accounts() {
       setModalOpen(false);
       void reload();
     } catch (e) {
-      setFormError(errorText(e, 'บันทึกไม่สำเร็จ'));
+      const message = errorText(e, 'บันทึกไม่สำเร็จ');
+      // เรื่องของช่องเลขบัญชี = error ที่ช่อง + focus (ไม่ใช่ Alert บนสุดที่ไม่บอกว่าช่องไหน)
+      if (message === NUMBER_TAKEN || message === NUMBER_NOT_DIGITS) {
+        setRejectedNumber({ digits: fields.account_number, message });
+        document.getElementById(FIELD_ID.account_number)?.focus();
+      } else setFormError(message);
     } finally {
       setSubmitting(false);
     }
@@ -292,6 +339,10 @@ export default function Accounts() {
   // โหลดเฉพาะกล่องอีเมลซ้ำ ไม่ขึ้น skeleton — โหลดไม่ได้คงของเดิมไว้ (ผลของการดึงยังแจ้งใน snackbar ตามปกติ)
   const fetchMailboxes = () => req<EmailAccount[]>('/api/email-accounts').catch(() => null);
 
+  // กล่องเดียว (หรือไม่มี) = ทุกบัญชีอยู่กล่องเดียวกัน คอลัมน์อีเมลซ้ำทุกแถวเปล่า ๆ · โหลดกล่องไม่ได้ = คงคอลัมน์ไว้
+  // เงื่อนไขเดียวกันตัดชื่อกล่องหน้าผลดึงอีเมล — กล่องเดียวไม่ต้องบอกว่ากล่องไหน
+  const showEmail = mailboxes == null || mailboxes.length > 1;
+
   // request รอจนดึงจบ (หลายวินาทีได้) — ปุ่มเป็น aria-disabled ระหว่างนั้น ผลแจ้งใน snackbar
   const syncMailbox = async (mailbox: EmailAccount) => {
     setSyncingFor(mailbox.id, true);
@@ -302,20 +353,21 @@ export default function Accounts() {
       const read = summary.statements_inserted;
       const failed = summary.statements_failed;
       const readText = `อ่าน statement ใหม่สำเร็จ ${read.toLocaleString('th-TH')} ไฟล์`;
+      const box = showEmail ? `${mailbox.email}: ` : '';
       announce(
         summary.already_running
-          ? { message: `${mailbox.email}: ระบบกำลังดึงอีเมลของกล่องนี้อยู่แล้ว statement ที่พบจะเข้ามาเอง`, severity: 'info' }
+          ? { message: `${box}ระบบกำลังดึงอีเมลของกล่องนี้อยู่แล้ว statement ที่พบจะเข้ามาเอง`, severity: 'info' }
           // statements_failed นับเฉพาะไฟล์ที่ล้มเหลวในรอบดึงนี้ (src/worker.ts) แต่รายการปลายทางบนแดชบอร์ดคือทุกไฟล์ทุกเดือนทุกกล่อง
           // ข้อความจึงบอก "รอบนี้" ปุ่มบอก "ทั้งหมด" — รายการนั้นบอกสาเหตุและทางแก้ทีละไฟล์ (มี action = snackbar ไม่หายเอง)
           : failed > 0
             ? {
-                message: `${mailbox.email}: ${read > 0 ? `${readText} · ` : ''}รอบนี้พบ statement ที่มีปัญหา ${failed.toLocaleString('th-TH')} ไฟล์`,
+                message: `${box}${read > 0 ? `${readText} · ` : ''}รอบนี้พบ statement ที่มีปัญหา ${failed.toLocaleString('th-TH')} ไฟล์`,
                 severity: 'warning',
                 action: { label: 'ดูไฟล์ที่มีปัญหาทั้งหมด', onClick: () => navigate('/dashboard#statement-failures') },
               }
             : read > 0
-              ? { message: `${mailbox.email}: ${readText}`, severity: 'success' }
-              : { message: `${mailbox.email}: ไม่มี statement ใหม่`, severity: 'success' },
+              ? { message: `${box}${readText}`, severity: 'success' }
+              : { message: `${box}ไม่มี statement ใหม่`, severity: 'success' },
       );
     } catch (e) {
       // 409 = server ตั้งให้กล่องนี้ต้องเชื่อม Gmail ใหม่แล้ว โหลดซ้ำแล้วแถวเปลี่ยนเป็นปุ่ม "เชื่อม Gmail ใหม่" เอง · 502 = ข้อความของ server
@@ -376,8 +428,6 @@ export default function Accounts() {
     TAX_PAGES_ENABLED && taxEntities == null && loadErrors.taxEntities,
   ].filter(Boolean).join(' • ');
 
-  // กล่องเดียว (หรือไม่มี) = ทุกบัญชีอยู่กล่องเดียวกัน คอลัมน์อีเมลซ้ำทุกแถวเปล่า ๆ · โหลดกล่องไม่ได้ = คงคอลัมน์ไว้
-  const showEmail = mailboxes == null || mailboxes.length > 1;
   // ยังไม่มีกล่องอีเมลเลย = ฟอร์มเพิ่มบัญชีเลือกกล่องไม่ได้ ทางแรกจึงเป็นเชื่อม Gmail
   const noMailbox = mailboxes != null && mailboxes.length === 0;
 
@@ -475,12 +525,15 @@ export default function Accounts() {
         onClose={() => setModalOpen(false)}
         busy={submitting}
         dirty={JSON.stringify(form) !== JSON.stringify(formInitial)}
-        footer={{ formId: 'account-form', submitLabel: editingId ? 'บันทึกการแก้ไข' : 'เพิ่มบัญชี' }}
+        // มาจากลิงก์ซ่อม = ปุ่มบอกสิ่งที่มาทำ ตรงกับหัว dialog
+        footer={{ formId: 'account-form', submitLabel: !editingId ? 'เพิ่มบัญชี' : focusPassword ? 'ตั้งรหัสใหม่' : 'บันทึกการแก้ไข' }}
         onExited={flushNotice}
       >
+        {/* noValidate: ช่องบังคับตรวจเองใน saveAccount (FIELD_ID) — `required` คงไว้เพื่อเครื่องหมาย * และ aria-required */}
         <Box
           component="form"
           id="account-form"
+          noValidate
           onSubmit={(event) => {
             event.preventDefault();
             if (!submitting) void saveAccount();
@@ -488,16 +541,21 @@ export default function Accounts() {
         >
           <Stack spacing={2.5}>
             {formError && <Alert ref={revealOnMount} severity="error">{formError}</Alert>}
-            {!editingId && (
-              <Typography color="text.secondary" sx={descriptionSx}>
-                ถ้าอยากได้ข้อมูลย้อนหลัง ขอ statement ย้อนหลังจากธนาคารให้ส่งเข้ากล่องอีเมลของบัญชีนี้ได้ ระบบจะอ่านและใช้เป็นข้อมูลตั้งต้นให้เอง
-              </Typography>
-            )}
             {formLoadError && <LoadError message={formLoadError} onRetry={retry} />}
             <Box component="fieldset" sx={{ m: 0, p: 0, minWidth: 0, border: 0 }}>
               <FormLabel component="legend" sx={{ mb: 1.5, color: 'text.primary', fontWeight: 600 }}>การเชื่อมต่อ statement</FormLabel>
               <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 16rem), 1fr))' }}>
-                <TextField select label="ธนาคาร" helperText="เลือกธนาคารเจ้าของบัญชี" value={form.bank_id} onChange={setFormField('bank_id')} required autoFocus={!editingId}>
+                <TextField
+                  select
+                  label="ธนาคาร"
+                  error={fieldErrors.bank_id != null}
+                  helperText={fieldErrors.bank_id ?? 'เลือกธนาคารเจ้าของบัญชี'}
+                  value={form.bank_id}
+                  onChange={setFormField('bank_id')}
+                  required
+                  autoFocus={!editingId}
+                  slotProps={{ select: { SelectDisplayProps: { id: FIELD_ID.bank_id } } }}
+                >
                   <MenuItem value=""><em>— เลือก —</em></MenuItem>
                   {(banks ?? []).filter((bank) => bank.is_active || String(bank.id) === form.bank_id).map((bank) => (
                     <MenuItem key={bank.id} value={String(bank.id)}>{bank.name}</MenuItem>
@@ -507,10 +565,12 @@ export default function Accounts() {
                 <TextField
                   select
                   label="กล่องอีเมลที่ให้ระบบเข้าไปอ่าน"
-                  helperText="กล่องที่รับ statement ของบัญชีนี้ — ต่อกล่องอื่นเพิ่มได้ที่ส่วนกล่องอีเมลในหน้านี้"
+                  error={fieldErrors.email_account_id != null}
+                  helperText={fieldErrors.email_account_id ?? 'กล่องที่รับ statement ของบัญชีนี้ — ต่อกล่องอื่นเพิ่มได้ที่ส่วนกล่องอีเมลในหน้านี้'}
                   value={form.email_account_id}
                   onChange={setFormField('email_account_id')}
                   required
+                  slotProps={{ select: { SelectDisplayProps: { id: FIELD_ID.email_account_id } } }}
                 >
                   <MenuItem value=""><em>— เลือก —</em></MenuItem>
                   {(mailboxes ?? []).map((mailbox) => (
@@ -522,29 +582,31 @@ export default function Accounts() {
                 <TextField
                   id={FIELD_ID.account_number}
                   label="เลขที่บัญชี"
-                  error={blankError('account_number') != null}
-                  helperText={blankError('account_number') ?? 'เลขเต็มจากแอปธนาคารหรือสมุดบัญชี (statement ปิดบางหลักไว้) มีขีดหรือไม่ก็ได้'}
+                  error={fieldErrors.account_number != null}
+                  helperText={fieldErrors.account_number ?? 'เลขเต็มจากแอปธนาคารหรือสมุดบัญชี (statement ปิดบางหลักไว้) มีขีดหรือไม่ก็ได้'}
                   value={form.account_number}
                   onChange={setFormField('account_number')}
                   required
-                  slotProps={{ htmlInput: { maxLength: 40 } }}
+                  slotProps={{ htmlInput: { maxLength: 40, inputMode: 'numeric' } }}
                 />
                 {/* รหัสเปิดไฟล์คือข้อมูลการเชื่อมต่อ — ไฟล์ที่เปิดไม่ได้บนแดชบอร์ดลิงก์มาที่ช่องนี้ (`?edit=` → autoFocus) */}
                 <TextField
+                  id={FIELD_ID.pdf_password}
                   type={showPassword ? 'text' : 'password'}
                   label="รหัสผ่านเปิดไฟล์ statement"
+                  error={fieldErrors.pdf_password != null}
                   // PATCH ที่ช่องนี้ว่าง server คงรหัสเดิมไว้ (src/routes/accounts.ts) · คำใบ้ตามคู่มือ (guides.ts)
                   // มาจากลิงก์ซ่อม = มาเพื่อใส่รหัสใหม่ จึงบังคับกรอกและไม่บอกว่าเว้นว่างได้ · บริบท "ทำไมถึงมา" อยู่ต้น helper ไม่ใช่ย่อหน้าแยก
                   // เพราะ focus ลงช่องนี้ตรง ๆ helper ผูก aria-describedby screen reader จึงอ่านพร้อมช่อง · PATCH ที่มีรหัสใหม่สั่งอ่านทั้งกล่องใหม่
                   // ไฟล์ที่ค้าง parse_failed ถูกเปิดอีกรอบ
-                  helperText={focusPassword
+                  helperText={fieldErrors.pdf_password ?? (focusPassword
                     ? 'มี statement ที่เปิดด้วยรหัสเดิมไม่ได้ ใส่รหัสใหม่แล้วระบบจะลองเปิดไฟล์เดิมอีกครั้ง · ธนาคารตั้งให้ มักเป็นเลขบัตรประชาชนหรือวันเกิด · ระบบเก็บแบบเข้ารหัสและไม่แสดงกลับอีก'
                     : editingId
                       ? 'เว้นว่างไว้ = ใช้รหัสเดิม · ธนาคารตั้งให้ มักเป็นเลขบัตรประชาชนหรือวันเกิด · ระบบเก็บแบบเข้ารหัสและไม่แสดงกลับอีก'
-                      : 'รหัสเปิดไฟล์ PDF ที่ธนาคารตั้งให้ มักเป็นเลขบัตรประชาชนหรือวันเกิด · ระบบเก็บแบบเข้ารหัสและไม่แสดงกลับอีก'}
+                      : 'รหัสเปิดไฟล์ PDF ที่ธนาคารตั้งให้ มักเป็นเลขบัตรประชาชนหรือวันเกิด · ระบบเก็บแบบเข้ารหัสและไม่แสดงกลับอีก')}
                   value={form.pdf_password}
                   onChange={setFormField('pdf_password')}
-                  required={!editingId || focusPassword}
+                  required={passwordRequired}
                   autoFocus={focusPassword}
                   autoComplete="new-password"
                   slotProps={{
@@ -568,8 +630,8 @@ export default function Accounts() {
                 <TextField
                   id={FIELD_ID.nickname}
                   label="ชื่อเล่น"
-                  error={blankError('nickname') != null}
-                  helperText={blankError('nickname') ?? 'ชื่อที่ช่วยให้จำบัญชีนี้ได้ง่าย'}
+                  error={fieldErrors.nickname != null}
+                  helperText={fieldErrors.nickname ?? 'ชื่อที่ช่วยให้จำบัญชีนี้ได้ง่าย'}
                   value={form.nickname}
                   onChange={setFormField('nickname')}
                   required
@@ -592,6 +654,12 @@ export default function Accounts() {
                 )}
               </Box>
             </Box>
+            {/* คำแนะนำ ไม่ใช่สิ่งที่ต้องกรอก — อยู่ท้ายฟอร์ม ไม่ดันช่องแรกลง */}
+            {!editingId && (
+              <Typography color="text.secondary" sx={descriptionSx}>
+                ถ้าอยากได้ข้อมูลย้อนหลัง ขอ statement ย้อนหลังจากธนาคารให้ส่งเข้ากล่องอีเมลของบัญชีนี้ได้ ระบบจะอ่านและใช้เป็นข้อมูลตั้งต้นให้เอง
+              </Typography>
+            )}
           </Stack>
         </Box>
       </Modal>
