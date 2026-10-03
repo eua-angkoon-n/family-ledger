@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   Alert, Box, Button, Checkbox, Chip, FormControlLabel, FormGroup, LinearProgress, MenuItem, Paper, Stack,
@@ -9,6 +9,7 @@ import AddRounded from '@mui/icons-material/AddRounded';
 import CalculateRounded from '@mui/icons-material/CalculateRounded';
 import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded';
 import DownloadRounded from '@mui/icons-material/DownloadRounded';
+import BookmarkAddRounded from '@mui/icons-material/BookmarkAddRounded';
 import EditRounded from '@mui/icons-material/EditRounded';
 import PrintRounded from '@mui/icons-material/PrintRounded';
 import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded';
@@ -23,7 +24,7 @@ import { TAX_ENTITY_TYPE_LABEL } from '../taxDocumentLabels.js';
 import { dataTextSx } from '../theme.js';
 import {
   BELOW_MD, Disclosure, EmptyState, FeedbackSnackbar, LoadError, MD_UP, PageHeader, RowIconButton, TableSkeleton,
-  usePrintLightScheme, useStoredOpen, visuallyHiddenSx, type Notice,
+  useHashTarget, usePrintLightScheme, useStoredOpen, visuallyHiddenSx, type Notice,
 } from '../ui.js';
 
 // §16 ข้อ 13 ของแผนต้นฉบับ — ทุกรายงานต้องระบุว่าไม่รวมเงินสดและ e-Wallet · คำเตือนว่าเป็นประมาณการอยู่ประโยคเดียวกัน
@@ -47,10 +48,10 @@ const ruleYear = (version: string): number | null => {
 const payableWord = (satang: number) => (satang > 0 ? 'ต้องชำระเพิ่ม' : satang < 0 ? 'ขอคืนได้' : 'ไม่ต้องชำระเพิ่ม');
 const payableMoney = (satang: number) => <Money satang={Math.abs(satang)} tone={satang > 0 ? 'expense' : 'income'} />;
 
-// ขั้นบันไดเป็นบาทเต็มเสมอ — ช่วงแบบตารางกรมสรรพากร "150,001 – 300,000"
-const wholeBaht = (satang: number) => formatBaht(satang).replace(/\.00$/, '');
+// ขั้นบันไดเป็นบาทเต็มเสมอ — ช่วงแบบตารางกรมสรรพากร "฿150,001 – ฿300,000" (มี ฿ เหมือนเงินทุกช่องในตาราง)
+const wholeBaht = (satang: number) => `฿${formatBaht(satang).replace(/\.00$/, '')}`;
 const bracketRange = (lower: number, upper: number | null) => {
-  const from = lower === 0 ? '0' : wholeBaht(lower + 100);
+  const from = lower === 0 ? '฿0' : wholeBaht(lower + 100);
   return upper == null ? `${from} ขึ้นไป` : `${from} – ${wholeBaht(upper)}`;
 };
 
@@ -70,12 +71,11 @@ const CELL_PX = { '& .MuiTableCell-root': { px: { xs: 1, md: 2 } } } as const;
 const NO_PRINT = { displayPrint: 'none' } as const;
 
 // พิมพ์ (ปุ่มพิมพ์หรือ Ctrl+P) ตาม The Guide Page Rule: กางทุกส่วนที่พับ ซ่อนปุ่ม/ลูกศร/checkbox (แถบเครื่องมือ กล่องเงินเข้า
-// และคอลัมน์จัดการซ่อนด้วย displayPrint ที่ตัวเอง) และ usePrintLightScheme สลับเป็นธีมสว่างชั่วคราว
+// คอลัมน์จัดการ และลูกศรของการ์ดใน SummaryCard ซ่อนด้วย displayPrint ที่ตัวเอง) และ usePrintLightScheme สลับเป็นธีมสว่างชั่วคราว
 const PRINT_SX = {
   '@media print': {
     '& .MuiCollapse-root': { height: 'auto !important', visibility: 'visible !important' },
     '& .MuiIconButton-root, & .MuiBadge-badge, & .MuiButton-endIcon, & .MuiLinearProgress-root': { display: 'none' },
-    '& svg[data-testid="ChevronRightRoundedIcon"]': { display: 'none' },
   },
 } as const;
 
@@ -102,10 +102,11 @@ function IssueItem({ n, label, to, hint }: { n: number; label: string; to?: stri
   );
 }
 
-function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
+// innerRef + tabIndex -1 ที่หัวข้อ = ปลายทางของลิงก์ #id ผ่าน useHashTarget (เลื่อนมาแล้ว focus หัวข้อ) · scrollMarginTop พ้น app bar
+function Section({ id, title, innerRef, children }: { id: string; title: string; innerRef?: RefObject<HTMLElement | null>; children: ReactNode }) {
   return (
-    <Box component="section" aria-labelledby={id} sx={{ mt: 4 }}>
-      <Typography variant="h2" id={id}>{title}</Typography>
+    <Box component="section" ref={innerRef} aria-labelledby={id} sx={{ mt: 4, scrollMarginTop: 80 }}>
+      <Typography variant="h2" id={id} tabIndex={innerRef ? -1 : undefined}>{title}</Typography>
       {children}
     </Box>
   );
@@ -234,7 +235,7 @@ export default function TaxSummary() {
       setHistoryOpen(true); // เพิ่มรายการใหม่แล้วกางให้เอง (The Disclosure Section Rule)
       reload();
     } catch (err) {
-      setNotice({ message: err instanceof Error ? err.message : 'คำนวณไม่สำเร็จ', severity: 'error' });
+      setNotice({ message: err instanceof Error ? err.message : 'บันทึกผลไม่สำเร็จ', severity: 'error' });
     } finally {
       setCalculating(false);
     }
@@ -243,6 +244,8 @@ export default function TaxSummary() {
   const txnLink = (params: Record<string, string>) => `/transactions?${new URLSearchParams(params).toString()}`;
   const e = summary?.estimate ?? null;
   const rYear = summary ? ruleYear(summary.rule_version) : null;
+  // เงินได้สุทธิก่อนปัดเป็น 0 — ลำดับเดียวกับ estimateTax (src/services/tax-calculation.ts)
+  const rawNet = e ? e.assessableSatang - e.employmentExpenseSatang - e.personalAllowanceSatang - e.deductionClaimSatang : 0;
 
   // รายได้ที่วันที่และยอดเท่ากันมากกว่าหนึ่งรายการ — มักเป็นเงินเดือนเดียวกันที่บันทึกซ้ำ (ทำเครื่องหมาย ไม่ตัดสินแทน)
   const records = summary?.employment_income_records ?? [];
@@ -251,6 +254,12 @@ export default function TaxSummary() {
   for (const r of records) keyCount.set(recordKey(r), (keyCount.get(recordKey(r)) ?? 0) + 1);
   const isDuplicate = (r: (typeof records)[number]) => (keyCount.get(recordKey(r)) ?? 0) > 1;
   const duplicateCount = records.filter(isDuplicate).length;
+
+  // ตัวเลขยังไม่ครบเมื่อยังมีเงินที่ไม่ถูกนับ (ธุรกรรมยังไม่ระบุการนับภาษี / รายได้ที่ไม่รู้ว่าเป็นของใคร) — เอกสารที่ยังไม่ตรวจ
+  // ไม่เปลี่ยนตัวเลข จึงไม่นับ · ลิงก์ผ่าน router (ได้ location.key ใหม่) useHashTarget จึงเลื่อน+focus ทุกครั้งที่กด
+  const incomplete = summary != null && (summary.missing_document.untreated_txn_count > 0 || summary.missing_document.unresolved_income_satang > 0);
+  const issuesRef = useRef<HTMLElement>(null);
+  useHashTarget('#tax-issues-heading', summary != null, issuesRef, 'tax-issues-heading');
 
   return (
     <Box sx={PRINT_SX}>
@@ -291,15 +300,16 @@ export default function TaxSummary() {
             </TextField>
             <Box sx={{ flexGrow: 1, display: { xs: 'none', sm: 'block' } }} />
             <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+              {/* ตัวเลขบนจอคำนวณสดทุกครั้งที่โหลด — ปุ่มนี้แค่เก็บผลไว้เทียบ (ไม่ใช่ปุ่มหลักที่ต้องกดก่อนเห็นตัวเลข) */}
               <Button
-                variant="contained"
-                startIcon={<CalculateRounded />}
+                variant="outlined"
+                startIcon={<BookmarkAddRounded />}
                 disabled={!entity}
                 aria-disabled={calculating || undefined}
                 aria-busy={calculating}
                 onClick={() => void calculate()}
               >
-                {calculating ? 'กำลังคำนวณ…' : 'คำนวณและบันทึก'}
+                {calculating ? 'กำลังบันทึก…' : 'บันทึกผลไว้เทียบ'}
               </Button>
               <Button variant="outlined" startIcon={<AddRounded />} onClick={() => setAddIncomeOpen(true)}>เพิ่มรายได้เอง</Button>
               <Button component="a" startIcon={<DownloadRounded />} href={entity ? `/api/tax/${year}/export.csv?tax_entity_id=${entityKey}` : undefined} disabled={!entity} download>
@@ -318,7 +328,7 @@ export default function TaxSummary() {
           ) : rYear != null && rYear !== year ? (
             <Alert severity="info" variant="outlined" role="status" sx={{ mt: 2 }}>
               ยังไม่มีเกณฑ์ภาษีของปี {taxYearBE(year)} ในระบบ — คำนวณด้วยเกณฑ์ปี {taxYearBE(rYear)} ({rYear < year ? 'ปีล่าสุด' : 'ปีเก่าสุด'}ที่มี)
-              ตัวเลขเป็นประมาณการและยังไม่ได้ตรวจกับกรมสรรพากร ถ้าอัตราหรือค่าลดหย่อนของปีนี้เปลี่ยน ผลจะคลาดเคลื่อน
+              ถ้าอัตราหรือค่าลดหย่อนของปีนี้เปลี่ยน ผลจะคลาดเคลื่อน
             </Alert>
           ) : rYear != null && (
             <Typography variant="body2" color="text.secondary" role="status" sx={{ mt: 1.5 }}>
@@ -334,18 +344,19 @@ export default function TaxSummary() {
               {loading && <LinearProgress aria-label="กำลังโหลดประมาณการ" sx={{ position: 'absolute', top: -8, left: 0, right: 0, height: 2 }} />}
 
               {/* จำนวนการ์ดต้องตรงกับที่ render จริง: 4 ใบคงที่ + (ประมาณการ 2 ใบ หรือการ์ดปิด 1 ใบ) */}
+              {/* หัวการ์ดสั้น — 6 ใบที่ 1280px หัวเหลือที่ราว 110px (คำนวณ ยังไม่ได้วัด) ชื่อเต็มอยู่ใน caption และบล็อกที่มาของเงินได้สุทธิ */}
               <Box sx={{ ...summaryRowSx(e ? 6 : 5), mt: 3 }} data-tour="tax-cards">
-                <SummaryCard dense title="เงินได้จากงานประจำ" value={<Money satang={summary.inputs.employmentIncomeSatang} tone="income" />} caption="รายได้เต็ม (ก่อนหัก) ที่บันทึกไว้ในปีนี้ ดูทีละรายการได้ที่ส่วนที่มาของเงินได้ด้านล่าง" />
+                <SummaryCard dense title="เงินเดือน" value={<Money satang={summary.inputs.employmentIncomeSatang} tone="income" />} caption="เงินได้จากงานประจำ (เงินเดือน ค่าจ้าง) — รายได้เต็มก่อนหักที่บันทึกไว้ในปีนี้ ดูทีละรายการได้ที่ส่วนที่มาของเงินได้จากงานประจำ" />
                 <SummaryCard
                   dense
-                  title="รายได้ธุรกิจอื่น"
+                  title="รายได้ธุรกิจ"
                   value={<Money satang={summary.inputs.otherIncomeSatang} tone="income" />}
                   caption="เงินเข้าที่ตั้งการนับภาษีเป็นรายได้ธุรกิจ"
                   to={summary.inputs.otherIncomeSatang !== 0 ? txnLink(summary.drilldown_params.other_income) : undefined}
                 />
                 <SummaryCard
                   dense
-                  title="ค่าใช้จ่ายหักภาษีได้"
+                  title="ค่าใช้จ่ายธุรกิจ"
                   value={<Money satang={summary.inputs.deductibleExpenseSatang} tone="expense" />}
                   caption="เงินออกที่ตั้งการนับภาษีเป็นค่าใช้จ่ายหักภาษีได้"
                   to={summary.inputs.deductibleExpenseSatang !== 0 ? txnLink(summary.drilldown_params.deductible_expense) : undefined}
@@ -357,9 +368,28 @@ export default function TaxSummary() {
                       dense
                       title="เงินได้สุทธิ"
                       value={<Money satang={e.netSatang} />}
-                      caption={`เงินได้ − ค่าใช้จ่าย − ลดหย่อนส่วนตัว ฿${formatBaht(e.personalAllowanceSatang)} − ค่าลดหย่อน`}
+                      caption="เงินได้ทั้งหมด หักค่าใช้จ่ายงานประจำ ค่าใช้จ่ายธุรกิจ ลดหย่อนส่วนตัว และค่าลดหย่อน — ดูทีละบรรทัดที่ส่วนที่มาของเงินได้สุทธิ"
                     />
-                    <SummaryCard dense title="ต้องชำระเพิ่ม/ขอคืน" value={payableMoney(e.estimatedPayableSatang)} caption={payableWord(e.estimatedPayableSatang)} captionInline />
+                    <SummaryCard
+                      dense
+                      title="ชำระเพิ่ม/ขอคืน"
+                      value={payableMoney(e.estimatedPayableSatang)}
+                      captionInline
+                      caption={
+                        <>
+                          {payableWord(e.estimatedPayableSatang)}
+                          {/* ยังมีเงินที่ไม่ถูกนับ — คำตอบต้องไม่ดูมั่นใจเกินข้อมูล (warning + ไอคอน + คำ) */}
+                          {incomplete && (
+                            <Box component="span" sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5, mt: 0.5, color: 'warning.main' }}>
+                              <WarningAmberRounded fontSize="small" aria-hidden sx={{ mt: 0.25 }} />
+                              <Link to={{ search: searchParams.toString(), hash: '#tax-issues-heading' }} style={{ color: 'inherit' }}>
+                                ยังไม่ครบ — ดูสิ่งที่ยังต้องตรวจ
+                              </Link>
+                            </Box>
+                          )}
+                        </>
+                      }
+                    />
                   </>
                 ) : (
                   <SummaryCard dense title="ประมาณการภาษี" value="—" disabled disabledReason="มีเฉพาะบุคคลธรรมดา" />
@@ -395,6 +425,7 @@ export default function TaxSummary() {
                   <Typography variant="body2" sx={{ mt: 0.5, maxWidth: '70ch' }}>
                     ยอดใกล้เคียงกันเข้าบัญชีหลายเดือน ถ้าเป็นเงินเดือนที่ยังไม่ได้บันทึกเป็นรายได้เต็ม ติ๊กแล้วกดบันทึก — ใช้ยอดที่เข้าบัญชีเป็นยอดก่อนหัก
                     (ถ้าสลิปมีหักประกันสังคมหรือภาษี ณ ที่จ่าย กดแก้ไขในส่วนที่มาของเงินได้ทีหลัง) รายการที่บันทึกไว้แล้วหรือไม่ใช่รายได้ ไม่ต้องติ๊ก
+                    — รายได้ที่บันทึกไว้คนละวันกับวันที่เงินเข้าอาจยังถูกเสนอ ตรวจกับส่วนที่มาของเงินได้ให้ดีก่อนติ๊ก
                   </Typography>
                   <FormGroup aria-label="เลือกเงินเข้าที่จะบันทึกเป็นรายได้เต็ม" sx={{ my: 1 }} role="group">
                     {summary.unrecorded_income_txns.map((txn) => (
@@ -495,6 +526,46 @@ export default function TaxSummary() {
               )}
 
               {e && (
+                <Section id="tax-net-heading" title="ที่มาของเงินได้สุทธิ">
+                  {/* ทุกบรรทัดมาจาก estimate ของ API — อัตรา/เพดานค่าใช้จ่ายงานประจำไม่ได้ส่งมา จึงไม่เขียนตัวเลขกฎหมายเอง */}
+                  <TableContainer component={Paper} variant="outlined" role="region" aria-label="ตารางที่มาของเงินได้สุทธิ" sx={{ mt: 1.5 }}>
+                    <Table size="small" aria-label="ลำดับการหักจากเงินได้ถึงเงินได้สุทธิ" sx={CELL_PX}>
+                      <TableBody>
+                        {([
+                          ['เงินได้จากงานประจำ', e.employmentIncomeSatang, null],
+                          ['รายได้ธุรกิจอื่น', e.otherIncomeSatang, null],
+                          ['หักค่าใช้จ่ายงานประจำ', -e.employmentExpenseSatang, `หักแบบเหมาตามอัตราและเพดานของเกณฑ์ภาษีปี${rYear != null ? ` ${taxYearBE(rYear)}` : 'ที่ใช้'} คิดจากเงินได้จากงานประจำเท่านั้น`],
+                          ['หักค่าใช้จ่ายธุรกิจ', -e.deductibleExpenseSatang, 'เงินออกที่ตั้งการนับภาษีเป็นค่าใช้จ่ายหักภาษีได้'],
+                          ['หักลดหย่อนส่วนตัว', -e.personalAllowanceSatang, 'ระบบหักให้เองตามเกณฑ์ ไม่ต้องเพิ่มในค่าลดหย่อน'],
+                          ['หักค่าลดหย่อนที่ยื่น', -e.deductionClaimSatang, 'รวมจากตารางค่าลดหย่อนด้านล่าง'],
+                        ] as const).map(([label, satang, hint]) => (
+                          <TableRow key={label}>
+                            <TableCell>
+                              {label}
+                              {hint && <Typography variant="body2" color="text.secondary">{hint}</Typography>}
+                            </TableCell>
+                            <TableCell align="right" sx={{ whiteSpace: 'nowrap', verticalAlign: 'top' }}><Money satang={satang} /></TableCell>
+                          </TableRow>
+                        ))}
+                        {/* สูตรเป็น max(0, …) (src/services/tax-calculation.ts) — ติดลบแล้วบรรทัดบนรวมไม่เท่ายอดสุทธิ จึงบอกตรง ๆ */}
+                        <TableRow>
+                          <TableCell sx={{ fontWeight: 600 }}>
+                            เงินได้สุทธิ
+                            {rawNet < 0 && (
+                              <Typography variant="body2" color="text.secondary">
+                                รวมแล้วติดลบ <Money satang={rawNet} /> จึงนับเป็น 0
+                              </Typography>
+                            )}
+                          </TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 600, whiteSpace: 'nowrap', verticalAlign: 'top' }}><Money satang={e.netSatang} /></TableCell>
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                </Section>
+              )}
+
+              {e && (
                 <Section id="tax-brackets-heading" title="ขั้นบันไดภาษี">
                   <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, mb: 1.5 }}>
                     เงินได้สุทธิ <Money satang={e.netSatang} /> แบ่งเสียภาษีตามขั้น — แสดงทุกขั้นที่มีเงินได้ตกอยู่
@@ -504,7 +575,7 @@ export default function TaxSummary() {
                     <Table size="small" aria-label="ภาษีแยกตามขั้นบันไดของเงินได้สุทธิ" sx={CELL_PX}>
                       <TableHead>
                         <TableRow>
-                          <TableCell>เงินได้สุทธิ (บาท)</TableCell>
+                          <TableCell>ช่วงเงินได้สุทธิ</TableCell>
                           <TableCell align="right">อัตรา</TableCell>
                           <TableCell align="right" sx={MD_UP}>เงินได้ในขั้น</TableCell>
                           <TableCell align="right">ภาษีในขั้น</TableCell>
@@ -513,8 +584,8 @@ export default function TaxSummary() {
                       <TableBody>
                         {e.bracketBreakdown.map((b, i) => {
                           const lower = i === 0 ? 0 : (e.bracketBreakdown[i - 1]!.upToSatang ?? 0);
-                          // incomeSatang ไม่มีในผลจากเซิร์ฟเวอร์รุ่นก่อน 1.5.0 — แสดงว่าไม่มีข้อมูล ไม่คำนวณเดาเอง
-                          const income = b.incomeSatang == null ? noValue('ไม่มีข้อมูล') : <Money satang={b.incomeSatang} />;
+                          // estimate ในหน้านี้คำนวณสดเสมอจึงมี incomeSatang (snapshot เก่าไม่มี แต่ประวัติไม่แสดงขั้นบันได)
+                          const income = <Money satang={b.incomeSatang} />;
                           return (
                             <TableRow key={i}>
                               <TableCell sx={dataTextSx}>
@@ -545,7 +616,7 @@ export default function TaxSummary() {
                 </Section>
               )}
 
-              <Section id="tax-issues-heading" title="สิ่งที่ยังต้องตรวจ">
+              <Section id="tax-issues-heading" title="สิ่งที่ยังต้องตรวจ" innerRef={issuesRef}>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
                   ประมาณการจะครบเมื่อทุกธุรกรรมของปีนี้ถูกระบุว่าเกี่ยวกับภาษีไหม และเอกสารภาษีผ่านการตรวจแล้ว
                 </Typography>
@@ -632,8 +703,8 @@ export default function TaxSummary() {
                 ) : snapshots.length === 0 ? (
                   <EmptyState
                     icon={<CalculateRounded sx={{ fontSize: 40 }} />}
-                    title="ยังไม่เคยคำนวณและบันทึก"
-                    description={`กด "คำนวณและบันทึก" เพื่อเก็บผลของปี ${taxYearBE(year)} ไว้เทียบภายหลัง — ผลที่บันทึกไม่เปลี่ยนตามข้อมูลที่แก้ทีหลัง`}
+                    title="ยังไม่เคยบันทึกผล"
+                    description={`ตัวเลขด้านบนคำนวณสดทุกครั้ง — กด "บันทึกผลไว้เทียบ" เพื่อเก็บผลของปี ${taxYearBE(year)} ไว้ ผลที่บันทึกไม่เปลี่ยนตามข้อมูลที่แก้ทีหลัง`}
                   />
                 ) : (
                   // < md เหลือ คำนวณเมื่อ · ผล — เกณฑ์และภาษีโดยประมาณเป็นบรรทัดรอง

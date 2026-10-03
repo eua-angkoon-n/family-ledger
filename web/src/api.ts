@@ -463,8 +463,8 @@ export const TAX_TREATMENT_LABEL: Record<TaxTreatment, string> = {
   excluded: 'ไม่นับรวม',
 };
 
-// incomeSatang = เงินได้สุทธิที่ตกอยู่ในขั้นนี้ (ไม่มีใน snapshot เก่าก่อน 1.5.0 จึงเป็น optional)
-export type TaxBracketBreakdown = { upToSatang: number | null; rate: number; taxSatang: number; incomeSatang?: number };
+// incomeSatang = เงินได้สุทธิที่ตกอยู่ในขั้นนี้ — snapshot เก่าก่อน 1.5.0 ไม่มี field นี้ แต่หน้าเว็บไม่แสดงขั้นบันไดจาก snapshot
+export type TaxBracketBreakdown = { upToSatang: number | null; rate: number; taxSatang: number; incomeSatang: number };
 export type TaxEstimate = {
   ruleVersion: string;
   employmentIncomeSatang: number;

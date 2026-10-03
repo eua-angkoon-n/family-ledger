@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import {
   Box,
   Button,
+  Collapse,
   LinearProgress,
   MenuItem,
   Paper,
@@ -16,10 +17,13 @@ import {
   TableRow,
   TextField,
   Typography,
+  useMediaQuery,
+  type Theme,
 } from '@mui/material';
 import AddRounded from '@mui/icons-material/AddRounded';
 import ArchiveOutlined from '@mui/icons-material/ArchiveOutlined';
 import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded';
+import FilterListRounded from '@mui/icons-material/FilterListRounded';
 import MarkEmailReadRounded from '@mui/icons-material/MarkEmailReadRounded';
 import ReceiptRounded from '@mui/icons-material/ReceiptRounded';
 import {
@@ -54,6 +58,8 @@ const validType = (v: string) => (Object.hasOwn(DOCUMENT_TYPE_LABEL, v) ? v : ''
 
 export default function TaxDocuments() {
   const [searchParams, setSearchParams] = useSearchParams();
+  // < sm: เหลือค้นหา + ปีบนแถบ ที่เหลือพับใน "ตัวกรองเพิ่มเติม" (แบบหน้าธุรกรรม) — ตารางขึ้นสูงขึ้น ~120px
+  const narrow = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'), { noSsr: true });
   const [taxEntities, setTaxEntities] = useState<TaxEntity[] | null>(null);
   const [entitiesError, setEntitiesError] = useState('');
   const [mailboxes, setMailboxes] = useState<EmailAccount[]>([]);
@@ -86,6 +92,8 @@ export default function TaxDocuments() {
   // ช่องค้นหายิงตอน Enter/ออกจากช่อง ไม่ใช่ทุกตัวอักษร — ร่างตามค่าใน URL เสมอ (ล้างตัวกรอง/Back แล้วช่องตรงกับผล)
   const [qDraft, setQDraft] = useState(q);
   useEffect(() => setQDraft(q), [q]);
+  // เปิดลิงก์ที่มีตัวกรองในแผงอยู่แล้ว (หน้าภาษีส่ง ?status=draft) = กางให้เห็นเลย
+  const [moreOpen, setMoreOpen] = useState(() => Boolean(taxEntityId || status || documentType));
 
   // ตัวกรอง = replace (ไม่เพิ่ม history ทุกครั้งที่เลือก) · หน้า = push (Back ย้อนได้)
   const setFilter = (patch: Record<string, string | null>, replace = true) => {
@@ -166,6 +174,8 @@ export default function TaxDocuments() {
   const activeEntities = entities.filter((e) => e.is_active);
   // ผู้เสียภาษีรายเดียว = ชื่อซ้ำกันทุกแถว ไม่ต้องมีคอลัมน์/บรรทัดรอง (แบบกล่องอีเมลของหน้าบัญชีของฉัน)
   const showEntity = entities.length > 1;
+  // ตัวกรองผู้เสียภาษี: ซ่อนเมื่อมีรายเดียว · ระหว่างโหลดรายชื่อยังแสดง (ไม่โผล่ทีหลังแล้วดันช่องอื่น) · ลิงก์ที่กรองไว้แล้วต้องเห็นและเอาออกได้
+  const showEntityFilter = taxEntities == null || showEntity || taxEntityId !== '';
   const taxEntityName = (id: number) => entities.find((e) => e.id === id)?.display_name ?? '';
   const defaultTaxEntityId = taxEntityId || (activeEntities.length === 1 ? String(activeEntities[0]!.id) : '');
   const entitiesLoad = entitiesError ? { error: entitiesError, onRetry: loadEntities } : undefined;
@@ -203,6 +213,51 @@ export default function TaxDocuments() {
   };
 
   const filterSx = { flex: '1 1 160px', maxWidth: { sm: 220 } };
+  const panelCount = [taxEntityId, status, documentType].filter(Boolean).length;
+
+  const entityFilter = showEntityFilter && (
+    <TextField select size="small" label="ผู้เสียภาษี" value={taxEntityId} onChange={(e) => setFilter({ tax_entity_id: e.target.value })} sx={filterSx}>
+      <MenuItem value="">ทั้งหมด</MenuItem>
+      {entities.map((e) => <MenuItem key={e.id} value={String(e.id)}>{e.display_name}</MenuItem>)}
+      {/* ลิงก์ชี้ผู้เสียภาษีที่ไม่อยู่ในรายชื่อ (ยังโหลดไม่เสร็จ/โหลดไม่ได้) — ยังเห็นและเอาออกได้ */}
+      {taxEntityId && !entities.some((e) => String(e.id) === taxEntityId) && <MenuItem value={taxEntityId}>ผู้เสียภาษีรหัส {taxEntityId}</MenuItem>}
+    </TextField>
+  );
+  const yearFilter = (
+    // < sm ฐานแคบลงให้ปีกับปุ่ม "ตัวกรอง (n)" อยู่แถวเดียวกันที่ 320px
+    <TextField select size="small" label="ปีภาษี" value={taxYear} onChange={(e) => setFilter({ tax_year: e.target.value })} sx={narrow ? { flex: '1 1 120px' } : filterSx}>
+      <MenuItem value="">ทุกปี</MenuItem>
+      {taxYearOptions(taxYear).map((y) => <MenuItem key={y} value={String(y)} sx={dataTextSx}>{taxYearBE(y)}</MenuItem>)}
+    </TextField>
+  );
+  const statusFilter = (
+    <TextField select size="small" label="สถานะ" value={status} onChange={(e) => setFilter({ status: e.target.value })} sx={filterSx}>
+      <MenuItem value="">ทั้งหมด</MenuItem>
+      {(Object.entries(TAX_DOC_STATUS_LABEL) as [TaxDocumentStatus, string][]).map(([value, label]) => (
+        <MenuItem key={value} value={value}>{label}</MenuItem>
+      ))}
+    </TextField>
+  );
+  const typeFilter = (
+    <TextField select size="small" label="ประเภทเอกสาร" value={documentType} onChange={(e) => setFilter({ document_type: e.target.value })} sx={{ flex: '1 1 200px', maxWidth: { sm: 280 } }}>
+      <MenuItem value="">ทั้งหมด</MenuItem>
+      {(Object.entries(DOCUMENT_TYPE_LABEL) as [TaxDocumentType, string][]).map(([value, label]) => (
+        <MenuItem key={value} value={value}>{label}</MenuItem>
+      ))}
+    </TextField>
+  );
+  const searchFilter = (
+    <TextField
+      size="small"
+      label="ค้นหา (ผู้ออก/เลขที่เอกสาร)"
+      value={qDraft}
+      inputRef={searchRef}
+      onChange={(e) => setQDraft(e.target.value)}
+      onBlur={commitSearch}
+      onKeyDown={(e) => { if (e.key === 'Enter') commitSearch(); }}
+      sx={{ flex: '2 1 220px' }}
+    />
+  );
 
   return (
     <Box>
@@ -225,40 +280,41 @@ export default function TaxDocuments() {
       {TAX_GMAIL_IMPORT_ENABLED && mailboxesError && <LoadError message={mailboxesError} onRetry={loadMailboxes} />}
 
       <Stack direction="row" spacing={1.5} useFlexGap sx={{ mt: 3, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-        <TextField select size="small" label="ผู้เสียภาษี" value={taxEntityId} onChange={(e) => setFilter({ tax_entity_id: e.target.value })} sx={filterSx}>
-          <MenuItem value="">ทั้งหมด</MenuItem>
-          {entities.map((e) => <MenuItem key={e.id} value={String(e.id)}>{e.display_name}</MenuItem>)}
-          {/* ลิงก์ชี้ผู้เสียภาษีที่ไม่อยู่ในรายชื่อ (ยังโหลดไม่เสร็จ/โหลดไม่ได้) — ยังเห็นและเอาออกได้ */}
-          {taxEntityId && !entities.some((e) => String(e.id) === taxEntityId) && <MenuItem value={taxEntityId}>ผู้เสียภาษีรหัส {taxEntityId}</MenuItem>}
-        </TextField>
-        <TextField select size="small" label="ปีภาษี" value={taxYear} onChange={(e) => setFilter({ tax_year: e.target.value })} sx={filterSx}>
-          <MenuItem value="">ทุกปี</MenuItem>
-          {taxYearOptions(taxYear).map((y) => <MenuItem key={y} value={String(y)} sx={dataTextSx}>{taxYearBE(y)}</MenuItem>)}
-        </TextField>
-        <TextField select size="small" label="สถานะ" value={status} onChange={(e) => setFilter({ status: e.target.value })} sx={filterSx}>
-          <MenuItem value="">ทั้งหมด</MenuItem>
-          {(Object.entries(TAX_DOC_STATUS_LABEL) as [TaxDocumentStatus, string][]).map(([value, label]) => (
-            <MenuItem key={value} value={value}>{label}</MenuItem>
-          ))}
-        </TextField>
-        <TextField select size="small" label="ประเภทเอกสาร" value={documentType} onChange={(e) => setFilter({ document_type: e.target.value })} sx={{ flex: '1 1 200px', maxWidth: { sm: 280 } }}>
-          <MenuItem value="">ทั้งหมด</MenuItem>
-          {(Object.entries(DOCUMENT_TYPE_LABEL) as [TaxDocumentType, string][]).map(([value, label]) => (
-            <MenuItem key={value} value={value}>{label}</MenuItem>
-          ))}
-        </TextField>
-        <TextField
-          size="small"
-          label="ค้นหา (ผู้ออก/เลขที่เอกสาร)"
-          value={qDraft}
-          inputRef={searchRef}
-          onChange={(e) => setQDraft(e.target.value)}
-          onBlur={commitSearch}
-          onKeyDown={(e) => { if (e.key === 'Enter') commitSearch(); }}
-          sx={{ flex: '2 1 220px' }}
-        />
+        {narrow ? (
+          <>
+            {searchFilter}
+            {yearFilter}
+            {/* ตัวกรองในแผงค้างใน URL ได้แม้แผงพับ — จำนวนบนปุ่ม (สี primary) บอกว่ามีอยู่ */}
+            <Button
+              startIcon={<FilterListRounded />}
+              onClick={() => setMoreOpen((v) => !v)}
+              color={panelCount > 0 ? 'primary' : 'inherit'}
+              aria-expanded={moreOpen}
+              aria-controls="taxdoc-more-filters"
+            >
+              ตัวกรอง{panelCount > 0 ? ` (${panelCount})` : ''}
+            </Button>
+          </>
+        ) : (
+          <>
+            {entityFilter}
+            {yearFilter}
+            {statusFilter}
+            {typeFilter}
+            {searchFilter}
+          </>
+        )}
         {hasFilter && clearButton}
       </Stack>
+      {narrow && (
+        <Collapse in={moreOpen} id="taxdoc-more-filters">
+          <Stack direction="row" spacing={1.5} useFlexGap sx={{ flexWrap: 'wrap', pt: 1.5 }}>
+            {entityFilter}
+            {statusFilter}
+            {typeFilter}
+          </Stack>
+        </Collapse>
+      )}
 
       {/* ผลการกรองสำหรับ screen reader — อยู่นอกส่วนที่สลับเป็น skeleton */}
       <Box role="status" sx={visuallyHiddenSx}>
@@ -332,20 +388,21 @@ export default function TaxDocuments() {
                         ))}
                       </Typography>
                     </TableCell>
-                    <TableCell sx={MD_UP}>{DOCUMENT_TYPE_LABEL[doc.document_type]}</TableCell>
+                    <TableCell sx={{ ...MD_UP, whiteSpace: 'nowrap' }}>{DOCUMENT_TYPE_LABEL[doc.document_type]}</TableCell>
                     {showEntity && <TableCell sx={MD_UP}>{taxEntityName(doc.tax_entity_id)}</TableCell>}
                     <TableCell sx={{ ...MD_UP, ...dataTextSx }}>{taxYearBE(doc.tax_year)}</TableCell>
                     <TableCell align="right" sx={{ whiteSpace: 'nowrap', px: { xs: 1, md: 2 } }}><Money satang={doc.total_satang} /></TableCell>
-                    <TableCell sx={MD_UP}><TaxDocumentStatusChip status={doc.status} /></TableCell>
+                    <TableCell sx={{ ...MD_UP, whiteSpace: 'nowrap' }}><TaxDocumentStatusChip status={doc.status} /></TableCell>
                     <TableCell align="right" sx={{ py: 0.5, px: { xs: 0.5, md: 1 } }} onClick={(e) => e.stopPropagation()}>
-                      {/* < md ปุ่มเรียงแนวตั้ง — ที่ 320px ชื่อผู้ออกเหลือที่ ~115px แทน ~70px */}
+                      {/* < md ปุ่มเรียงแนวตั้ง — ที่ 320px ชื่อผู้ออกเหลือที่ ~115px แทน ~70px
+                          เปิดก่อนเก็บเข้าคลัง (ลำดับตา/Tab/นิ้วโป้ง) — ปุ่มสีแดงไม่ใช่สิ่งแรกที่เจอ */}
                       <Stack direction={{ xs: 'column', md: 'row' }} spacing={0.5} sx={{ alignItems: 'flex-end', justifyContent: 'flex-end' }}>
+                        <RowIconButton data-taxdoc-open label={`ดูรายละเอียด ${doc.issuer_name}`} tooltip="ดูรายละเอียด" onClick={() => setSelectedDocId(doc.id)}>
+                          <ChevronRightRounded />
+                        </RowIconButton>
                         {/* ไม่มี endpoint เอากลับ ย้อนจากหน้าจอไม่ได้ — สี error แบบ "เก็บเข้าคลัง" ของหน้าบัญชีของฉัน */}
                         <RowIconButton label={`เก็บเข้าคลัง ${doc.issuer_name}`} tooltip="เก็บเข้าคลัง" color="error" onClick={() => openArchive(doc)}>
                           <ArchiveOutlined fontSize="small" />
-                        </RowIconButton>
-                        <RowIconButton data-taxdoc-open label={`ดูรายละเอียด ${doc.issuer_name}`} tooltip="ดูรายละเอียด" onClick={() => setSelectedDocId(doc.id)}>
-                          <ChevronRightRounded />
                         </RowIconButton>
                       </Stack>
                     </TableCell>

@@ -99,6 +99,20 @@ export function taxDocumentMetaPayload(form: TaxDocumentMetaForm) {
   };
 }
 
+// ยอดที่อ่านไม่ได้คงเป็นข้อความ — ไม่งั้นพิมพ์ "abc" ในช่องที่ว่างอยู่ได้ null เท่าเดิม แล้วไม่นับว่าแก้
+const amountKey = (value: string) => (value.trim() === '' ? null : parseBahtToSatang(value) ?? value);
+
+/** ค่าที่ใช้เทียบว่าฟอร์มถูกแก้หรือยัง — เทียบค่าที่จะส่ง ไม่ใช่ข้อความ: พิมพ์ "1500" ทับ "1,500.00" ไม่นับว่าแก้ */
+export function taxDocumentMetaKey(form: TaxDocumentMetaForm): string {
+  return JSON.stringify({
+    ...taxDocumentMetaPayload(form),
+    subtotal_satang: amountKey(form.subtotal_baht),
+    vat_satang: amountKey(form.vat_baht),
+    total_satang: amountKey(form.total_baht),
+    withholding_satang: amountKey(form.withholding_baht),
+  });
+}
+
 const bahtInput = (satang: number | null) => (satang == null ? '' : formatBaht(satang));
 
 /** ค่าเดิมของเอกสารเป็นฟอร์มแก้ไข — ยอดเงินรูปเดียวกับตัวอย่าง "1,500.00" (Inputs ใน DESIGN.md) */

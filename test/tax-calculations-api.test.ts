@@ -323,6 +323,8 @@ test('tax calculation: summary, snapshot, deduction claims, export, audit', asyn
     // ผู้ใช้เปิดอ่านเอง: ปี พ.ศ. และชื่อผู้เสียภาษี ไม่ใช่ปี ค.ศ./id ดิบ
     assert.match(text, /ปีภาษี \(พ\.ศ\.\),2569/);
     assert.match(text, /ผู้เสียภาษี,บุคคลธรรมดา 8/);
+    // 2026 ยังไม่มีกฎของตัวเอง → ใช้เกณฑ์ปี 2025 (พ.ศ. 2568) ต้องบอกให้ผู้อ่านรู้
+    assert.match(text, /ชุดกฎภาษี,th-pit-2025\.1 \(เกณฑ์ปี 2568\)/);
     assert.doesNotMatch(text, /Tax Entity/);
     assert.match(res.headers.get('content-disposition') ?? '', /tax-estimate-2569-/);
 

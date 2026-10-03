@@ -255,19 +255,34 @@ function activeNavPath(pathname: string): string | false {
 }
 
 // แท็บย่อยของเมนู "ภาษี" — สองหน้ายังเป็นสอง route เดิม แถบนี้เป็นลิงก์ไปมา (render เหนือหน้าใน route ทั้งสอง)
-// ลิงก์ล้วนไม่พาตัวกรองไปด้วย (สองหน้าใช้ชื่อ query คนละชุด) · ไม่พิมพ์ เหมือน app bar
+// ลิงก์พาปีและผู้เสียภาษีไปด้วยเฉพาะที่มีใน URL (ปีชื่อ query ต่างกัน: /tax `year` ↔ /tax-documents `tax_year`) ตัวกรองอื่นไม่พา
+// ไม่ใส่ปีให้เองตอน URL ไม่มี — หน้าเอกสารไม่มีปี = ทุกปี · ไม่พิมพ์ เหมือน app bar
 const TAX_TABS = [
-  { path: '/tax', label: 'ประมาณการ' },
-  { path: '/tax-documents', label: 'เอกสาร' },
+  { path: '/tax', label: 'ประมาณการ', yearParam: 'year' },
+  { path: '/tax-documents', label: 'เอกสาร', yearParam: 'tax_year' },
 ] as const;
 
+// แท็บย่อยน้ำหนักรองจากเมนูหลัก: ที่เลือกมีแค่เส้นใต้ ไม่มีพื้น sidebar-accent (สีตัวอักษรของพื้นนั้นไม่ได้ตั้งมาสำหรับพื้นหน้า
+// จึงใช้ text.primary — ring เป็น currentColor ตามธีม)
+const taxTabsSx = { '& .MuiTab-root.Mui-selected, & .MuiTab-root.Mui-selected:hover': { bgcolor: 'transparent', color: 'text.primary' } } as const;
+
 function TaxSubNav() {
-  const current = useLocation().pathname.startsWith('/tax-documents') ? '/tax-documents' : '/tax'; // "/tax/" ก็ยังเป็นแท็บประมาณการ
+  const { pathname, search } = useLocation();
+  const current = TAX_TABS[pathname.startsWith('/tax-documents') ? 1 : 0]; // "/tax/" ก็ยังเป็นแท็บประมาณการ
+  const params = new URLSearchParams(search);
+  const entityId = params.get('tax_entity_id');
+  const year = params.get(current.yearParam);
+  const linkTo = (tab: (typeof TAX_TABS)[number]) => {
+    const q = new URLSearchParams();
+    if (entityId) q.set('tax_entity_id', entityId);
+    if (year) q.set(tab.yearParam, year);
+    return { pathname: tab.path, search: q.toString() };
+  };
   return (
     <Box component="nav" aria-label="เมนูภาษี" sx={{ mb: 3, borderBottom: 1, borderColor: 'divider', displayPrint: 'none' }}>
-      <Tabs value={current} variant="scrollable" scrollButtons="auto">
+      <Tabs value={current.path} variant="scrollable" scrollButtons="auto" sx={taxTabsSx}>
         {TAX_TABS.map((tab) => (
-          <Tab key={tab.path} value={tab.path} label={tab.label} component={Link} to={tab.path} aria-current={current === tab.path ? 'page' : undefined} />
+          <Tab key={tab.path} value={tab.path} label={tab.label} component={Link} to={linkTo(tab)} aria-current={current.path === tab.path ? 'page' : undefined} />
         ))}
       </Tabs>
     </Box>
@@ -685,7 +700,7 @@ export default function App() {
             <Box component="nav" aria-label="เมนูหลัก" sx={{ order: { xs: -1, md: 0 }, minWidth: 0 }}>
               {isDesktop ? (
                 // ช่วงไอคอนล้วนพอดีเสมอ (8 tabs ก็ยังพอ) · ≥ lg แอดมินที่เปิดหน้าภาษี (features.ts) มี 7 tabs — ภาษีรวมเป็นแท็บเดียว
-                // และ tab มีชื่อกว้างตามชื่อ (NavTab) ประมาณว่าเหลือที่ราว 40px ที่ 1200px (คำนวณ ยังไม่ได้วัดในเบราว์เซอร์)
+                // และ tab มีชื่อกว้างตามชื่อ (NavTab) — วัดในเบราว์เซอร์แล้ว (แอดมิน + เปิดหน้าภาษี) ไม่ล้นที่ 1440/1280/1200/1100/900px
                 // scrollable กันตัดหายเงียบ ๆ ถ้าเมนูยาวขึ้นอีก ลูกศรขึ้นเฉพาะตอนล้นจริง
                 // ไม่ใส่ aria-label ที่ Tabs เพราะ nav ด้านนอกมีชื่อ "เมนูหลัก" แล้ว (screen reader จะอ่านซ้ำสองรอบ)
                 <Tabs value={activeNav} variant="scrollable" scrollButtons="auto">

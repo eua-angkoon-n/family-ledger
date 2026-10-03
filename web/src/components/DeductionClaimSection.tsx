@@ -6,12 +6,11 @@ import {
 import AddRounded from '@mui/icons-material/AddRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import EditRounded from '@mui/icons-material/EditRounded';
-import ReceiptLongRounded from '@mui/icons-material/ReceiptLongRounded';
 import { del, patch, post, req, type TaxDeductionClaim, type TaxDocument } from '../api.js';
 import Modal from '../Modal.js';
-import { formatBaht, parseBahtToSatang } from '../format.js';
+import { AMOUNT_FORMAT_HINT, formatBaht, parseBahtToSatang } from '../format.js';
 import { dataTextSx } from '../theme.js';
-import { amountFieldHelp, BELOW_MD, ConfirmDialog, EmptyState, LoadError, MD_UP, PageHeader, RowIconButton, TableSkeleton } from '../ui.js';
+import { amountFieldHelp, BELOW_MD, ConfirmDialog, LoadError, MD_UP, PageHeader, RowIconButton, TableSkeleton } from '../ui.js';
 import Money from './Money.js';
 
 // รายการเดียวกับ src/services/tax-rules.ts (DEDUCTION_TYPES) — ไม่มี 'personal' เพราะลดหย่อนส่วนตัว
@@ -37,10 +36,19 @@ export const deductionLabel = (type: string) => DEDUCTION_TYPE_LABEL[type] ?? ty
 type Form = { deduction_type: string; eligible: string; claimed: string; tax_document_id: string; note: string };
 const emptyForm = (): Form => ({ deduction_type: 'donation', eligible: '', claimed: '', tax_document_id: '', note: '' });
 
-function amount(value: string): number {
-  const result = parseBahtToSatang(value);
-  if (result == null) throw new Error('กรุณากรอกจำนวนเงินบาทให้ถูกต้อง ไม่เกิน 2 ตำแหน่งทศนิยม');
-  return result;
+// ฟอร์มเป็น noValidate แล้วตรวจเองตอนกดบันทึก (error ไทยใต้ช่อง focus ช่องแรกที่ผิด) — id เรียงตามลำดับในฟอร์ม
+const AMOUNT_ID = { eligible: 'deduction-claim-eligible', claimed: 'deduction-claim-claimed' } as const;
+type AmountField = keyof typeof AMOUNT_ID;
+function amountErrors(form: Form): Partial<Record<AmountField, string>> {
+  const errors: Partial<Record<AmountField, string>> = {};
+  const eligible = parseBahtToSatang(form.eligible);
+  const claimed = parseBahtToSatang(form.claimed);
+  if (form.eligible.trim() === '') errors.eligible = 'กรอกยอดที่มีสิทธิ์';
+  else if (eligible == null) errors.eligible = AMOUNT_FORMAT_HINT;
+  if (form.claimed.trim() === '') errors.claimed = 'กรอกยอดที่ยื่นขอ';
+  else if (claimed == null) errors.claimed = AMOUNT_FORMAT_HINT;
+  else if (eligible != null && claimed > eligible) errors.claimed = 'ยอดที่ยื่นขอต้องไม่เกินยอดที่มีสิทธิ์';
+  return errors;
 }
 
 const documentLabel = (d: TaxDocument) => (d.document_no ? `${d.issuer_name} · ${d.document_no}` : d.issuer_name);
@@ -61,6 +69,7 @@ export default function DeductionClaimSection({ taxEntityId, taxYear, onChanged 
   const [form, setForm] = useState<Form>(emptyForm);
   const [initialForm, setInitialForm] = useState<Form>(emptyForm);
   const [formError, setFormError] = useState('');
+  const [attempted, setAttempted] = useState(false);
   const [busy, setBusy] = useState(false);
   // แยก open ออกจากแถว — ระหว่าง dialog กำลังปิด ชื่อรายการยังอยู่ในคำถาม
   const [deleting, setDeleting] = useState<TaxDeductionClaim | null>(null);
@@ -92,7 +101,7 @@ export default function DeductionClaimSection({ taxEntityId, taxYear, onChanged 
       tax_document_id: claim.tax_document_id == null ? '' : String(claim.tax_document_id),
       note: claim.note ?? '',
     };
-    setFormError(''); setForm(next); setInitialForm(next); setEditing(claim);
+    setFormError(''); setAttempted(false); setForm(next); setInitialForm(next); setEditing(claim);
   };
 
   // response ของค่าลดหย่อนมีแค่ tax_document_id — ชื่อผู้ออก/เลขที่มาจากรายการเอกสารของปีนี้ที่โหลดไว้แล้ว (ไม่เรียก API เพิ่ม)
@@ -103,15 +112,27 @@ export default function DeductionClaimSection({ taxEntityId, taxYear, onChanged 
     return doc ? documentLabel(doc) : 'ผูกเอกสารแล้ว';
   };
 
+  const fieldErrors = attempted ? amountErrors(form) : {};
+  // error ตอนกดบันทึกมาก่อน ไม่งั้นใช้คำเตือนรูปแบบตัวเลขระหว่างพิมพ์ (amountFieldHelp) แล้วค่อยคำใบ้ปกติ
+  const amountHelp = (field: AmountField, hint?: string) => {
+    const error = fieldErrors[field];
+    if (error) return { error: true, helperText: error };
+    const format = amountFieldHelp(form[field]);
+    return 'error' in format ? format : { helperText: hint };
+  };
+
   const save = async () => {
-    setBusy(true); setFormError('');
+    setFormError(''); setAttempted(true);
+    const invalid = (Object.keys(AMOUNT_ID) as AmountField[]).find((f) => amountErrors(form)[f]);
+    if (invalid) {
+      document.getElementById(AMOUNT_ID[invalid])?.focus();
+      return;
+    }
+    setBusy(true);
     try {
-      const eligible = amount(form.eligible);
-      const claimed = amount(form.claimed);
-      if (claimed > eligible) throw new Error('ยอดที่ยื่นขอต้องไม่เกินยอดที่มีสิทธิ์');
       const body = {
-        eligible_amount_satang: eligible,
-        claimed_amount_satang: claimed,
+        eligible_amount_satang: parseBahtToSatang(form.eligible)!,
+        claimed_amount_satang: parseBahtToSatang(form.claimed)!,
         tax_document_id: form.tax_document_id ? Number(form.tax_document_id) : null,
         note: form.note || null,
       };
@@ -148,7 +169,7 @@ export default function DeductionClaimSection({ taxEntityId, taxYear, onChanged 
       <PageHeader
         id="deduction-claim-heading"
         title="ค่าลดหย่อน"
-        description="ยอดที่ยื่นขอรวมเข้าประมาณการ (ไม่รวมลดหย่อนส่วนตัวที่ระบบหักให้เอง) · ผูกเอกสารภาษีไว้เพื่อให้ตรวจย้อนได้"
+        description='ยอดที่ยื่นขอรวมเข้าประมาณการ (ไม่รวมลดหย่อนส่วนตัวที่ระบบหักให้เอง) · ค่าลดหย่อนแต่ละประเภทมีเพดานตามกฎหมาย กรอกยอดที่ใช้สิทธิ์ได้จริง ระบบไม่ได้ตรวจเพดานให้ · ประกันสังคมที่หักจากเงินเดือนไม่ถูกนับเอง เพิ่มเป็นประเภท "ประกันสังคม" · ผูกเอกสารภาษีไว้เพื่อให้ตรวจย้อนได้'
         action={
           <Button ref={addButtonRef} variant="outlined" startIcon={<AddRounded />} onClick={() => openEditor('new')} sx={{ whiteSpace: 'nowrap', displayPrint: 'none' }}>
             เพิ่มค่าลดหย่อน
@@ -158,7 +179,8 @@ export default function DeductionClaimSection({ taxEntityId, taxYear, onChanged 
 
       {error && <LoadError message={error} onRetry={() => setRevision((n) => n + 1)} />}
       {rows == null ? !error && <TableSkeleton rows={2} /> : rows.length === 0 ? (
-        <EmptyState icon={<ReceiptLongRounded sx={{ fontSize: 40 }} />} title="ยังไม่มีค่าลดหย่อนที่บันทึกไว้" description="เพิ่มค่าลดหย่อนที่มีเอกสารรองรับ เพื่อให้ประมาณการภาษีแม่นยำขึ้น" />
+        // บรรทัดเดียว ไม่ใช่การ์ดว่างใหญ่ — ปุ่มเพิ่มอยู่ที่หัวส่วนแล้ว
+        <Typography color="text.secondary" sx={{ mt: 1.5 }}>ยังไม่มีค่าลดหย่อนที่บันทึกไว้ — กด "เพิ่มค่าลดหย่อน" เพื่อให้ประมาณการแม่นยำขึ้น</Typography>
       ) : (
         // < md เหลือ ประเภท · ยื่นขอ · จัดการ — ยอดที่มีสิทธิ์และเอกสารพับเป็นบรรทัดรอง ตารางไม่ล้นกล่องจึงไม่มี tabIndex
         <TableContainer component={Paper} variant="outlined" role="region" aria-label="ตารางค่าลดหย่อน" sx={{ mt: 2 }}>
@@ -211,7 +233,8 @@ export default function DeductionClaimSection({ taxEntityId, taxYear, onChanged 
         dirty={JSON.stringify(form) !== JSON.stringify(initialForm)}
         footer={{ formId: 'deduction-claim-form', submitLabel: editing === 'new' ? 'เพิ่มค่าลดหย่อน' : 'บันทึกการแก้ไข' }}
       >
-        <Stack component="form" id="deduction-claim-form" spacing={2} onSubmit={(e) => { e.preventDefault(); if (!busy) void save(); }}>
+        {/* noValidate: ช่องยอดเงินตรวจเองใน save (AMOUNT_ID) — `required` คงไว้เพื่อ * และ aria-required */}
+        <Stack component="form" id="deduction-claim-form" noValidate spacing={2} onSubmit={(e) => { e.preventDefault(); if (!busy) void save(); }}>
           {formError && <Alert severity="error">{formError}</Alert>}
           <TextField
             select label="ประเภทค่าลดหย่อน" required disabled={editing !== 'new'}
@@ -220,8 +243,8 @@ export default function DeductionClaimSection({ taxEntityId, taxYear, onChanged 
           >
             {Object.entries(DEDUCTION_TYPE_LABEL).map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
           </TextField>
-          <TextField label="ยอดที่มีสิทธิ์ (บาท)" required value={form.eligible} onChange={(e) => setForm({ ...form, eligible: e.target.value })} {...amountFieldHelp(form.eligible)} slotProps={{ htmlInput: { inputMode: 'decimal', sx: dataTextSx } }} />
-          <TextField label="ยอดที่ยื่นขอ (บาท)" required value={form.claimed} onChange={(e) => setForm({ ...form, claimed: e.target.value })} {...amountFieldHelp(form.claimed)} slotProps={{ htmlInput: { inputMode: 'decimal', sx: dataTextSx } }} />
+          <TextField id={AMOUNT_ID.eligible} label="ยอดที่มีสิทธิ์ (บาท)" required value={form.eligible} onChange={(e) => setForm({ ...form, eligible: e.target.value })} {...amountHelp('eligible')} slotProps={{ htmlInput: { inputMode: 'decimal', sx: dataTextSx } }} />
+          <TextField id={AMOUNT_ID.claimed} label="ยอดที่ยื่นขอ (บาท)" required value={form.claimed} onChange={(e) => setForm({ ...form, claimed: e.target.value })} {...amountHelp('claimed', 'ยอดที่ใช้สิทธิ์ได้จริงหลังเทียบเพดานของประเภทนี้แล้ว')} slotProps={{ htmlInput: { inputMode: 'decimal', sx: dataTextSx } }} />
           <TextField select label="เอกสารอ้างอิง" value={form.tax_document_id} onChange={(e) => setForm({ ...form, tax_document_id: e.target.value })} helperText="ไม่บังคับ แต่ต้องมีก่อนถือว่าตรวจสอบครบ">
             <MenuItem value="">ไม่ผูกเอกสาร</MenuItem>
             {formDocumentMissing && <MenuItem value={form.tax_document_id}>เอกสารที่ผูกไว้เดิม (ไม่อยู่ในรายการปีนี้)</MenuItem>}

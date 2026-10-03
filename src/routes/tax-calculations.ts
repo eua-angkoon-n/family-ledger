@@ -435,7 +435,9 @@ taxCalculationsRouter.get('/tax/:year/export.csv', requireUser(async (req, res, 
   lines.push('รายการ,จำนวนเงิน (บาท)');
   lines.push(`ประมาณการภาษี ปีภาษี (พ.ศ.),${taxYearCE + 543}`);
   lines.push(`ผู้เสียภาษี,${csvEscape(entity.display_name)}`);
-  lines.push(`ชุดกฎภาษี,${csvEscape(summary.rule_version)}`);
+  // ปีไม่มีกฎของตัวเอง resolveRuleSet ใช้ปีก่อนหน้า — บอกผู้อ่านว่าคำนวณตามเกณฑ์ปีไหนจริง
+  const ruleYearBE = summary.estimate ? resolveRuleSet(taxYearCE).taxYearCE + 543 : null;
+  lines.push(`ชุดกฎภาษี,${csvEscape(ruleYearBE ? `${summary.rule_version} (เกณฑ์ปี ${ruleYearBE})` : summary.rule_version)}`);
   lines.push(`เงินได้จากงานประจำ,${(summary.inputs.employmentIncomeSatang / 100).toFixed(2)}`);
   lines.push(`เงินได้ธุรกิจอื่น,${(summary.inputs.otherIncomeSatang / 100).toFixed(2)}`);
   lines.push(`ค่าใช้จ่ายหักภาษีได้,${(summary.inputs.deductibleExpenseSatang / 100).toFixed(2)}`);

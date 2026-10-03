@@ -24,7 +24,7 @@ test('tax document vault: upload, dedupe, link, verify, download, audit, archive
   process.env.TAX_DOC_STORAGE_DIR = dir;
   t.after(() => rm(dir, { recursive: true, force: true }));
 
-  const { HttpError } = await import('../src/http.js');
+  const { errorHandler } = await import('../src/http.js');
   const { taxEntitiesRouter } = await import('../src/routes/tax-entities.js');
   const { taxDocumentsRouter } = await import('../src/routes/tax-documents.js');
 
@@ -39,13 +39,7 @@ test('tax document vault: upload, dedupe, link, verify, download, audit, archive
     });
     app.use('/api', taxEntitiesRouter);
     app.use('/api', taxDocumentsRouter);
-    app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-      if (err instanceof HttpError) return void res.status(err.status).json({ error: err.message });
-      const code = (err as { code?: string }).code;
-      if (code === '23505') return void res.status(409).json({ error: 'ซ้ำ' });
-      console.error(err);
-      res.status(500).json({ error: 'internal' });
-    });
+    app.use(errorHandler);
     return app;
   }
 
@@ -197,6 +191,25 @@ test('tax document vault: upload, dedupe, link, verify, download, audit, archive
     assert.equal(((await buddhistYear.json()) as { error: string }).error, 'ปีภาษีไม่ถูกต้อง');
   });
 
+  // body เกินเพดาน express.json (15mb) — body-parser โยน entity.too.large ก่อนถึง route ต้องได้ 413 ข้อความไทยจาก errorHandler
+  await t.test('body เกินเพดาน express.json → 413 ข้อความไทย (ไม่ใช่ 500)', async () => {
+    const huge = await app.request('/api/tax-documents', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ file_base64: Buffer.alloc(12 * 1024 * 1024).toString('base64') }),
+    });
+    assert.equal(huge.status, 413);
+    assert.equal(((await huge.json()) as { error: string }).error, 'ไฟล์ใหญ่เกิน 10MB');
+
+    const other = await app.request('/api/tax-entities', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ display_name: 'x'.repeat(200 * 1024) }),
+    });
+    assert.equal(other.status, 413);
+    assert.equal(((await other.json()) as { error: string }).error, 'ข้อมูลที่ส่งมาใหญ่เกินไป');
+  });
+
   await t.test('ดาวน์โหลดได้ไบต์เดิมเป๊ะ + header ถูก + มี audit log', async () => {
     const res = await app.request(`/api/tax-documents/${docId}/file`);
     assert.equal(res.status, 200);
@@ -213,6 +226,23 @@ test('tax document vault: upload, dedupe, link, verify, download, audit, archive
     ).rows;
     assert.equal(auditRows.length, 1);
     assert.ok(auditRows[0]!.ip_address);
+  });
+
+  await t.test('?inline=1 เปิดดูในแท็บ — disposition inline + content-type จาก magic bytes + audit แยกด้วย after.inline', async () => {
+    const res = await app.request(`/api/tax-documents/${docId}/file?inline=1`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('content-type'), 'application/pdf');
+    assert.equal(res.headers.get('content-disposition'), "inline; filename*=UTF-8''receipt.pdf");
+    assert.ok(Buffer.from(await res.arrayBuffer()).equals(pdfBytes));
+
+    const auditRows = (
+      await db.pool.query(
+        `select 1 from audit_log where user_id = $1 and action = 'tax_document.download' and entity_id = $2
+           and after_data->>'inline' = 'true'`,
+        [userA, docId],
+      )
+    ).rows;
+    assert.equal(auditRows.length, 1);
   });
 
   await t.test('เชื่อม transaction — ตรวจย้อนกลับได้และมี audit log', async () => {

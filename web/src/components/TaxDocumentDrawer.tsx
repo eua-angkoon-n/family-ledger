@@ -20,16 +20,19 @@ import CloseRounded from '@mui/icons-material/CloseRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import DownloadRounded from '@mui/icons-material/DownloadRounded';
 import EditRounded from '@mui/icons-material/EditRounded';
+import OpenInNewRounded from '@mui/icons-material/OpenInNewRounded';
 import SearchRounded from '@mui/icons-material/SearchRounded';
-import { patch, put, req, type TaxDocument, type TaxDocumentDetail, type TaxEntity, type TxnListResponse } from '../api.js';
+import {
+  patch, put, req, type TaxDocument, type TaxDocumentDetail, type TaxDocumentStatus, type TaxEntity, type TxnListResponse,
+} from '../api.js';
 import MonthPicker, { currentMonth, validMonth } from './MonthPicker.js';
 import { formatBaht, formatDate, formatDateTime, parseBahtToSatang } from '../format.js';
-import { dataTextSx, radii } from '../theme.js';
+import { dataDisplaySx, dataTextSx, radii } from '../theme.js';
 import { DOCUMENT_TYPE_LABEL } from '../taxDocumentLabels.js';
 import { amountFieldHelp, ConfirmDialog, LoadError, visuallyHiddenSx, type Notice } from '../ui.js';
 import Money from './Money.js';
 import {
-  EMPTY_TAX_DOC_META_FORM, firstMetaErrorId, metaFieldId, TaxDocumentMetadataFields, taxDocumentMetaErrors, taxDocumentMetaPayload,
+  EMPTY_TAX_DOC_META_FORM, firstMetaErrorId, metaFieldId, TaxDocumentMetadataFields, taxDocumentMetaErrors, taxDocumentMetaKey, taxDocumentMetaPayload,
   taxDocumentToForm, taxYearBE,
 } from './TaxDocumentMetadataFields.js';
 import TaxDocumentStatusChip, { TAX_DOC_STATUS_LABEL } from './TaxDocumentStatusChip.js';
@@ -39,8 +42,13 @@ type SaveResult = Notice & { ok: boolean };
 // what = ส่วนที่ยังไม่บันทึก จับไว้ตอนถาม — ข้อความใน dialog ไม่เปลี่ยนระหว่าง fade ออก
 type Pending = { kind: 'close' | 'cancelEdit'; go: () => void; what: string };
 
-// h3 ใต้ชื่อ drawer (h2) ขั้น Headline Small — เหมือน ReviewDrawer
-const SECTION_HEADING_SX = { fontSize: '1rem', lineHeight: 1.5 } as const;
+// ปุ่มสถานะของแต่ละสถานะ: ไปข้างหน้า (contained) แล้วถอยกลับ (ปุ่มข้อความ) — PATCH status อย่างเดียว
+// server: verified ตั้ง verified_at = now() ใหม่, draft ล้าง verified_at, submitted คงเวลาที่ตรวจไว้
+const STATUS_MOVES: Record<TaxDocumentStatus, { forward?: TaxDocumentStatus; back: TaxDocumentStatus[] }> = {
+  draft: { forward: 'verified', back: [] },
+  verified: { forward: 'submitted', back: ['draft'] },
+  submitted: { back: ['verified', 'draft'] },
+};
 const NOT_READY: SaveResult = { ok: false, message: 'ยังโหลดเอกสารไม่เสร็จ', severity: 'error' };
 
 const detailToLinkRows = (detail: TaxDocumentDetail): LinkRow[] =>
@@ -70,7 +78,8 @@ export default function TaxDocumentDrawer({ docId, taxEntities, entitiesLoad, on
   const [editAttempted, setEditAttempted] = useState(false);
   const [editError, setEditError] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
-  const [verifying, setVerifying] = useState(false);
+  // สถานะที่กำลังตั้ง — ปุ่มนั้นขึ้น "กำลังบันทึก…" ปุ่มสถานะอื่นกดไม่ได้จนกว่าจะเสร็จ
+  const [statusBusy, setStatusBusy] = useState<TaxDocumentStatus | null>(null);
   const [savedLinks, setSavedLinks] = useState<LinkRow[]>([]);
   const [links, setLinks] = useState<LinkRow[]>([]);
   const [savingLinks, setSavingLinks] = useState(false);
@@ -143,7 +152,7 @@ export default function TaxDocumentDrawer({ docId, taxEntities, entitiesLoad, on
   }, [docId]);
 
   const linksDirty = linksKey(links) !== linksKey(savedLinks);
-  const editDirty = editing && JSON.stringify(editForm) !== JSON.stringify(editInitial);
+  const editDirty = editing && taxDocumentMetaKey(editForm) !== taxDocumentMetaKey(editInitial);
   const dirty = !loading && detail != null && (linksDirty || editDirty);
 
   const taxEntityName = taxEntities.find((e) => e.id === detail?.tax_entity_id)?.display_name ?? '';
@@ -202,22 +211,28 @@ export default function TaxDocumentDrawer({ docId, taxEntities, entitiesLoad, on
     }
   };
 
-  const markVerified = async () => {
-    if (!detail || verifying) return;
-    setVerifying(true);
+  // ไปข้างหน้าหรือถอยกลับ — ไม่มี dialog (ถอยแล้วกดกลับได้ทันที) แต่ประกาศผลทุกครั้ง · ห้ามระหว่างมีการแก้ไขข้อมูลค้าง
+  // (ตรวจแล้ว = ข้อมูลตรงกับไฟล์ ถ้าข้อมูลบนจอยังไม่ได้บันทึก สถานะจะรับรองค่าเก่า)
+  const setStatus = async (next: TaxDocumentStatus) => {
+    if (!detail || statusBusy || editDirty) return;
+    const forward = STATUS_MOVES[detail.status].forward === next;
+    setStatusBusy(next);
     try {
-      const updated = await patch<TaxDocument>(`/api/tax-documents/${detail.id}`, { status: 'verified' });
+      const updated = await patch<TaxDocument>(`/api/tax-documents/${detail.id}`, { status: next });
       if (docIdRef.current === detail.id) {
         setDetail((d) => (d ? { ...d, status: updated.status, verified_at: updated.verified_at } : d));
-        // ปุ่มหายไปเมื่อตรวจแล้ว — focus หัวข้อส่วนนี้ซึ่งตอนนี้บอกเวลาที่ตรวจ
+        // ปุ่มชุดใหม่แทนชุดเดิม (ปุ่มที่กดหายไป) — focus หัวข้อส่วนนี้ ผลประกาศผ่าน live region
         focusAfterRenderRef.current = () => statusHeadingRef.current?.focus();
       }
-      notify({ message: 'ทำเครื่องหมายว่าตรวจแล้ว', severity: 'success' });
+      notify({
+        message: forward ? `ทำเครื่องหมายว่า${TAX_DOC_STATUS_LABEL[next]}` : `สถานะกลับเป็น “${TAX_DOC_STATUS_LABEL[next]}”`,
+        severity: 'success',
+      });
       onSaved();
     } catch (e) {
       notify({ message: e instanceof Error ? e.message : 'ตั้งสถานะไม่สำเร็จ', severity: 'error' });
     } finally {
-      setVerifying(false);
+      setStatusBusy(null);
     }
   };
 
@@ -328,6 +343,19 @@ export default function TaxDocumentDrawer({ docId, taxEntities, entitiesLoad, on
     };
   };
 
+  const statusButtons = detail
+    ? [
+        ...(STATUS_MOVES[detail.status].forward ? [{ next: STATUS_MOVES[detail.status].forward!, forward: true }] : []),
+        ...STATUS_MOVES[detail.status].back.map((next) => ({ next, forward: false })),
+      ]
+    : [];
+  const verifiedAt = detail?.verified_at && <>ตรวจเมื่อ <Box component="span" sx={dataTextSx}>{formatDateTime(detail.verified_at)}</Box></>;
+  const statusHint = detail?.status === 'draft'
+    ? 'เทียบข้อมูลด้านบนกับไฟล์ต้นฉบับ ถ้าตรงกันแล้วกด “ทำเครื่องหมายว่าตรวจแล้ว”'
+    : detail?.status === 'verified'
+      ? <>{verifiedAt}{verifiedAt && ' · '}ยื่นแบบภาษีที่ใช้เอกสารนี้แล้ว กด “ทำเครื่องหมายว่ายื่นแล้ว”</>
+      : verifiedAt;
+
   // ข้อมูลเอกสารที่ไม่บังคับ แสดงเฉพาะที่กรอกไว้
   const details = detail ? ([
     ['ผู้เสียภาษี', taxEntityName || '—'],
@@ -360,7 +388,12 @@ export default function TaxDocumentDrawer({ docId, taxEntities, entitiesLoad, on
     >
       <Box sx={{ width: { xs: '100vw', sm: 460 }, p: 3, height: '100%', overflowY: 'auto' }}>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start', justifyContent: 'space-between', mb: 2 }}>
-          <Typography variant="h2" id="tax-doc-drawer-heading" sx={{ fontSize: '1.25rem', pt: 0.75 }}>รายละเอียดเอกสารภาษี</Typography>
+          {/* ชื่อผู้ออกคือสิ่งที่ผู้ใช้มองหา — คำนำหน้าที่ซ่อนไว้ทำให้ชื่อ dialog (aria-labelledby) ยังบอกว่าเป็นเอกสารภาษี */}
+          <Typography variant="h2" id="tax-doc-drawer-heading" sx={{ pt: 0.75, minWidth: 0, overflowWrap: 'anywhere' }}>
+            {detail && !loading && !error
+              ? <><Box component="span" sx={visuallyHiddenSx}>เอกสารภาษี: </Box>{detail.issuer_name}</>
+              : 'รายละเอียดเอกสารภาษี'}
+          </Typography>
           <IconButton aria-label="ปิด" onClick={requestClose}><CloseRounded /></IconButton>
         </Stack>
         {/* อยู่นอกส่วนที่ถูกแทนด้วย skeleton — live region ต้องอยู่ใน DOM ก่อนข้อความเปลี่ยนจึงประกาศแน่นอน */}
@@ -378,28 +411,31 @@ export default function TaxDocumentDrawer({ docId, taxEntities, entitiesLoad, on
         ) : detail && !error ? (
           <Stack spacing={3}>
             <Box>
-              <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
-                <Typography sx={{ fontWeight: 600, overflowWrap: 'anywhere' }}>{detail.issuer_name}</Typography>
-                <TaxDocumentStatusChip status={detail.status} />
+              <TaxDocumentStatusChip status={detail.status} />
+              <Money satang={detail.total_satang} sx={{ ...dataDisplaySx, display: 'block', mt: 1 }} />
+              {/* เปิดดู = ไฟล์เดิมแบบ inline ในแท็บใหม่ (เทียบกับข้อมูลได้โดยไม่ต้องเก็บไฟล์ลงเครื่อง) — server บันทึกประวัติเหมือนดาวน์โหลด */}
+              <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', mt: 1.5 }}>
+                <Button
+                  component="a"
+                  href={`/api/tax-documents/${detail.id}/file?inline=1`}
+                  target="_blank"
+                  rel="noopener"
+                  variant="outlined"
+                  startIcon={<OpenInNewRounded />}
+                >
+                  เปิดดู<Box component="span" sx={visuallyHiddenSx}> (แท็บใหม่)</Box>
+                </Button>
+                <Button component="a" href={`/api/tax-documents/${detail.id}/file`} download variant="outlined" startIcon={<DownloadRounded />}>
+                  ดาวน์โหลดไฟล์ต้นฉบับ
+                </Button>
               </Stack>
-              <Money satang={detail.total_satang} sx={{ fontSize: '1.75rem', display: 'block', mt: 1 }} />
-              <Button
-                component="a"
-                href={`/api/tax-documents/${detail.id}/file`}
-                download
-                variant="outlined"
-                startIcon={<DownloadRounded />}
-                sx={{ mt: 1.5 }}
-              >
-                ดาวน์โหลดไฟล์ต้นฉบับ
-              </Button>
             </Box>
 
             <Divider />
 
             <Box component="section" aria-labelledby="tax-doc-info-heading">
               <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
-                <Typography component="h3" variant="h2" id="tax-doc-info-heading" sx={SECTION_HEADING_SX}>ข้อมูลเอกสาร</Typography>
+                <Typography variant="h3" id="tax-doc-info-heading">ข้อมูลเอกสาร</Typography>
                 {!editing && (
                   <Button ref={editButtonRef} size="small" startIcon={<EditRounded />} onClick={startEdit}>แก้ไขข้อมูล</Button>
                 )}
@@ -456,22 +492,30 @@ export default function TaxDocumentDrawer({ docId, taxEntities, entitiesLoad, on
             <Divider />
 
             <Box component="section" aria-labelledby="tax-doc-status-heading">
-              <Typography ref={statusHeadingRef} tabIndex={-1} component="h3" variant="h2" id="tax-doc-status-heading" sx={{ ...SECTION_HEADING_SX, mb: 1.5 }}>
-                สถานะการตรวจ
+              <Typography ref={statusHeadingRef} tabIndex={-1} variant="h3" id="tax-doc-status-heading" sx={{ mb: 1.5 }}>
+                สถานะเอกสาร
               </Typography>
-              {detail.status === 'draft' ? (
-                <>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-                    เทียบข้อมูลด้านบนกับไฟล์ต้นฉบับ ถ้าตรงกันแล้วกดปุ่มนี้
-                  </Typography>
-                  <Button variant="contained" onClick={() => void markVerified()} aria-disabled={verifying} aria-busy={verifying}>
-                    {verifying ? 'กำลังบันทึก…' : 'ทำเครื่องหมายว่าตรวจแล้ว'}
+              {/* สถานะปัจจุบันอยู่ที่ chip บนหัวลิ้นชักแล้ว — ส่วนนี้บอกเวลาที่ตรวจและสิ่งที่ทำต่อได้ ไม่ซ้ำป้าย */}
+              {statusHint && <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>{statusHint}</Typography>}
+              {/* แก้ข้อมูลค้าง = aria-disabled + เหตุผล ไม่ซ่อนปุ่ม (ยังอยู่ในลำดับ tab และอ่านเหตุผลได้) */}
+              <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+                {statusButtons.map(({ next, forward }) => (
+                  <Button
+                    key={next}
+                    variant={forward ? 'contained' : 'text'}
+                    color={forward ? 'primary' : 'inherit'}
+                    onClick={() => void setStatus(next)}
+                    aria-disabled={statusBusy != null || editDirty}
+                    aria-busy={statusBusy === next}
+                    aria-describedby={editDirty ? 'tax-doc-status-blocked' : undefined}
+                  >
+                    {statusBusy === next ? 'กำลังบันทึก…' : forward ? `ทำเครื่องหมายว่า${TAX_DOC_STATUS_LABEL[next]}` : `กลับเป็น${TAX_DOC_STATUS_LABEL[next]}`}
                   </Button>
-                </>
-              ) : (
-                <Typography variant="body2" color="text.secondary">
-                  {TAX_DOC_STATUS_LABEL[detail.status]}
-                  {detail.verified_at && <> · ตรวจเมื่อ <Box component="span" sx={dataTextSx}>{formatDateTime(detail.verified_at)}</Box></>}
+                ))}
+              </Stack>
+              {editDirty && (
+                <Typography id="tax-doc-status-blocked" variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                  บันทึกการแก้ไขข้อมูลเอกสารก่อน แล้วจึงเปลี่ยนสถานะ
                 </Typography>
               )}
             </Box>
@@ -479,9 +523,15 @@ export default function TaxDocumentDrawer({ docId, taxEntities, entitiesLoad, on
             <Divider />
 
             <Box component="section" aria-labelledby="tax-doc-links-heading">
-              <Typography ref={linksHeadingRef} tabIndex={-1} component="h3" variant="h2" id="tax-doc-links-heading" sx={{ ...SECTION_HEADING_SX, mb: 1.5 }}>
+              <Typography ref={linksHeadingRef} tabIndex={-1} variant="h3" id="tax-doc-links-heading" sx={{ mb: links.length > 0 ? 0.5 : 1.5 }}>
                 เชื่อมกับธุรกรรม
               </Typography>
+              {/* ยอดของรายการบนจอ (รวมที่ยังไม่บันทึก) เทียบยอดรวมของเอกสาร */}
+              {links.length > 0 && (
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                  เชื่อมแล้ว <Money satang={links.reduce((sum, l) => sum + l.linked_amount_satang, 0)} /> จาก <Money satang={detail.total_satang} />
+                </Typography>
+              )}
 
               {links.length === 0 ? (
                 <Typography variant="body2" color="text.secondary">ยังไม่ได้เชื่อมกับธุรกรรมใด ค้นหาด้านล่างแล้วกดที่รายการเพื่อเพิ่ม</Typography>

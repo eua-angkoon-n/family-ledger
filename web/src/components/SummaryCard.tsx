@@ -72,7 +72,8 @@ export default function SummaryCard({ title, icon, value, caption, to, onClick, 
           </Tooltip>
         )}
         {/* ลูกศรบอกว่าการ์ดนี้พาไปดูรายการต่อได้ — แยกการ์ดกดได้/กดไม่ได้โดยไม่ต้อง hover */}
-        {interactive && <ChevronRightRounded fontSize="small" aria-hidden sx={{ ml: 'auto', flexShrink: 0 }} />}
+        {/* ไม่พิมพ์ — บนกระดาษกดไม่ได้ */}
+        {interactive && <ChevronRightRounded fontSize="small" aria-hidden sx={{ ml: 'auto', flexShrink: 0, displayPrint: 'none' }} />}
       </Stack>
       <Box
         sx={{

@@ -6,7 +6,7 @@ import Modal from '../Modal.js';
 import { dataTextSx } from '../theme.js';
 import type { Notice } from '../ui.js';
 import {
-  EMPTY_TAX_DOC_META_FORM, firstMetaErrorId, TaxDocumentMetadataFields, taxDocumentMetaErrors, taxDocumentMetaPayload,
+  EMPTY_TAX_DOC_META_FORM, firstMetaErrorId, TaxDocumentMetadataFields, taxDocumentMetaErrors, taxDocumentMetaKey, taxDocumentMetaPayload,
 } from './TaxDocumentMetadataFields.js';
 
 type Props = {
@@ -23,15 +23,17 @@ type Props = {
 // เพดานเดียวกับ server: detectMime รับแค่ PDF/JPEG/PNG และ MAX_FILE_BYTES 10MB หลัง decode (src/routes/tax-documents.ts)
 // base64 โต ~4/3 → 13.4MB ยังต่ำกว่าเพดาน 15MB ต่อคำขอ (server.ts)
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
-const ACCEPT = '.pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png';
-const ACCEPTED_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
+// image/jpg = ชนิดที่ Android บางรุ่นรายงานแทน image/jpeg (server ดู magic bytes ไม่ดูชนิดนี้)
+const ACCEPT = '.pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/jpg,image/png';
+const ACCEPTED_TYPES = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
 const FILE_HELP = 'PDF, JPEG หรือ PNG ไม่เกิน 10MB';
 
 const formatSize = (bytes: number) =>
   bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))}KB` : `${(bytes / 1024 / 1024).toFixed(1)}MB`;
 
-// type ว่าง (บางเครื่องไม่รู้ชนิด) ปล่อยให้ server ตรวจ magic bytes เอง
+// type ว่าง (บางเครื่องไม่รู้ชนิด) ปล่อยให้ server ตรวจ magic bytes เอง · 0 ไบต์ = ไฟล์เสียหรือดาวน์โหลดไม่จบ บอกก่อนส่ง
 function fileProblem(file: File): string {
+  if (file.size === 0) return 'ไฟล์นี้ว่าง (0 ไบต์) เลือกไฟล์อื่น';
   if (file.type && !ACCEPTED_TYPES.includes(file.type)) return `รับเฉพาะ ${FILE_HELP}`;
   if (file.size > MAX_FILE_BYTES) return `ไฟล์นี้ ${formatSize(file.size)} เกินเพดาน 10MB`;
   return '';
@@ -106,7 +108,7 @@ export default function TaxDocumentUploadModal({ open, taxEntities, entitiesLoad
       title="อัปโหลดเอกสารภาษี"
       onClose={onClose}
       busy={submitting}
-      dirty={file != null || JSON.stringify(form) !== JSON.stringify(initial)}
+      dirty={file != null || taxDocumentMetaKey(form) !== taxDocumentMetaKey(initial)}
       footer={{ formId: `${idPrefix}-form`, submitLabel: 'อัปโหลด' }}
       onExited={() => {
         // ล้างตอนปิดสนิท — ไม่งั้นเปิดครั้งถัดไปเห็นค่าเก่าหนึ่งเฟรม และส่วนที่พับคำนวณกาง/พับจากค่าเก่า

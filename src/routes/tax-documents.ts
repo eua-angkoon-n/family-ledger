@@ -3,7 +3,7 @@ import { requireUser } from '../auth.js';
 import { decrypt } from '../crypto.js';
 import { pool, query, tx } from '../db.js';
 import { getAttachment, getMessage, listAttachments, listMessages, refreshAccessToken } from '../gmail.js';
-import { enumStr, HttpError, id, isoDate, optionalStr, pathId, satang, str, type Body } from '../http.js';
+import { enumStr, FILE_TOO_LARGE, HttpError, id, isoDate, MAX_FILE_BYTES, optionalStr, pathId, satang, str, type Body } from '../http.js';
 import { audit } from '../services/audit.js';
 import { detectMime, readStoredFile, sha256Of, storeFile } from '../services/file-vault.js';
 import { assertOwnsTaxEntity } from './tax-entities.js';
@@ -15,10 +15,8 @@ const DOCUMENT_TYPES = [
   'insurance_certificate', 'donation_receipt', 'investment_certificate', 'other',
 ] as const;
 const STATUSES = ['draft', 'verified', 'submitted'] as const;
-const MAX_FILE_BYTES = 10 * 1024 * 1024;
 // base64 ของไฟล์ 10MB พอดียาว 13,981,016 ตัวอักษร — ยาวกว่านี้คือไฟล์ใหญ่เกินแน่นอน ไม่ต้อง decode ก่อน
 const MAX_FILE_BASE64_CHARS = Math.ceil(MAX_FILE_BYTES / 3) * 4;
-export const FILE_TOO_LARGE = `ไฟล์ใหญ่เกิน ${MAX_FILE_BYTES / 1024 / 1024}MB`;
 const LIST_LIMIT_DEFAULT = 50;
 const LIST_LIMIT_MAX = 200;
 // ปิดคู่กับ TAX_PAGES_ENABLED ใน web/src/features.ts — สองเส้นนี้ค้นทั้งกล่อง (has:attachment) ไม่ใช่เฉพาะเมลธนาคาร
@@ -366,14 +364,19 @@ taxDocumentsRouter.get('/tax-documents/:id/file', requireUser(async (req, res, u
   );
   const doc = rows[0];
   if (!doc) throw new HttpError(404, 'ไม่พบเอกสาร');
+  // ?inline=1 = "เปิดดู" ในแท็บใหม่ — action เดิม (ป้ายใน web/src/auditLabels.ts มีอยู่แล้ว) แยกด้วย after.inline
+  const inline = req.query.inline === '1';
 
   await audit(pool, {
-    userId: user.id, action: 'tax_document.download', entityType: 'tax_document', entityId: docId, ip: req.ip ?? null,
+    userId: user.id, action: 'tax_document.download', entityType: 'tax_document', entityId: docId,
+    after: inline ? { inline: true } : undefined, ip: req.ip ?? null,
   });
 
   const buf = await readStoredFile(doc.storage_path);
+  // file_mime มาจาก detectMime (magic bytes) ตอนอัปโหลดเท่านั้น ไม่ใช่จากชื่อไฟล์ — inline จึงปลอดภัยคู่กับ nosniff จาก useSecurityHeaders
+  // ไม่ใส่ CSP sandbox: Chrome ไม่ยอมเปิด PDF viewer ในเอกสารที่ถูก sandbox
   res.setHeader('content-type', doc.file_mime);
-  res.setHeader('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(doc.original_filename)}`);
+  res.setHeader('content-disposition', `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(doc.original_filename)}`);
   res.send(buf);
 }));
 
