@@ -185,6 +185,7 @@ function parseOnDemand(text: string): ParsedStatement {
 }
 
 // SCB ไม่พิมพ์ยอดยกมาในช่วงที่ไม่มี movement — gate ยังไม่ผ่าน (ห้ามเดายอด) แต่ติด reason ให้รู้ว่าไม่ใช่ไฟล์พัง
+// ไม่ครอบ: ไม่รู้ยอดยกมาแต่มีแถว event 0.00 ที่ยอดคงเหลือไม่เป็นศูนย์ แถวนั้นถูกนับเป็นรายการ จึงยังขึ้นเป็นปัญหา (ตกด้านปลอดภัย)
 function emptyReason(
   openingKnown: boolean,
   transactions: ParsedTransaction[],

@@ -309,7 +309,7 @@ export async function accountCoverage(userId: number, today?: string): Promise<A
        count(*) filter (where st.status = 'parsed') as parsed_statement_count,
        count(*) filter (where st.status = 'pending') as pending_statement_count,
        count(*) filter (where st.status = 'parse_failed') as parse_failed_count,
-       count(*) filter (where st.status = 'checksum_failed') as checksum_failed_count,
+       count(*) filter (where st.status = 'checksum_failed' and st.error_detail->>'reason' is distinct from 'no_data') as checksum_failed_count,
        case
          when a.created_at >= date_trunc('month', d.today) then false
          -- ในช่วงผ่อนผันเส้นตายถอยไปสิ้นเดือน M-2 พ้นช่วงแล้วใช้สิ้นเดือน M-1
