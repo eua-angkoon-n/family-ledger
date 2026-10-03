@@ -51,6 +51,10 @@ function amountErrors(form: Form): Partial<Record<AmountField, string>> {
   return errors;
 }
 
+// เทียบค่าที่จะส่ง ไม่ใช่ข้อความ (แบบ taxDocumentMetaKey): พิมพ์ "1500" ทับ "1,500.00" ไม่นับว่าแก้ · ยอดที่อ่านไม่ได้คงเป็นข้อความ
+const amountKey = (value: string) => (value.trim() === '' ? null : parseBahtToSatang(value) ?? value);
+const formKey = (f: Form) => JSON.stringify([f.deduction_type, amountKey(f.eligible), amountKey(f.claimed), f.tax_document_id, f.note || null]);
+
 const documentLabel = (d: TaxDocument) => (d.document_no ? `${d.issuer_name} · ${d.document_no}` : d.issuer_name);
 // คอลัมน์จัดการไม่พิมพ์ (ปุ่มไม่มีความหมายบนกระดาษ) — หัวและแถวพร้อมกัน
 const ACTIONS_SX = { displayPrint: 'none' } as const;
@@ -105,7 +109,7 @@ export default function DeductionClaimSection({ taxEntityId, taxYear, onChanged 
   };
 
   // response ของค่าลดหย่อนมีแค่ tax_document_id — ชื่อผู้ออก/เลขที่มาจากรายการเอกสารของปีนี้ที่โหลดไว้แล้ว (ไม่เรียก API เพิ่ม)
-  // ไม่อยู่ในรายการ (เอกสารปีอื่น/เก็บเข้าคลัง/เกิน 200 ใบ) = บอกแค่ว่าผูกแล้ว
+  // ไม่อยู่ในรายการ (เอกสารปีอื่น/เอาออกจากรายการแล้ว/เกิน 200 ใบ) = บอกแค่ว่าผูกแล้ว
   const documentText = (claim: TaxDeductionClaim) => {
     if (claim.tax_document_id == null) return 'ไม่ผูกเอกสาร';
     const doc = documents.find((d) => d.id === claim.tax_document_id);
@@ -169,7 +173,8 @@ export default function DeductionClaimSection({ taxEntityId, taxYear, onChanged 
       <PageHeader
         id="deduction-claim-heading"
         title="ค่าลดหย่อน"
-        description='ยอดที่ยื่นขอรวมเข้าประมาณการ (ไม่รวมลดหย่อนส่วนตัวที่ระบบหักให้เอง) · ค่าลดหย่อนแต่ละประเภทมีเพดานตามกฎหมาย กรอกยอดที่ใช้สิทธิ์ได้จริง ระบบไม่ได้ตรวจเพดานให้ · ประกันสังคมที่หักจากเงินเดือนไม่ถูกนับเอง เพิ่มเป็นประเภท "ประกันสังคม" · ผูกเอกสารภาษีไว้เพื่อให้ตรวจย้อนได้'
+        // เพดาน/ประกันสังคมอยู่ใต้ช่องในฟอร์ม (ตอนกรอกจริง) — ส่วนนำของหน้าบนมือถือสั้นลง
+        description="ยอดที่ยื่นขอรวมเข้าประมาณการ ไม่รวมลดหย่อนส่วนตัวที่ระบบหักให้เอง"
         action={
           <Button ref={addButtonRef} variant="outlined" startIcon={<AddRounded />} onClick={() => openEditor('new')} sx={{ whiteSpace: 'nowrap', displayPrint: 'none' }}>
             เพิ่มค่าลดหย่อน
@@ -230,7 +235,7 @@ export default function DeductionClaimSection({ taxEntityId, taxYear, onChanged 
         title={editing === 'new' ? 'เพิ่มค่าลดหย่อน' : 'แก้ไขค่าลดหย่อน'}
         onClose={() => setEditing(null)}
         busy={busy}
-        dirty={JSON.stringify(form) !== JSON.stringify(initialForm)}
+        dirty={formKey(form) !== formKey(initialForm)}
         footer={{ formId: 'deduction-claim-form', submitLabel: editing === 'new' ? 'เพิ่มค่าลดหย่อน' : 'บันทึกการแก้ไข' }}
       >
         {/* noValidate: ช่องยอดเงินตรวจเองใน save (AMOUNT_ID) — `required` คงไว้เพื่อ * และ aria-required */}
@@ -239,12 +244,12 @@ export default function DeductionClaimSection({ taxEntityId, taxYear, onChanged 
           <TextField
             select label="ประเภทค่าลดหย่อน" required disabled={editing !== 'new'}
             value={form.deduction_type} onChange={(e) => setForm({ ...form, deduction_type: e.target.value })}
-            helperText={editing !== 'new' ? 'เปลี่ยนประเภทไม่ได้ ถ้าเลือกผิดให้ลบแล้วเพิ่มใหม่' : undefined}
+            helperText={editing !== 'new' ? 'เปลี่ยนประเภทไม่ได้ ถ้าเลือกผิดให้ลบแล้วเพิ่มใหม่' : 'ประกันสังคมที่หักจากเงินเดือนไม่ถูกนับเอง ต้องเพิ่มเป็นประเภท "ประกันสังคม"'}
           >
             {Object.entries(DEDUCTION_TYPE_LABEL).map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
           </TextField>
           <TextField id={AMOUNT_ID.eligible} label="ยอดที่มีสิทธิ์ (บาท)" required value={form.eligible} onChange={(e) => setForm({ ...form, eligible: e.target.value })} {...amountHelp('eligible')} slotProps={{ htmlInput: { inputMode: 'decimal', sx: dataTextSx } }} />
-          <TextField id={AMOUNT_ID.claimed} label="ยอดที่ยื่นขอ (บาท)" required value={form.claimed} onChange={(e) => setForm({ ...form, claimed: e.target.value })} {...amountHelp('claimed', 'ยอดที่ใช้สิทธิ์ได้จริงหลังเทียบเพดานของประเภทนี้แล้ว')} slotProps={{ htmlInput: { inputMode: 'decimal', sx: dataTextSx } }} />
+          <TextField id={AMOUNT_ID.claimed} label="ยอดที่ยื่นขอ (บาท)" required value={form.claimed} onChange={(e) => setForm({ ...form, claimed: e.target.value })} {...amountHelp('claimed', 'ยอดที่ใช้สิทธิ์ได้จริงหลังเทียบเพดานตามกฎหมายของประเภทนี้ — ระบบไม่ได้ตรวจเพดานให้')} slotProps={{ htmlInput: { inputMode: 'decimal', sx: dataTextSx } }} />
           <TextField select label="เอกสารอ้างอิง" value={form.tax_document_id} onChange={(e) => setForm({ ...form, tax_document_id: e.target.value })} helperText="ไม่บังคับ แต่ต้องมีก่อนถือว่าตรวจสอบครบ">
             <MenuItem value="">ไม่ผูกเอกสาร</MenuItem>
             {formDocumentMissing && <MenuItem value={form.tax_document_id}>เอกสารที่ผูกไว้เดิม (ไม่อยู่ในรายการปีนี้)</MenuItem>}

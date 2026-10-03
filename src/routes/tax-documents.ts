@@ -299,6 +299,7 @@ taxDocumentsRouter.patch('/tax-documents/:id', requireUser(async (req, res, user
 
   const updated = await tx(async (c) => {
     const before = (await c.query(`select ${TAX_DOC_COLUMNS} from tax_document where id = $1 and user_id = $2`, [docId, user.id])).rows[0];
+    // verified_at: ถอยจาก submitted กลับมา verified คงเวลาตรวจเดิม — ตั้งใหม่เฉพาะหลังกลับเป็น draft (ล้างเป็น null)
     const { rows } = await c.query(
       `update tax_document set
          tax_entity_id = coalesce($3, tax_entity_id),
@@ -314,7 +315,7 @@ taxDocumentsRouter.patch('/tax-documents/:id', requireUser(async (req, res, user
          total_satang = coalesce($19, total_satang),
          withholding_satang = case when $20 then $21 else withholding_satang end,
          status = coalesce($22, status),
-         verified_at = case when $22 = 'verified' then now() when $22 = 'draft' then null else verified_at end,
+         verified_at = case when $22 = 'verified' then coalesce(verified_at, now()) when $22 = 'draft' then null else verified_at end,
          updated_at = now()
        where id = $1 and user_id = $2 and archived_at is null
        returning ${TAX_DOC_COLUMNS}`,

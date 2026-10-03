@@ -135,8 +135,10 @@ export function taxDocumentToForm(doc: TaxDocument): TaxDocumentMetaForm {
 // ใช้ร่วมกันระหว่าง TaxDocumentUploadModal, ลิ้นชักโหมดแก้ไข และ GmailAttachmentPicker — ฟอร์มเดียวกันทุกที่
 // error ของช่องบังคับขึ้นหลังกดบันทึก (`attempted`) ส่วนยอดเงินที่อ่านไม่ได้ขึ้นทันทีที่พิมพ์
 export function TaxDocumentMetadataFields({
-  form, setForm, taxEntities, idPrefix, attempted, entitiesLoad,
+  form, setForm, taxEntities, idPrefix, attempted, entitiesLoad, followIssueYear = false,
 }: {
+  /** เอกสารใหม่: กรอกวันที่ออกแล้วปีภาษีตามปีของวันที่นั้น จนกว่าผู้ใช้จะเลือกปีเอง (ปีตั้งต้นคือปีปัจจุบัน ซึ่งมักผิดกับเอกสารปีก่อน) */
+  followIssueYear?: boolean;
   form: TaxDocumentMetaForm;
   setForm: Dispatch<SetStateAction<TaxDocumentMetaForm>>;
   taxEntities: TaxEntity[];
@@ -162,6 +164,15 @@ export function TaxDocumentMetadataFields({
   const foldedError = foldedKeys.some((k) => err(k));
   const open = moreOpen || foldedError;
   const panelId = useId();
+
+  // ปีของวันที่ออก (ค.ศ.) — นอกช่วงที่ server รับ (2000–2200) ถือว่ายังไม่มี
+  const yearOf = (date: string) => (/^\d{4}-\d{2}-\d{2}$/.test(date) && Number(date.slice(0, 4)) >= 2000 && Number(date.slice(0, 4)) <= 2200 ? date.slice(0, 4) : '');
+  const [yearTouched, setYearTouched] = useState(false);
+  const issueYear = yearOf(form.issue_date);
+  // ต่างกันได้จริง (หนังสือรับรองหัก ณ ที่จ่ายของปีก่อนออกต้นปีถัดไป) — เตือนใต้ช่อง ไม่บล็อก
+  const yearHelp = issueYear === '' ? undefined : issueYear !== form.tax_year
+    ? `วันที่ออกเอกสารเป็นปี ${taxYearBE(issueYear)} — ถ้าเป็นเอกสารของปีก่อน (เช่นหนังสือรับรองหัก ณ ที่จ่ายที่ออกต้นปี) ปีภาษีนี้ถูกแล้ว`
+    : followIssueYear && !yearTouched ? 'ตามปีของวันที่ออกเอกสาร' : undefined;
 
   const activeEntities = taxEntities.filter((e) => e.is_active || String(e.id) === form.tax_entity_id);
   const entityHelp = err('tax_entity_id')
@@ -202,7 +213,15 @@ export function TaxDocumentMetadataFields({
             <MenuItem key={value} value={value}>{label}</MenuItem>
           ))}
         </TextField>
-        <TextField select label="ปีภาษี (พ.ศ.)" value={form.tax_year} onChange={setFormField('tax_year')} required slotProps={selectId('tax_year')}>
+        <TextField
+          select
+          label="ปีภาษี (พ.ศ.)"
+          value={form.tax_year}
+          onChange={(ev) => { setYearTouched(true); setFormField('tax_year')(ev); }}
+          required
+          helperText={yearHelp}
+          slotProps={{ ...selectId('tax_year'), formHelperText: { sx: { color: issueYear !== '' && issueYear !== form.tax_year ? 'warning.main' : undefined } } }}
+        >
           {taxYearOptions(form.tax_year).map((y) => <MenuItem key={y} value={String(y)} sx={dataTextSx}>{taxYearBE(y)}</MenuItem>)}
         </TextField>
         <TextField
@@ -249,7 +268,17 @@ export function TaxDocumentMetadataFields({
           <Collapse in={open}>
             <Box sx={{ display: 'grid', gap: 2, pt: 1.5, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 14rem), 1fr))' }}>
               <TextField label="เลขที่เอกสาร" value={form.document_no} onChange={setFormField('document_no')} slotProps={{ htmlInput: { id: id('document_no'), maxLength: 100, sx: dataTextSx } }} />
-              <TextField label="วันที่ออกเอกสาร" type="date" value={form.issue_date} onChange={setFormField('issue_date')} slotProps={{ inputLabel: { shrink: true }, htmlInput: { id: id('issue_date') } }} />
+              <TextField
+                label="วันที่ออกเอกสาร"
+                type="date"
+                value={form.issue_date}
+                onChange={(ev) => {
+                  const date = ev.target.value;
+                  const follow = followIssueYear && !yearTouched ? yearOf(date) : '';
+                  setForm((f) => ({ ...f, issue_date: date, ...(follow ? { tax_year: follow } : {}) }));
+                }}
+                slotProps={{ inputLabel: { shrink: true }, htmlInput: { id: id('issue_date') } }}
+              />
               <TextField label="เลขผู้เสียภาษีของผู้ออก" value={form.issuer_tax_id} onChange={setFormField('issuer_tax_id')} slotProps={{ htmlInput: { id: id('issuer_tax_id'), maxLength: 20, inputMode: 'numeric', sx: dataTextSx } }} />
               <TextField
                 label="ยอดก่อนภาษี (บาท)"

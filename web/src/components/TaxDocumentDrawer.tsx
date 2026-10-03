@@ -43,7 +43,7 @@ type SaveResult = Notice & { ok: boolean };
 type Pending = { kind: 'close' | 'cancelEdit'; go: () => void; what: string };
 
 // ปุ่มสถานะของแต่ละสถานะ: ไปข้างหน้า (contained) แล้วถอยกลับ (ปุ่มข้อความ) — PATCH status อย่างเดียว
-// server: verified ตั้ง verified_at = now() ใหม่, draft ล้าง verified_at, submitted คงเวลาที่ตรวจไว้
+// server: ยังไม่ตรวจ → ตรวจแล้ว ตั้ง verified_at = now(), ถอยเป็นยังไม่ตรวจล้าง verified_at, ยื่นแล้ว ↔ ตรวจแล้ว คงเวลาที่ตรวจไว้
 const STATUS_MOVES: Record<TaxDocumentStatus, { forward?: TaxDocumentStatus; back: TaxDocumentStatus[] }> = {
   draft: { forward: 'verified', back: [] },
   verified: { forward: 'submitted', back: ['draft'] },
@@ -353,8 +353,10 @@ export default function TaxDocumentDrawer({ docId, taxEntities, entitiesLoad, on
   const statusHint = detail?.status === 'draft'
     ? 'เทียบข้อมูลด้านบนกับไฟล์ต้นฉบับ ถ้าตรงกันแล้วกด “ทำเครื่องหมายว่าตรวจแล้ว”'
     : detail?.status === 'verified'
-      ? <>{verifiedAt}{verifiedAt && ' · '}ยื่นแบบภาษีที่ใช้เอกสารนี้แล้ว กด “ทำเครื่องหมายว่ายื่นแล้ว”</>
+      ? <>{verifiedAt}{verifiedAt && ' · '}ถ้ายื่นแบบภาษีที่ใช้เอกสารนี้แล้ว กด “ทำเครื่องหมายว่ายื่นแล้ว”</>
       : verifiedAt;
+  // ถอยกลับเป็นยังไม่ตรวจ = server ล้าง verified_at (ถอยจากยื่นแล้วเป็นตรวจแล้วคงเวลาเดิม) — บอกก่อนกด
+  const willClearVerifiedAt = detail?.verified_at != null && STATUS_MOVES[detail.status].back.includes('draft');
 
   // ข้อมูลเอกสารที่ไม่บังคับ แสดงเฉพาะที่กรอกไว้
   const details = detail ? ([
@@ -507,12 +509,17 @@ export default function TaxDocumentDrawer({ docId, taxEntities, entitiesLoad, on
                     onClick={() => void setStatus(next)}
                     aria-disabled={statusBusy != null || editDirty}
                     aria-busy={statusBusy === next}
-                    aria-describedby={editDirty ? 'tax-doc-status-blocked' : undefined}
+                    aria-describedby={[editDirty && 'tax-doc-status-blocked', next === 'draft' && willClearVerifiedAt && 'tax-doc-status-clear'].filter(Boolean).join(' ') || undefined}
                   >
                     {statusBusy === next ? 'กำลังบันทึก…' : forward ? `ทำเครื่องหมายว่า${TAX_DOC_STATUS_LABEL[next]}` : `กลับเป็น${TAX_DOC_STATUS_LABEL[next]}`}
                   </Button>
                 ))}
               </Stack>
+              {willClearVerifiedAt && (
+                <Typography id="tax-doc-status-clear" variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                  กลับเป็นยังไม่ตรวจ เวลาที่ตรวจไว้จะถูกล้าง
+                </Typography>
+              )}
               {editDirty && (
                 <Typography id="tax-doc-status-blocked" variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                   บันทึกการแก้ไขข้อมูลเอกสารก่อน แล้วจึงเปลี่ยนสถานะ

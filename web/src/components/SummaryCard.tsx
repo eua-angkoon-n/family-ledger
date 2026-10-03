@@ -75,23 +75,30 @@ export default function SummaryCard({ title, icon, value, caption, to, onClick, 
         {/* ไม่พิมพ์ — บนกระดาษกดไม่ได้ */}
         {interactive && <ChevronRightRounded fontSize="small" aria-hidden sx={{ ml: 'auto', flexShrink: 0, displayPrint: 'none' }} />}
       </Stack>
-      <Box
-        sx={{
-          ...dataTextSx,
-          lineHeight: 1.3,
-          overflowWrap: 'anywhere',
-          // ขั้น Data Display ของ DESIGN.md — ไม่ dense ก็อยู่ 2 คอลัมน์บนมือถือ / 4 ใบที่ 900px 1.75rem ล้นการ์ดถ้าไม่ย่อลง
-          // dense ที่ md 1.125rem (การ์ด 5 ใบที่ 900px เหลือที่ให้ตัวเลขราว 125px) ที่ lg 1.5rem (ราว 185px)
-          fontSize: dense ? { xs: '1.25rem', md: '1.125rem', lg: '1.5rem' } : { xs: '1.25rem', sm: '1.5rem', lg: '1.75rem' },
-        }}
-      >
-        {/* "—" ล้วน screen reader อ่านเป็น "ขีด" หรือข้ามไป — ซ่อนจาก AT แล้วให้ข้อความแทน */}
-        {loading ? <Skeleton width="60%" /> : disabled ? (
-          <>
-            <span aria-hidden>—</span>
-            <Box component="span" sx={visuallyHiddenSx}>ยังไม่มีข้อมูล</Box>
-          </>
-        ) : value}
+      {/* กล่องนอกเป็น container (กว้างตามคอลัมน์ ไม่ขึ้นกับเนื้อหา) ให้ตัวเลขข้างในย่อตามความกว้างการ์ดด้วย cqi —
+          ไม่ใส่ที่กล่อง subgrid ของการ์ดเอง เพราะ containment ของ container อาจตัดการเป็น subgrid */}
+      <Box sx={{ containerType: 'inline-size', minWidth: 0 }}>
+        <Box
+          sx={{
+            ...dataTextSx,
+            lineHeight: 1.3,
+            // ตัวเลขไม่ตัดกลาง ("฿123,456.7 / 8") — ย่อแทน: ขนาดตามขั้น Data Display ของ DESIGN.md แต่ไม่เกิน 16% ของความกว้าง
+            // ("฿123,456.78" กว้างราว 6em จึงพอดีการ์ด) ที่จอปกติ 16cqi ใหญ่กว่าขั้นอยู่แล้ว ขนาดเท่าเดิม ย่อเฉพาะการ์ดที่แคบจริง
+            // (320px: กว้าง ~106px → ~17px) · dense ที่ md 1.125rem (การ์ด 5 ใบที่ 900px เหลือที่ให้ตัวเลขราว 125px) ที่ lg 1.5rem (ราว 185px)
+            whiteSpace: 'nowrap',
+            fontSize: dense
+              ? { xs: 'min(1.25rem, 16cqi)', md: 'min(1.125rem, 16cqi)', lg: 'min(1.5rem, 16cqi)' }
+              : { xs: 'min(1.25rem, 16cqi)', sm: 'min(1.5rem, 16cqi)', lg: 'min(1.75rem, 16cqi)' },
+          }}
+        >
+          {/* "—" ล้วน screen reader อ่านเป็น "ขีด" หรือข้ามไป — ซ่อนจาก AT แล้วให้ข้อความแทน */}
+          {loading ? <Skeleton width="60%" /> : disabled ? (
+            <>
+              <span aria-hidden>—</span>
+              <Box component="span" sx={visuallyHiddenSx}>ยังไม่มีข้อมูล</Box>
+            </>
+          ) : value}
+        </Box>
       </Box>
       {!loading && ((caption != null && !captionAsTip) || (disabled && disabledReason)) && (
         <Typography variant="body2" color="text.secondary">

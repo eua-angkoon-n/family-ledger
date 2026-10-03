@@ -227,6 +227,8 @@ export type UnlinkedClaimSample = { id: number; deduction_type: string; claimed_
 
 type MissingDocumentReport = {
   untreated_txn_count: number;
+  untreated_credit_count: number; // แยกทิศจาก untreated_txn_count — ผลรวมสองค่าเท่า untreated_txn_count เสมอ
+  untreated_debit_count: number;
   unlinked_business_txn_count: number;
   // ตัวอย่างแถว (cap 100) — untreated_txn มี drill-down เต็มผ่าน /transactions?tax_treatment=none แล้ว
   // (ดู drilldownParams) ส่วนสองอย่างนี้ยังไม่มี filter dimension ให้ drill-down เต็มรูป จึงคืนตัวอย่างแถวแทน
@@ -242,8 +244,10 @@ type MissingDocumentReport = {
 // draft_document drill-down เต็มผ่าน /tax-documents?status=draft (หน้านั้นรองรับ filter นี้อยู่แล้ว)
 async function missingDocumentReport(userId: number, taxEntityId: number, taxYearCE: number, unresolvedIncomeSatang: number): Promise<MissingDocumentReport> {
   const [untreated, unlinked, unlinkedSamples, draftDocs, unlinkedClaims, unlinkedClaimSamples] = await Promise.all([
-    query<{ n: number }>(
-      `select count(*)::int as n
+    query<{ n: number; credit: number; debit: number }>(
+      `select count(*)::int as n,
+              count(*) filter (where t.direction = 'credit')::int as credit,
+              count(*) filter (where t.direction = 'debit')::int as debit
        from txn t join bank_account a on a.id = t.bank_account_id
        left join txn_annotation an on an.txn_id = t.id
        where a.user_id = $1 and an.tax_treatment is null
@@ -289,6 +293,8 @@ async function missingDocumentReport(userId: number, taxEntityId: number, taxYea
 
   return {
     untreated_txn_count: untreated.rows[0]!.n,
+    untreated_credit_count: untreated.rows[0]!.credit,
+    untreated_debit_count: untreated.rows[0]!.debit,
     unlinked_business_txn_count: unlinked.rows[0]!.n,
     unlinked_business_txn_samples: unlinkedSamples.rows,
     draft_document_count: draftDocs.rows[0]!.n,

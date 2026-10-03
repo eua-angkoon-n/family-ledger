@@ -496,6 +496,10 @@ export type UnlinkedClaimSample = { id: number; deduction_type: string; claimed_
 
 export type TaxMissingDocument = {
   untreated_txn_count: number;
+  // แยกตามทิศเงินจาก untreated_txn_count (ผลรวมเท่ากัน): เงินเข้าที่ยังไม่ระบุ = อาจมีรายได้ตกหล่น (ประมาณการต่ำกว่าจริง)
+  // เงินออกที่ยังไม่ระบุ = อาจหักเป็นค่าใช้จ่ายได้ (ประมาณการได้แต่สูงกว่าจริง) — "ยังไม่ครบ" ดูเฉพาะฝั่งเงินเข้า
+  untreated_credit_count: number;
+  untreated_debit_count: number;
   unlinked_business_txn_count: number;
   unlinked_business_txn_samples: UnlinkedBusinessTxnSample[];
   draft_document_count: number;

@@ -21,7 +21,7 @@ import {
   type Theme,
 } from '@mui/material';
 import AddRounded from '@mui/icons-material/AddRounded';
-import ArchiveOutlined from '@mui/icons-material/ArchiveOutlined';
+import PlaylistRemoveRounded from '@mui/icons-material/PlaylistRemoveRounded';
 import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded';
 import FilterListRounded from '@mui/icons-material/FilterListRounded';
 import MarkEmailReadRounded from '@mui/icons-material/MarkEmailReadRounded';
@@ -76,7 +76,7 @@ export default function TaxDocuments() {
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [archiveBusy, setArchiveBusy] = useState(false);
   const [archiveError, setArchiveError] = useState('');
-  // หลังเก็บเข้าคลังสำเร็จ: ประกาศผลและย้าย focus เมื่อ dialog ปิดสนิท (แถวหายไปพร้อมปุ่มต้นทาง)
+  // หลังเอาออกจากรายการสำเร็จ: ประกาศผลและย้าย focus เมื่อ dialog ปิดสนิท (แถวหายไปพร้อมปุ่มต้นทาง)
   const afterArchiveRef = useRef<{ index: number; notice: Notice } | null>(null);
   const requestIdRef = useRef(0);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -92,8 +92,9 @@ export default function TaxDocuments() {
   // ช่องค้นหายิงตอน Enter/ออกจากช่อง ไม่ใช่ทุกตัวอักษร — ร่างตามค่าใน URL เสมอ (ล้างตัวกรอง/Back แล้วช่องตรงกับผล)
   const [qDraft, setQDraft] = useState(q);
   useEffect(() => setQDraft(q), [q]);
-  // เปิดลิงก์ที่มีตัวกรองในแผงอยู่แล้ว (หน้าภาษีส่ง ?status=draft) = กางให้เห็นเลย
-  const [moreOpen, setMoreOpen] = useState(() => Boolean(taxEntityId || status || documentType));
+  // เปิดลิงก์ที่มีตัวกรองในแผงอยู่แล้ว (หน้าภาษีส่ง ?status=draft) = กางให้เห็นเลย — ผู้เสียภาษีรู้ว่าเป็นตัวกรองจริงไหม
+  // หลังโหลดรายชื่อ (effect ด้านล่าง)
+  const [moreOpen, setMoreOpen] = useState(() => Boolean(status || documentType));
 
   // ตัวกรอง = replace (ไม่เพิ่ม history ทุกครั้งที่เลือก) · หน้า = push (Back ย้อนได้)
   const setFilter = (patch: Record<string, string | null>, replace = true) => {
@@ -141,7 +142,7 @@ export default function TaxDocuments() {
   }, [taxEntityId, taxYear, status, documentType, q, page]);
 
   // คงแถวเดิมไว้ระหว่างโหลด (aria-busy + แถบบาง) — skeleton เฉพาะตอนยังไม่มีอะไรให้ดู
-  // background = โหลดซ้ำหลังอัปโหลด/แก้/เก็บเข้าคลัง: พังแล้วคงแถวเดิมใต้ LoadError (The Section Failure Rule)
+  // background = โหลดซ้ำหลังอัปโหลด/แก้/เอาออกจากรายการ: พังแล้วคงแถวเดิมใต้ LoadError (The Section Failure Rule)
   // ตัวกรอง/หน้าเปลี่ยนแล้วพัง = แถวเดิมเป็นของเงื่อนไขก่อน ไม่ค้างไว้
   const load = async (background: boolean) => {
     const requestId = ++requestIdRef.current;
@@ -162,7 +163,7 @@ export default function TaxDocuments() {
   useEffect(() => { void load(false); }, [queryString]);
   const reload = () => void load(true);
 
-  // หน้าเกินช่วง (ลิงก์เก่า, เก็บแถวสุดท้ายของหน้าสุดท้ายเข้าคลัง) — ไปหน้าสุดท้ายที่มีแถว แทนการค้างที่ "ไม่พบ"
+  // หน้าเกินช่วง (ลิงก์เก่า, เอาแถวสุดท้ายของหน้าสุดท้ายออก) — ไปหน้าสุดท้ายที่มีแถว แทนการค้างที่ "ไม่พบ"
   const pastEnd = data != null && data.rows.length === 0 && page > 1;
   useEffect(() => {
     if (pastEnd && data) setFilter({ page: data.total_count > 0 ? String(Math.ceil(data.total_count / LIMIT)) : null });
@@ -174,13 +175,20 @@ export default function TaxDocuments() {
   const activeEntities = entities.filter((e) => e.is_active);
   // ผู้เสียภาษีรายเดียว = ชื่อซ้ำกันทุกแถว ไม่ต้องมีคอลัมน์/บรรทัดรอง (แบบกล่องอีเมลของหน้าบัญชีของฉัน)
   const showEntity = entities.length > 1;
+  // แท็บย่อย/ลิงก์จากหน้าประมาณการพา tax_entity_id มาเสมอ — บ้านที่มีผู้เสียภาษีรายเดียวและลิงก์ชี้รายนั้น ผลเท่ากับไม่กรอง
+  // จึงไม่นับเป็นตัวกรอง (ไม่กางแผง ไม่ขึ้น "ไม่พบเอกสารที่ตรงตัวกรอง") · ระหว่างโหลดรายชื่อยังไม่นับ (ปุ่มล้างตัวกรองไม่โผล่แล้วหายทุกครั้ง
+  // ที่สลับแท็บ) · รายชื่อโหลดไม่ได้ = นับไว้ก่อน ผู้ใช้ยังเห็นและล้างได้
+  const entityFiltered = taxEntityId !== '' && (taxEntities == null
+    ? entitiesError !== ''
+    : !(entities.length === 1 && String(entities[0]!.id) === taxEntityId));
+  useEffect(() => { if (taxEntities && entityFiltered) setMoreOpen(true); }, [taxEntities]);
   // ตัวกรองผู้เสียภาษี: ซ่อนเมื่อมีรายเดียว · ระหว่างโหลดรายชื่อยังแสดง (ไม่โผล่ทีหลังแล้วดันช่องอื่น) · ลิงก์ที่กรองไว้แล้วต้องเห็นและเอาออกได้
-  const showEntityFilter = taxEntities == null || showEntity || taxEntityId !== '';
+  const showEntityFilter = taxEntities == null || showEntity || entityFiltered;
   const taxEntityName = (id: number) => entities.find((e) => e.id === id)?.display_name ?? '';
   const defaultTaxEntityId = taxEntityId || (activeEntities.length === 1 ? String(activeEntities[0]!.id) : '');
   const entitiesLoad = entitiesError ? { error: entitiesError, onRetry: loadEntities } : undefined;
 
-  const hasFilter = Boolean(taxEntityId || taxYear || status || documentType || q);
+  const hasFilter = Boolean(entityFiltered || taxYear || status || documentType || q);
   const emptyTitle = hasFilter ? 'ไม่พบเอกสารที่ตรงตัวกรอง' : 'ยังไม่มีเอกสารภาษี';
   const clearFilters = () => {
     setFilter(CLEAR_FILTERS);
@@ -202,18 +210,18 @@ export default function TaxDocuments() {
       const index = rows.findIndex((r) => r.id === archiving.id);
       // เอาแถวออกทันที แล้วโหลดซ้ำเบื้องหลัง — focus ย้ายไปแถวที่เลื่อนขึ้นมาแทนได้ตอน dialog ปิดสนิท
       setData((d) => (d ? { ...d, rows: d.rows.filter((r) => r.id !== archiving.id), total_count: Math.max(0, d.total_count - 1) } : d));
-      afterArchiveRef.current = { index, notice: { message: `เก็บเอกสารของ “${archiving.issuer_name}” เข้าคลังแล้ว`, severity: 'success' } };
+      afterArchiveRef.current = { index, notice: { message: `เอาเอกสารของ “${archiving.issuer_name}” ออกจากรายการแล้ว`, severity: 'success' } };
       setArchiveOpen(false);
       reload();
     } catch (e) {
-      setArchiveError(e instanceof Error ? e.message : 'เก็บเข้าคลังไม่สำเร็จ');
+      setArchiveError(e instanceof Error ? e.message : 'เอาออกจากรายการไม่สำเร็จ');
     } finally {
       setArchiveBusy(false);
     }
   };
 
   const filterSx = { flex: '1 1 160px', maxWidth: { sm: 220 } };
-  const panelCount = [taxEntityId, status, documentType].filter(Boolean).length;
+  const panelCount = [entityFiltered, status, documentType].filter(Boolean).length;
 
   const entityFilter = showEntityFilter && (
     <TextField select size="small" label="ผู้เสียภาษี" value={taxEntityId} onChange={(e) => setFilter({ tax_entity_id: e.target.value })} sx={filterSx}>
@@ -395,14 +403,14 @@ export default function TaxDocuments() {
                     <TableCell sx={{ ...MD_UP, whiteSpace: 'nowrap' }}><TaxDocumentStatusChip status={doc.status} /></TableCell>
                     <TableCell align="right" sx={{ py: 0.5, px: { xs: 0.5, md: 1 } }} onClick={(e) => e.stopPropagation()}>
                       {/* < md ปุ่มเรียงแนวตั้ง — ที่ 320px ชื่อผู้ออกเหลือที่ ~115px แทน ~70px
-                          เปิดก่อนเก็บเข้าคลัง (ลำดับตา/Tab/นิ้วโป้ง) — ปุ่มสีแดงไม่ใช่สิ่งแรกที่เจอ */}
+                          เปิดก่อนเอาออก (ลำดับตา/Tab/นิ้วโป้ง) — ปุ่มสีแดงไม่ใช่สิ่งแรกที่เจอ */}
                       <Stack direction={{ xs: 'column', md: 'row' }} spacing={0.5} sx={{ alignItems: 'flex-end', justifyContent: 'flex-end' }}>
                         <RowIconButton data-taxdoc-open label={`ดูรายละเอียด ${doc.issuer_name}`} tooltip="ดูรายละเอียด" onClick={() => setSelectedDocId(doc.id)}>
                           <ChevronRightRounded />
                         </RowIconButton>
-                        {/* ไม่มี endpoint เอากลับ ย้อนจากหน้าจอไม่ได้ — สี error แบบ "เก็บเข้าคลัง" ของหน้าบัญชีของฉัน */}
-                        <RowIconButton label={`เก็บเข้าคลัง ${doc.issuer_name}`} tooltip="เก็บเข้าคลัง" color="error" onClick={() => openArchive(doc)}>
-                          <ArchiveOutlined fontSize="small" />
+                        {/* ไม่มี endpoint เอากลับ ย้อนจากหน้าจอไม่ได้ จึงเป็นสี error · ไม่ใช้คำ "เก็บเข้าคลัง" (ของหน้าบัญชีของฉัน) เพราะสื่อว่ามีที่ให้เอากลับได้ */}
+                        <RowIconButton label={`เอาออกจากรายการ ${doc.issuer_name}`} tooltip="เอาออกจากรายการ" color="error" onClick={() => openArchive(doc)}>
+                          <PlaylistRemoveRounded fontSize="small" />
                         </RowIconButton>
                       </Stack>
                     </TableCell>
@@ -454,14 +462,14 @@ export default function TaxDocuments() {
       />
       <ConfirmDialog
         open={archiveOpen}
-        title="เก็บเอกสารภาษีเข้าคลัง"
+        title="เอาเอกสารภาษีออกจากรายการ"
         description={
           <>
-            เก็บเอกสารของ “{archiving?.issuer_name ?? ''}” เข้าคลังหรือไม่? ไฟล์ยังเก็บไว้แบบเข้ารหัส แต่จะหายจากรายการนี้ และยังเอากลับจากหน้าจอไม่ได้
+            เอาเอกสารของ “{archiving?.issuer_name ?? ''}” ออกจากรายการหรือไม่? ไฟล์ยังเก็บไว้แบบเข้ารหัส แต่ตอนนี้ยังเอากลับมาจากหน้าจอไม่ได้
             {archiveError && <LoadError message={archiveError} />}
           </>
         }
-        confirmLabel="เก็บเข้าคลัง"
+        confirmLabel="เอาออกจากรายการ"
         confirmColor="error"
         busy={archiveBusy}
         onClose={() => setArchiveOpen(false)}

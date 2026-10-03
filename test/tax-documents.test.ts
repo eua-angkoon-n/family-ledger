@@ -280,6 +280,28 @@ test('tax document vault: upload, dedupe, link, verify, download, audit, archive
     assert.ok(body.verified_at);
   });
 
+  await t.test('ถอย submitted → verified คงเวลาตรวจเดิม, draft → verified ได้เวลาใหม่', async () => {
+    const patch = async (status: string) => {
+      const res = await app.request(`/api/tax-documents/${docId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      assert.equal(res.status, 200);
+      return ((await res.json()) as { verified_at: string | null }).verified_at;
+    };
+    // ย้อนเวลาตรวจไปก่อน ให้แยก "คงเดิม" กับ "now()" ได้แน่นอนโดยไม่พึ่งความละเอียดมิลลิวินาที
+    const original = '2026-01-02T03:04:05.000Z';
+    await db.pool.query('update tax_document set verified_at = $2 where id = $1', [docId, original]);
+
+    await patch('submitted');
+    assert.equal(await patch('verified'), original, 'submitted → verified ต้องคงเวลาตรวจเดิม');
+
+    assert.equal(await patch('draft'), null, 'กลับเป็น draft ต้องล้างเวลาตรวจ');
+    const reverified = await patch('verified');
+    assert.ok(reverified && new Date(reverified) > new Date(original), 'draft → verified ต้องได้เวลาใหม่ (now())');
+  });
+
   await t.test('list กรองด้วย tax_entity_id เห็นเอกสารที่สร้างไว้', async () => {
     const res = await app.request(`/api/tax-documents?tax_entity_id=${taxEntityId}`);
     const body = (await res.json()) as { rows: { id: number }[]; total_count: number };

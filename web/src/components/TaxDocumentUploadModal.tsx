@@ -20,8 +20,8 @@ type Props = {
   onNotice: (notice: Notice) => void;
 };
 
-// เพดานเดียวกับ server: detectMime รับแค่ PDF/JPEG/PNG และ MAX_FILE_BYTES 10MB หลัง decode (src/routes/tax-documents.ts)
-// base64 โต ~4/3 → 13.4MB ยังต่ำกว่าเพดาน 15MB ต่อคำขอ (server.ts)
+// เพดานเดียวกับ server: detectMime รับแค่ PDF/JPEG/PNG (src/routes/tax-documents.ts) และ MAX_FILE_BYTES 10MB หลัง decode (src/http.ts)
+// base64 โต ~4/3 → 13.4MB ยังต่ำกว่าเพดาน 15MB ต่อคำขอ (src/server.ts) — web import src/ ไม่ได้ จึงเขียนค่าซ้ำไว้ที่นี่
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 // image/jpg = ชนิดที่ Android บางรุ่นรายงานแทน image/jpeg (server ดู magic bytes ไม่ดูชนิดนี้)
 const ACCEPT = '.pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/jpg,image/png';
@@ -64,7 +64,7 @@ export default function TaxDocumentUploadModal({ open, taxEntities, entitiesLoad
   // snackbar อยู่ใน #root ซึ่งเป็น aria-hidden ระหว่าง modal เปิด — ประกาศผลหลังปิดสนิท
   const exitNoticeRef = useRef<Notice | null>(null);
 
-  // ค่าตั้งต้นทุกครั้งที่เปิด (ปีปัจจุบัน + ผู้เสียภาษีตั้งต้น) — dirty เทียบกับค่านี้
+  // ค่าตั้งต้นทุกครั้งที่เปิด (ปีปัจจุบัน + ผู้เสียภาษีตั้งต้น) — dirty เทียบกับค่านี้ · กรอกวันที่ออกแล้วปีตามวันที่ (followIssueYear)
   useEffect(() => {
     if (!open) return;
     const start = { ...EMPTY_TAX_DOC_META_FORM, tax_year: String(new Date().getFullYear()), tax_entity_id: defaultTaxEntityId };
@@ -173,6 +173,7 @@ export default function TaxDocumentUploadModal({ open, taxEntities, entitiesLoad
             idPrefix={idPrefix}
             attempted={attempted}
             entitiesLoad={entitiesLoad}
+            followIssueYear
           />
           {/* live region อยู่ใน DOM ตลอด — ข้อความขึ้นตอนเริ่มส่ง จึงประกาศแน่นอน */}
           <Box role="status">

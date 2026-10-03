@@ -164,6 +164,8 @@ test('tax calculation: summary, snapshot, deduction claims, export, audit', asyn
   await annotate(businessExpenseTxn, 'business_expense');
   const untreatedTxn = await insertTxn(3000000, 'debit', '2026-04-12');
   await annotate(untreatedTxn, null);
+  // เงินเข้าที่ยังไม่ระบุ — ต้องแยกนับเป็น untreated_credit_count (ไม่มี annotation เลยก็นับว่ายังไม่ระบุ)
+  await insertTxn(1500000, 'credit', '2026-04-13');
   // ธุรกรรมปีอื่น ต้องไม่ถูกนับ
   const otherYearTxn = await insertTxn(99999999, 'credit', '2025-01-01');
   await annotate(otherYearTxn, 'business_income');
@@ -202,7 +204,9 @@ test('tax calculation: summary, snapshot, deduction claims, export, audit', asyn
     assert.equal(summary.inputs.otherIncomeSatang, 20000000);
     assert.equal(summary.inputs.deductibleExpenseSatang, 5000000);
     assert.equal(summary.inputs.unresolvedIncomeSatang, 2000000);
-    assert.equal(summary.missing_document.untreated_txn_count, 1);
+    assert.equal(summary.missing_document.untreated_txn_count, 2);
+    assert.equal(summary.missing_document.untreated_credit_count, 1);
+    assert.equal(summary.missing_document.untreated_debit_count, 1);
     assert.equal(summary.missing_document.unlinked_business_txn_count, 1);
     assert.equal(summary.missing_document.draft_document_count, 1);
     assert.ok(summary.estimate != null);
@@ -232,6 +236,15 @@ test('tax calculation: summary, snapshot, deduction claims, export, audit', asyn
       const res = await app.request(`/api/transactions?${qs}`);
       const body = (await res.json()) as { total_count: number };
       assert.equal(body.total_count, summary.missing_document.untreated_txn_count, 'การ์ด untreated_txn ต้อง drill-down ได้จำนวนแถวตรงกัน');
+    }
+    // เงินเข้า/ออกที่ยังไม่ระบุ: หน้าเว็บต่อ &direction=credit|debit ท้าย untreated_txn — จำนวนต้องตรงกับตัวแยกทิศ
+    for (const [direction, expected] of [
+      ['credit', summary.missing_document.untreated_credit_count],
+      ['debit', summary.missing_document.untreated_debit_count],
+    ] as const) {
+      const qs = new URLSearchParams({ ...summary.drilldown_params.untreated_txn, direction }).toString();
+      const body = (await (await app.request(`/api/transactions?${qs}`)).json()) as { total_count: number };
+      assert.equal(body.total_count, expected, `untreated ${direction} ต้อง drill-down ได้จำนวนแถวตรงกัน`);
     }
   });
 
