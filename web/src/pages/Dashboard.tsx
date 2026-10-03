@@ -36,7 +36,7 @@ import MonthPicker, { currentMonth, shiftMonth, validMonth } from '../components
 import SummaryCard, { summaryRowSx } from '../components/SummaryCard.js';
 import { dataTextSx, tokens } from '../theme.js';
 import { formatBaht, formatDate, formatDateTime, formatDayMonth, formatMonth } from '../format.js';
-import { LoadError, PageHeader } from '../ui.js';
+import { LoadError, PageHeader, useHashTarget } from '../ui.js';
 
 function monthsBack(month: string, count: number): { from: string; to: string } {
   const [y, m] = month.split('-').map(Number) as [number, number];
@@ -80,12 +80,14 @@ function IssueCount({ n }: { n: number }) {
   );
 }
 
-// error_reason ที่ worker เขียนจริง (src/worker.ts): decrypt_failed / pdftotext_failed / checksum_failed หรือข้อความ
-// exception ของ parser (เช่น "ไม่พบชนิด KBank statement") — มีแค่รหัสผ่าน PDF ที่ผู้ใช้แก้เองได้ที่หน้าบัญชีของฉัน
-// ที่เหลือเป็นเรื่องของ parser/เซิร์ฟเวอร์ จึงบอกให้แจ้งผู้ดูแล ไม่มีปุ่มที่กดแล้วแก้ไม่ได้ (ข้อความดิบไม่แสดง เลข #id พอให้ผู้ดูแลตามได้)
+// error_reason ที่ worker เขียนจริง (src/worker.ts): decrypt_failed / pdftotext_failed / account_unresolved / checksum_failed
+// หรือข้อความ exception ของ parser (เช่น "ไม่พบชนิด KBank statement") — ปุ่มมีเฉพาะรหัสผ่าน PDF (`?edit=` เปิดฟอร์มที่บอกว่ารหัส
+// ไม่ตรง) · แยกบัญชีไม่ออกผู้ใช้ตรวจเลขบัญชีเองได้แต่ไม่มีปุ่ม (ฟอร์มจากลิงก์จะพูดเรื่องรหัสผ่านผิดเรื่อง) · ที่เหลือเป็นเรื่องของ
+// parser/เซิร์ฟเวอร์ จึงบอกให้แจ้งผู้ดูแล ไม่มีปุ่มที่กดแล้วแก้ไม่ได้ (ข้อความดิบไม่แสดง เลข #id พอให้ผู้ดูแลตามได้)
 function failureInfo(s: FailedStatement): { text: string; selfFix: boolean } {
   const reason = typeof s.error_reason === 'string' ? s.error_reason : '';
   if (reason === 'decrypt_failed') return { text: 'เปิดไฟล์ไม่ได้ เพราะรหัสผ่าน PDF ไม่ตรง', selfFix: true };
+  if (reason === 'account_unresolved') return { text: 'ระบบแยกไม่ออกว่าไฟล์นี้เป็นของบัญชีไหน — ตรวจเลขบัญชีที่ตั้งไว้ในหน้าบัญชีของฉัน', selfFix: false };
   if (reason === 'pdftotext_failed') return { text: 'อ่านข้อความในไฟล์ไม่ได้ — แจ้งผู้ดูแล', selfFix: false };
   if (s.status === 'checksum_failed') return { text: 'ยอดรวมในไฟล์ไม่ตรงกับรายการ — แจ้งผู้ดูแล', selfFix: false };
   return { text: 'ธนาคารเปลี่ยนรูปแบบไฟล์ ระบบยังอ่านไม่ได้ — แจ้งผู้ดูแล', selfFix: false };
@@ -234,6 +236,10 @@ export default function Dashboard() {
     : [];
   const hadIssues = useRef(false);
   if (issuesReady) hadIssues.current = issues.length > 0;
+  // `/dashboard#statement-failures` (ผลดึงอีเมลที่มีไฟล์มีปัญหาในหน้าบัญชีของฉัน) — รอทุกส่วนเหนือรายการ (แถบสถานะข้อมูล,
+  // แถบต้องจัดการ, การ์ด) โหลดจบ ไม่งั้นรายการเลื่อนหนีหลังเลื่อนไปแล้ว
+  const failuresRef = useRef<HTMLDivElement>(null);
+  useHashTarget('#statement-failures', issuesReady, failuresRef, 'statement-failures-heading');
 
   // กราฟว่างเพราะ statement ยังไม่มา ใช้ข้อความเดียวกับบรรทัดสถานะด้านบน แทน "ยังไม่มีข้อมูล" กลาง ๆ
   const pendingMessage = (fromMonth: string): string | undefined => {
@@ -471,6 +477,7 @@ export default function Dashboard() {
                 // warning ให้ตรงกับการ์ดตัวนับด้านบน — แต่ละแถวบอกสาเหตุเป็นภาษาคน และมีปุ่มเฉพาะแถวที่ผู้ใช้แก้เองได้
                 // เป็น section ที่มีชื่อ ไม่ใช่ role="alert" (ค่าเริ่มต้นของ Alert) — รายการคงที่ ไม่ใช่เหตุด่วนให้ screen reader ขัดจังหวะ
                 <Alert
+                  ref={failuresRef}
                   id="statement-failures"
                   component="section"
                   role="region"
@@ -480,7 +487,7 @@ export default function Dashboard() {
                   // หลายบรรทัด: ไอคอนอยู่แนวหัวข้อ ไม่ลอยกลางกล่อง (theme ตั้ง Alert ให้จัดกลางสำหรับข้อความบรรทัดเดียว)
                   sx={{ mt: 2, scrollMarginTop: 80, alignItems: 'flex-start' }}
                 >
-                  <Typography component="h3" variant="h2" id="statement-failures-heading" sx={{ fontSize: '1rem', lineHeight: 1.5, mb: 1 }}>
+                  <Typography component="h3" variant="h2" id="statement-failures-heading" tabIndex={-1} sx={{ fontSize: '1rem', lineHeight: 1.5, mb: 1 }}>
                     statement ที่มีปัญหา — นับทุกเดือน ไม่ผูกกับเดือนที่เลือก
                   </Typography>
                   <Stack spacing={1}>
@@ -502,7 +509,7 @@ export default function Dashboard() {
                       );
                     })}
                     {summary.failed_statements.length > 5 && (
-                      <Typography variant="body2">และอีก {summary.failed_statements.length - 5} ไฟล์</Typography>
+                      <Typography variant="body2">และอีก {summary.failed_statements.length - 5} รายการ</Typography>
                     )}
                   </Stack>
                 </Alert>

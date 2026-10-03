@@ -24,7 +24,7 @@ test('email accounts: sync กับ token ที่ใช้ไม่ได้ 
   const { HttpError } = await import('../src/http.js');
   const { encrypt } = await import('../src/crypto.js');
   const { emailAccountsRouter } = await import('../src/routes/email-accounts.js');
-  const { countStatements, syncEmailAccount } = await import('../src/worker.js');
+  const { countStatements, failedAccountTargets, syncEmailAccount, writeParsedStatement, writePending } = await import('../src/worker.js');
 
   // Google ปลอมเฉพาะ token endpoint กับ messages.list — คำขออื่น (เรียก test server เอง) ส่งต่อ fetch จริง
   const realFetch = globalThis.fetch;
@@ -193,5 +193,64 @@ test('email accounts: sync กับ token ที่ใช้ไม่ได้ 
     const rows = (await res.json()) as { id: number; reauth_required_at: string | null }[];
     assert.equal(res.status, 200);
     assert.ok(rows.find((r) => r.id === mailboxId)?.reauth_required_at);
+  });
+
+  await t.test('failedAccountTargets: ไฟล์ที่ผูกบัญชีไม่ได้ลงบัญชีตามชื่อไฟล์ ไม่งั้นลงทุกบัญชี', () => {
+    const a = { account_number: '123-4-56231-7' };
+    const b = { account_number: '999-9-99999-9' };
+    const file = 'statement_xxx-x-x6231-x.pdf';
+    assert.deepEqual(failedAccountTargets([a], 'anything.pdf'), [a]);
+    assert.deepEqual(failedAccountTargets([a, b], file), [a]);
+    assert.deepEqual(failedAccountTargets([a, b], 'statement.pdf'), [a, b]);
+  });
+
+  await t.test('อ่านไฟล์สำเร็จใต้บัญชีหนึ่ง → ล้าง parse_failed ของไฟล์เดียวกันใต้บัญชีอื่นในกล่องเดียวกันเท่านั้น', async () => {
+    const bankId = (await db.pool.query<{ id: number }>(`select id from bank where lower(name) = 'scb'`)).rows[0]!.id;
+    const otherMailbox = (
+      await db.pool.query<{ id: number }>(
+        `insert into email_account (user_id, email, refresh_token_enc) values ($1, 'other@example.com', $2) returning id`,
+        [userId, encrypt('refresh-token')],
+      )
+    ).rows[0]!.id;
+    const account = async (mailbox: number, no: string) =>
+      (await db.pool.query<{ id: number }>(
+        `insert into bank_account (user_id, bank_id, email_account_id, nickname, account_number, pdf_password_enc)
+         values ($1, $2, $3, $4, $4, $5) returning id`,
+        [userId, bankId, mailbox, no, encrypt('pw')],
+      )).rows[0]!.id;
+    const [a, b, c, other] = [
+      await account(mailboxId, '111-1-11111-1'),
+      await account(mailboxId, '222-2-22222-2'),
+      await account(mailboxId, '333-3-33333-3'),
+      await account(otherMailbox, '444-4-44444-4'),
+    ];
+    // แบบที่ worker เขียนเมื่อแยกบัญชีไม่ได้: gmail id เดียวกันหลายบัญชี (unique ผูก bank_account_id จึงเขียนได้)
+    const failUnder = (accountId: number, sha: string) =>
+      db.pool.query(
+        `insert into statement (bank_account_id, gmail_message_id, gmail_attachment_id, pdf_sha256, status, error_detail)
+         values ($1, 'msg', 'att', $2, 'parse_failed', '{"reason":"decrypt_failed"}')`,
+        [accountId, sha],
+      );
+    const rows = async (sha: string) =>
+      (await db.pool.query<{ bank_account_id: number; status: string }>(
+        'select bank_account_id, status from statement where pdf_sha256 = $1 order by bank_account_id',
+        [sha],
+      )).rows;
+
+    for (const id of [a, b, other]) await failUnder(id, 'sha-parsed');
+    const parsed = {
+      layout: 'monthly' as const, accountNumber: '111-1-11111-1', periodStart: '2026-08-01', periodEnd: '2026-08-31',
+      openingBalanceSatang: 0, closingBalanceSatang: 0, transactions: [], checksumValid: true,
+    };
+    assert.equal(await writeParsedStatement(mailboxId, a, 'msg', 'att', 'sha-parsed', '/tmp/x.pdf', parsed), true);
+    // แถวของ a ถูกทับเป็น parsed (dedup `status <> 'parse_failed'` จะข้ามไฟล์นี้รอบหน้า), b หาย, กล่องอื่นไม่ถูกแตะ
+    assert.deepEqual(await rows('sha-parsed'), [
+      { bank_account_id: a, status: 'parsed' },
+      { bank_account_id: other, status: 'parse_failed' },
+    ]);
+
+    for (const id of [a, b]) await failUnder(id, 'sha-pending');
+    assert.equal(await writePending(mailboxId, c, 'msg', 'att', 'sha-pending', '/tmp/x.pdf', 'text'), true);
+    assert.deepEqual(await rows('sha-pending'), [{ bank_account_id: c, status: 'pending' }]);
   });
 });

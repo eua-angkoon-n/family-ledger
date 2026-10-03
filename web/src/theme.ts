@@ -308,7 +308,7 @@ const theme = createTheme({
             '&.MuiButton-outlined': { backgroundColor: 'transparent', borderColor: theme.vars.palette.action.disabledBackground },
             '&.MuiButton-contained': { backgroundColor: theme.vars.palette.action.disabledBackground },
           },
-          // busy (+ aria-disabled) = ป้าย "กำลัง…" ที่ต้องอ่านได้ — action.disabled เหลือ ~1.5:1 ใช้สีตัวอักษรรอง (ยังดูไม่ active)
+          // busy (+ aria-disabled) = ป้าย "กำลัง…" ที่ต้องอ่านได้ — action.disabled บน card เหลือ 1.87 (สว่าง) / 3.26 (มืด) ใช้สีตัวอักษรรอง (ยังดูไม่ active)
           // outlined/text บน card/popover 4.88/5.66 · contained บนพื้น disabledBackground ตัวอักษรรองเหลือ 4.25 บน card
           // (สว่าง) จึงใช้ text.primary: 5.11 บน card, 4.94 บน background — aria-disabled ที่ไม่ busy ยังเป็นสี disabled เดิม
           '&[aria-disabled="true"][aria-busy="true"]': {
@@ -470,7 +470,15 @@ const theme = createTheme({
       },
     },
     MuiAlert: {
-      styleOverrides: { root: { alignItems: 'center' }, message: { lineHeight: 1.5 } },
+      styleOverrides: {
+        root: {
+          alignItems: 'center',
+          // ปุ่มใน Alert แบบ filled (snackbar ทุกหน้า): ring ของธีมบนพื้นสีสถานะเหลือ 1.2–1.7:1 — ring มาจาก outline (MUI วาง
+          // box-shadow 4px สี background ไว้ใต้ ring เป็นขอบใน) ใช้สีตัวอักษรของ Alert แทน ซึ่งผ่าน 4.5 กับพื้นของมันทุก severity
+          '&.MuiAlert-filled .Mui-focusVisible': { outlineColor: 'currentColor' },
+        },
+        message: { lineHeight: 1.5 },
+      },
     },
     MuiChip: {
       // มุม md ตาม Badge ของ shadcn (rounded-md)

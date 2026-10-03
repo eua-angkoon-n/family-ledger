@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Alert,
   Box,
@@ -40,7 +40,7 @@ import { formatDateTime } from './format.js';
 import Modal from './Modal.js';
 import { TAX_ENTITY_TYPE_LABEL } from './taxDocumentLabels.js';
 import { dataTextSx, descriptionSx } from './theme.js';
-import { BELOW_MD, ConfirmDialog, EmptyState, FeedbackSnackbar, LoadError, MD_UP, PageHeader, RowIconButton, TableSkeleton, type Notice } from './ui.js';
+import { BELOW_MD, ConfirmDialog, EmptyState, FeedbackSnackbar, LoadError, MD_UP, PageHeader, RowIconButton, TableSkeleton, useHashTarget, type Notice } from './ui.js';
 
 const EMPTY = {
   bank_id: '', email_account_id: '', nickname: '', account_number: '', pdf_password: '', promptpay_id: '',
@@ -62,6 +62,10 @@ const errorText = (e: unknown, fallback: string) => (e instanceof Error ? e.mess
 const NAME_CELL = { width: { xs: '100%', md: 'auto' }, maxWidth: { xs: 0, md: 'none' }, overflowWrap: 'anywhere' } as const;
 // ตัวคั่นที่ตาเห็นเท่านั้น — screen reader ไม่ต้องอ่าน "จุด"
 const SEP = <Box component="span" aria-hidden>{' · '}</Box>;
+// error ของฟอร์มอยู่บนสุด แต่บนมือถือคนที่เลื่อนลงไปกรอกช่องล่าง ๆ แล้วกดบันทึก (ปุ่มอยู่นอกส่วนที่เลื่อน) มองไม่เห็น — เลื่อนมาให้เห็น
+// ตอนเพิ่งขึ้น · ฟังก์ชันระดับไฟล์ (ref คงที่) React จึงเรียกเฉพาะตอน mount ไม่ใช่ทุก render ระหว่างพิมพ์
+const revealOnMount = (el: HTMLElement | null) => el?.scrollIntoView({ block: 'nearest' });
+const accountEditId = (id: number) => `account-edit-${id}`;
 
 /**
  * The Section Failure Rule: ยังไม่เคยโหลดได้ = skeleton หรือ LoadError แทนที่ส่วนนั้น (ไม่ใช่ EmptyState)
@@ -94,9 +98,11 @@ export default function Accounts() {
   const [archiveError, setArchiveError] = useState('');
   const [syncing, setSyncing] = useState<ReadonlySet<number>>(new Set());
   const [notice, setNotice] = useState<Notice | null>(null);
-  // ผลสำเร็จที่เกิดตอน modal/dialog เปิดอยู่ — `#root` เป็น aria-hidden จนปิดสนิท จึงแสดงจาก onExited (เหมือนหน้าแผนผ่อน)
-  const pendingNoticeRef = useRef<Notice | null>(null);
-  // dialog ใด ๆ ของหน้าเปิดอยู่ (จนถึง onExited) — ผลที่มาทีหลังแบบ async (ดึงอีเมล) จึงเข้าคิวแทนการขึ้นใต้ #root ที่ aria-hidden
+  // ผลทุกอย่างผ่าน `announce` เข้าคิวนี้แล้วขึ้นทีละอันตามลำดับ — ผลดึงอีเมลที่มาระหว่างฟอร์มเปิดไม่ถูกผลบันทึกทับ (เคยเก็บช่องเดียว)
+  const queueRef = useRef<Notice[]>([]);
+  // snackbar อยู่บนจอ (จนถึง onExited ของมัน)
+  const showingRef = useRef(false);
+  // dialog ใด ๆ ของหน้าเปิดอยู่ (จนถึง onExited) — `#root` เป็น aria-hidden จนปิดสนิท ผลจึงรอในคิว (เหมือนหน้าแผนผ่อน)
   const dialogOpenRef = useRef(false);
   // เปิดฟอร์มแก้ไขจากลิงก์ `?edit=` (ไฟล์ที่เปิดไม่ได้บนแดชบอร์ด) — focus ช่องรหัสผ่าน PDF แทนช่องแรก
   const [focusPassword, setFocusPassword] = useState(false);
@@ -139,15 +145,24 @@ export default function Accounts() {
   useEffect(() => { void reload(); }, []);
   const retry = () => void reload();
 
-  const flushNotice = () => {
-    dialogOpenRef.current = false;
-    const pending = pendingNoticeRef.current;
-    pendingNoticeRef.current = null;
-    if (pending) setNotice(pending);
+  // มีผลรอ + อันเดิมค้างบนจอ = ปิดอันเดิมก่อน (ผลใหม่สำคัญกว่า เหมือนก่อนมีคิว) อันถัดไปขึ้นหลังปิดสนิท — สลับข้อความตอนเปิดค้าง
+  // ไม่ได้ (FeedbackSnackbar onExited)
+  const pumpNotice = () => {
+    if (dialogOpenRef.current || queueRef.current.length === 0) return;
+    if (showingRef.current) {
+      setNotice(null);
+      return;
+    }
+    showingRef.current = true;
+    setNotice(queueRef.current.shift()!);
   };
   const announce = (next: Notice) => {
-    if (dialogOpenRef.current) pendingNoticeRef.current = next;
-    else setNotice(next);
+    queueRef.current.push(next);
+    pumpNotice();
+  };
+  const flushNotice = () => {
+    dialogOpenRef.current = false;
+    pumpNotice();
   };
 
   const setFormField = createFormFieldChangeHandler(setForm);
@@ -192,22 +207,17 @@ export default function Accounts() {
       return params;
     }, { replace: true });
     const target = accounts.find((a) => String(a.id) === editParam);
-    if (target) openEdit(target, true);
-    else setNotice({ message: 'ไม่พบบัญชีที่ลิงก์ชี้มา อาจถูกเก็บเข้าคลังไปแล้ว', severity: 'info' });
+    if (target) {
+      // มาจากลิงก์ focus อยู่ที่ <body> Modal จึงไม่มีที่คืน focus ตอนปิด — ให้ปุ่มแก้ไขของแถวนั้นถือไว้ก่อนเปิด (Modal คืนให้ปุ่มนี้)
+      document.getElementById(accountEditId(target.id))?.focus({ preventScroll: true });
+      openEdit(target, true);
+    } else announce({ message: 'ไม่พบบัญชีที่ลิงก์ชี้มา อาจถูกเก็บเข้าคลังไปแล้ว', severity: 'info' });
   }, [editParam, accounts]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // `/accounts#mailboxes-heading` (ข้อมูลช้า → ดึงอีเมล) — router ไม่เลื่อนให้ตอน client navigation และส่วนนี้อยู่ใต้ตาราง
-  // ที่ยังเป็น skeleton จึงรอทั้งสองส่วนโหลดจบ (หรือพัง) ก่อนเลื่อน แล้ว focus หัวข้อให้ screen reader รู้ว่ามาถึงไหน
-  const location = useLocation();
+  // `/accounts#mailboxes-heading` (ข้อมูลช้า → ดึงอีเมล) — ส่วนนี้อยู่ใต้ตารางบัญชี จึงรอทั้งสองส่วนโหลดจบ (หรือพัง) ก่อนเลื่อน
   const mailboxesSectionRef = useRef<HTMLElement>(null);
-  const handledHashKeyRef = useRef<string | null>(null);
   const sectionsSettled = (accounts != null || loadErrors.accounts != null) && (mailboxes != null || loadErrors.mailboxes != null);
-  useEffect(() => {
-    if (location.hash !== '#mailboxes-heading' || !sectionsSettled || handledHashKeyRef.current === location.key) return;
-    handledHashKeyRef.current = location.key;
-    mailboxesSectionRef.current?.scrollIntoView({ block: 'start' });
-    document.getElementById('mailboxes-heading')?.focus({ preventScroll: true });
-  }, [location.hash, location.key, sectionsSettled]);
+  useHashTarget('#mailboxes-heading', sectionsSettled, mailboxesSectionRef, 'mailboxes-heading');
 
   const saveAccount = async () => {
     setFormError('');
@@ -223,12 +233,12 @@ export default function Accounts() {
       // resync = server เริ่มอ่าน statement ทั้งกล่องใหม่เบื้องหลัง (เพิ่มบัญชี / เปลี่ยนธนาคาร เลขบัญชี รหัสผ่าน PDF หรือกล่องอีเมล)
       const email = mailboxes?.find((m) => m.id === saved.email_account_id)?.email;
       const done = editingId ? 'บันทึกการแก้ไขแล้ว' : 'เพิ่มบัญชีธนาคารแล้ว';
-      pendingNoticeRef.current = {
+      announce({
         message: saved.resync
           ? `${done} ระบบกำลังอ่าน statement ของกล่อง ${email ?? 'อีเมลนี้'} ใหม่ทั้งหมด ผลจะเข้ามาในไม่กี่นาที`
           : done,
         severity: 'success',
-      };
+      });
       setModalOpen(false);
       void reload();
     } catch (e) {
@@ -246,7 +256,7 @@ export default function Accounts() {
       await del(`/api/accounts/${archiving.id}`);
       const archivedId = archiving.id;
       setAccounts((rows) => rows && rows.filter((a) => a.id !== archivedId));
-      pendingNoticeRef.current = { message: `เก็บบัญชี “${archiving.nickname}” เข้าคลังแล้ว`, severity: 'success' };
+      announce({ message: `เก็บบัญชี “${archiving.nickname}” เข้าคลังแล้ว`, severity: 'success' });
       focusAddAfterExitRef.current = true;
       setArchiveOpen(false);
     } catch (e) {
@@ -279,12 +289,13 @@ export default function Accounts() {
       announce(
         summary.already_running
           ? { message: `${mailbox.email}: ระบบกำลังดึงอีเมลของกล่องนี้อยู่แล้ว statement ที่พบจะเข้ามาเอง`, severity: 'info' }
-          // นับรวมไฟล์เดิมที่ยังเปิดไม่ได้ — สาเหตุและทางแก้ทีละไฟล์อยู่ที่แดชบอร์ด (มี action = snackbar ไม่หายเอง)
+          // นับรวมไฟล์เดิมที่ยังพังอยู่ (เปิดไม่ได้ และเปิดได้แต่ยอดไม่ตรง) — คำเดียวกับแถบ "ต้องจัดการ" ของแดชบอร์ด ปุ่มพาไปรายการที่บอก
+          // สาเหตุและทางแก้ทีละไฟล์ (มี action = snackbar ไม่หายเอง)
           : failed > 0
             ? {
-                message: `${mailbox.email}: ${read > 0 ? `${readText} · ` : ''}เปิดไม่ได้ ${failed.toLocaleString('th-TH')} ไฟล์ ดูสาเหตุที่แดชบอร์ด`,
+                message: `${mailbox.email}: ${read > 0 ? `${readText} · ` : ''}statement ที่มีปัญหา ${failed.toLocaleString('th-TH')} ไฟล์`,
                 severity: 'warning',
-                action: { label: 'ไปที่แดชบอร์ด', onClick: () => navigate('/dashboard') },
+                action: { label: 'ดูไฟล์ที่มีปัญหา', onClick: () => navigate('/dashboard#statement-failures') },
               }
             : read > 0
               ? { message: `${mailbox.email}: ${readText}`, severity: 'success' }
@@ -323,7 +334,7 @@ export default function Accounts() {
       };
       if (entityEditingId) await patch(`/api/tax-entities/${entityEditingId}`, payload);
       else await post('/api/tax-entities', payload);
-      pendingNoticeRef.current = { message: entityEditingId ? 'บันทึกการแก้ไขผู้เสียภาษีแล้ว' : 'เพิ่มผู้เสียภาษีแล้ว', severity: 'success' };
+      announce({ message: entityEditingId ? 'บันทึกการแก้ไขผู้เสียภาษีแล้ว' : 'เพิ่มผู้เสียภาษีแล้ว', severity: 'success' });
       setEntityModalOpen(false);
       void reload();
     } catch (e) {
@@ -338,7 +349,7 @@ export default function Accounts() {
       await patch(`/api/tax-entities/${entity.id}`, { is_active: !entity.is_active });
       setTaxEntities((rows) => rows && rows.map((e) => (e.id === entity.id ? { ...e, is_active: !entity.is_active } : e)));
     } catch (e) {
-      setNotice({ message: errorText(e, 'เปลี่ยนสถานะไม่สำเร็จ'), severity: 'error' });
+      announce({ message: errorText(e, 'เปลี่ยนสถานะไม่สำเร็จ'), severity: 'error' });
     }
   };
 
@@ -361,7 +372,8 @@ export default function Accounts() {
         id="accounts-heading"
         title="บัญชีของฉัน"
         description="จัดการบัญชีและกล่องอีเมลที่ระบบใช้รับข้อมูลจาก statement"
-        action={<Button ref={addButtonRef} variant="contained" startIcon={<AddRounded />} onClick={() => openForm(null, EMPTY)} sx={{ whiteSpace: 'nowrap' }}>เพิ่มบัญชี</Button>}
+        // ยังไม่มีกล่องอีเมล = ฟอร์มเลือกกล่องไม่ได้ ทางเดียวคือ "เชื่อม Gmail" ในกล่องว่างด้านล่าง (ไม่ใช่ CTA ซ้ำหลายจุด)
+        action={noMailbox ? undefined : <Button ref={addButtonRef} variant="contained" startIcon={<AddRounded />} onClick={() => openForm(null, EMPTY)} sx={{ whiteSpace: 'nowrap' }}>เพิ่มบัญชี</Button>}
       />
 
       <Loaded data={accounts} error={loadErrors.accounts} onRetry={retry}>
@@ -415,7 +427,7 @@ export default function Accounts() {
                     {showEmail && <TableCell sx={{ ...MD_UP, ...dataTextSx, overflowWrap: 'anywhere' }}>{account.email}</TableCell>}
                     <TableCell align="right" sx={{ py: 0.5 }}>
                       <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end', alignItems: 'center' }}>
-                        <RowIconButton label={`แก้ไข ${account.nickname}`} tooltip="แก้ไข" onClick={() => openEdit(account)}>
+                        <RowIconButton id={accountEditId(account.id)} label={`แก้ไข ${account.nickname}`} tooltip="แก้ไข" onClick={() => openEdit(account)}>
                           <EditRounded fontSize="small" />
                         </RowIconButton>
                         {/* ไม่มี endpoint เอากลับ ย้อนจากหน้าจอไม่ได้ — สีเดียวกับ "เลิกใช้" ของหน้าวางแผน */}
@@ -439,7 +451,8 @@ export default function Accounts() {
 
       <Modal
         open={modalOpen}
-        title={editingId ? 'แก้ไขบัญชีธนาคาร' : 'เพิ่มบัญชีธนาคาร'}
+        // ชื่อจากค่าตอนเปิด ไม่เปลี่ยนตามช่องชื่อเล่นที่กำลังพิมพ์
+        title={editingId ? `แก้ไขบัญชี “${formInitial.nickname}”` : 'เพิ่มบัญชีธนาคาร'}
         onClose={() => setModalOpen(false)}
         busy={submitting}
         dirty={JSON.stringify(form) !== JSON.stringify(formInitial)}
@@ -455,9 +468,16 @@ export default function Accounts() {
           }}
         >
           <Stack spacing={2.5}>
+            {formError && <Alert ref={revealOnMount} severity="error">{formError}</Alert>}
             {!editingId && (
               <Typography color="text.secondary" sx={descriptionSx}>
                 ก่อนเพิ่มบัญชี ให้ขอ statement ย้อนหลังจากธนาคารส่งเข้ากล่องอีเมลของคุณ ระบบจะใช้เป็นข้อมูลตั้งต้น
+              </Typography>
+            )}
+            {/* มาจาก "ตั้งรหัสผ่าน PDF ใหม่" บนแดชบอร์ด — PATCH ที่มีรหัสใหม่สั่งอ่านทั้งกล่องใหม่ ไฟล์ที่ค้าง parse_failed ถูกเปิดอีกรอบ */}
+            {focusPassword && (
+              <Typography color="text.secondary" sx={descriptionSx}>
+                มี statement ที่เปิดด้วยรหัสผ่าน PDF ของบัญชีนี้ไม่ได้ ใส่รหัสใหม่แล้วระบบจะลองเปิดไฟล์เดิมอีกครั้ง
               </Typography>
             )}
             {formLoadError && <LoadError message={formLoadError} onRetry={retry} />}
@@ -484,17 +504,20 @@ export default function Accounts() {
                     <MenuItem key={mailbox.id} value={String(mailbox.id)} sx={dataTextSx}>{mailbox.email}</MenuItem>
                   ))}
                 </TextField>
+                {/* เลขบัญชีคือสิ่งที่ระบบใช้จับคู่ statement กับบัญชี — เปลี่ยนแล้วอ่านใหม่ทั้งกล่องเหมือนช่องอื่นในชุดนี้ */}
+                <TextField label="เลขที่บัญชี" helperText="กรอกตามที่แสดงใน statement" value={form.account_number} onChange={setFormField('account_number')} required slotProps={{ htmlInput: { maxLength: 40 } }} />
                 {/* รหัสเปิดไฟล์คือข้อมูลการเชื่อมต่อ — ไฟล์ที่เปิดไม่ได้บนแดชบอร์ดลิงก์มาที่ช่องนี้ (`?edit=` → autoFocus) */}
                 <TextField
                   type={showPassword ? 'text' : 'password'}
                   label="รหัสผ่านเปิดไฟล์ statement"
                   // PATCH ที่ช่องนี้ว่าง server คงรหัสเดิมไว้ (src/routes/accounts.ts) · คำใบ้ตามคู่มือ (guides.ts)
-                  helperText={editingId
+                  // มาจากลิงก์ซ่อม = มาเพื่อใส่รหัสใหม่ จึงบังคับกรอกและไม่บอกว่าเว้นว่างได้
+                  helperText={editingId && !focusPassword
                     ? 'เว้นว่างไว้ = ใช้รหัสเดิม · ธนาคารตั้งให้ มักเป็นเลขบัตรประชาชนหรือวันเกิด · ระบบเก็บแบบเข้ารหัสและไม่แสดงกลับอีก'
                     : 'รหัสเปิดไฟล์ PDF ที่ธนาคารตั้งให้ มักเป็นเลขบัตรประชาชนหรือวันเกิด · ระบบเก็บแบบเข้ารหัสและไม่แสดงกลับอีก'}
                   value={form.pdf_password}
                   onChange={setFormField('pdf_password')}
-                  required={!editingId}
+                  required={!editingId || focusPassword}
                   autoFocus={focusPassword}
                   autoComplete="new-password"
                   slotProps={{
@@ -516,7 +539,6 @@ export default function Accounts() {
               <FormLabel component="legend" sx={{ mb: 1.5, color: 'text.primary', fontWeight: 600 }}>รายละเอียดบัญชี</FormLabel>
               <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 16rem), 1fr))' }}>
                 <TextField label="ชื่อเล่น" helperText="ชื่อที่ช่วยให้จำบัญชีนี้ได้ง่าย" value={form.nickname} onChange={setFormField('nickname')} required slotProps={{ htmlInput: { maxLength: 60 } }} />
-                <TextField label="เลขที่บัญชี" helperText="กรอกตามที่แสดงใน statement" value={form.account_number} onChange={setFormField('account_number')} required slotProps={{ htmlInput: { maxLength: 40 } }} />
                 <TextField label="พร้อมเพย์ (ไม่บังคับ)" helperText="ใช้ช่วยจับคู่รายการโอนภายในครอบครัว" value={form.promptpay_id} onChange={setFormField('promptpay_id')} slotProps={{ htmlInput: { maxLength: 40 } }} />
                 {TAX_PAGES_ENABLED && (
                   <TextField
@@ -534,7 +556,6 @@ export default function Accounts() {
                 )}
               </Box>
             </Box>
-            {formError && <Alert severity="error">{formError}</Alert>}
           </Stack>
         </Box>
       </Modal>
@@ -576,7 +597,9 @@ export default function Accounts() {
           tabIndex={-1}
           title="กล่องอีเมล"
           description='กล่อง Gmail ที่ระบบค้นเฉพาะอีเมล statement จากธนาคาร ระบบดึงให้เองทุกชั่วโมง หรือกด "ดึงอีเมลใหม่" เพื่อดึงทันที'
-          action={<Button variant="outlined" startIcon={<AddRounded />} href="/auth/google?add=1" sx={{ whiteSpace: 'nowrap' }}>ต่อกล่องอีเมลอื่นเพิ่ม</Button>}
+          // จอแคบ PageHeader ยืด action เต็มกว้าง — ปุ่มรองนี้ไม่ยืด จะได้ไม่เด่นกว่า "ดึงอีเมลใหม่" ของแต่ละกล่อง
+          // ยังไม่มีกล่อง = ซ่อน (ทางเดียวคือ "เชื่อม Gmail" ในกล่องว่างของตารางบัญชี)
+          action={noMailbox ? undefined : <Button variant="outlined" startIcon={<AddRounded />} href="/auth/google?add=1" sx={{ whiteSpace: 'nowrap', alignSelf: 'flex-start' }}>ต่อกล่องอีเมลอื่นเพิ่ม</Button>}
         />
         <Loaded data={mailboxes} error={loadErrors.mailboxes} onRetry={retry} rows={2}>
           {(rows) => rows.length === 0 ? (
@@ -584,7 +607,6 @@ export default function Accounts() {
               icon={<MailOutlineRounded sx={{ fontSize: 40 }} />}
               title="ยังไม่ได้เชื่อม Gmail"
               description="เชื่อมกล่อง Gmail ที่รับ statement จากธนาคาร ระบบจึงจะนำเข้ารายการให้อัตโนมัติ"
-              action={<Button variant="outlined" href="/auth/google?add=1">เชื่อม Gmail</Button>}
             />
           ) : (
             // แถวแบบ DataFreshness แทนตาราง — มีไม่กี่กล่อง ไม่ต้องเลื่อนแนวนอนที่ 320px
@@ -738,6 +760,7 @@ export default function Accounts() {
           }}
         >
           <Stack spacing={2.5}>
+            {entityError && <Alert ref={revealOnMount} severity="error">{entityError}</Alert>}
             <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 16rem), 1fr))' }}>
               <TextField select label="ประเภท" value={entityForm.entity_type} onChange={setEntityFormField('entity_type')} required autoFocus>
                 {(Object.entries(TAX_ENTITY_TYPE_LABEL) as [TaxEntityType, string][]).map(([value, label]) => (
@@ -760,12 +783,18 @@ export default function Accounts() {
               control={<Switch checked={entityForm.vat_registered} onChange={(e) => setEntityForm((f) => ({ ...f, vat_registered: e.target.checked }))} />}
               label="จดทะเบียนภาษีมูลค่าเพิ่ม"
             />
-            {entityError && <Alert severity="error">{entityError}</Alert>}
           </Stack>
         </Box>
       </Modal>
 
-      <FeedbackSnackbar notice={notice} onClose={() => setNotice(null)} />
+      <FeedbackSnackbar
+        notice={notice}
+        onClose={() => setNotice(null)}
+        onExited={() => {
+          showingRef.current = false;
+          pumpNotice();
+        }}
+      />
     </Box>
   );
 }

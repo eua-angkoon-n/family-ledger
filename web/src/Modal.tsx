@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from 'react';
+import { useId, useRef, useState, type ReactNode } from 'react';
 import { Button, Dialog, DialogActions, DialogContent, DialogTitle, IconButton, Stack, Typography } from '@mui/material';
 import CloseRounded from '@mui/icons-material/CloseRounded';
 import { ConfirmDialog } from './ui.js';
@@ -23,6 +23,9 @@ type Props = {
 
 export default function Modal({ open, title, onClose, children, busy = false, dirty = false, footer, onExited }: Props) {
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  // ทิ้งแล้วปิด modal หลังกล่องถามปิดสนิท — ปิดพร้อมกันสองชั้น กล่องถามคืน focus ให้ปุ่มใน modal ที่กำลังหายไป แล้วตกไป <body>
+  // ปิดทีละชั้น: กล่องถามคืน focus ให้ปุ่มใน modal ก่อน แล้ว modal ค่อยคืนให้ปุ่มที่เปิดมันตามปกติ
+  const discardRef = useRef(false);
   // ชื่อ dialog = h2 อย่างเดียว ไม่รวมปุ่ม "ปิด" — DialogTitle รับ id ของ aria-labelledby จาก Dialog เป็นค่าเริ่มต้น จึงตั้ง id ของมันแยก
   const titleId = useId();
   const requestClose = () => {
@@ -60,7 +63,12 @@ export default function Modal({ open, title, onClose, children, busy = false, di
         cancelLabel="แก้ต่อ"
         onClose={() => setConfirmDiscard(false)}
         onConfirm={() => {
+          discardRef.current = true;
           setConfirmDiscard(false);
+        }}
+        onExited={() => {
+          if (!discardRef.current) return;
+          discardRef.current = false;
           onClose();
         }}
       />

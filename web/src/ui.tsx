@@ -1,4 +1,5 @@
-import { useEffect, useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   Alert,
   Box,
@@ -270,13 +271,17 @@ export function ConfirmDialog({
 export type Notice = { message: string; severity: 'success' | 'error' | 'info' | 'warning'; action?: { label: string; onClick: () => void } };
 
 // placement="top" ใช้ตอนมีแถบลอยด้านล่างจอ (แถบรายการที่เลือกในหน้าวางแผน) ไม่งั้น snackbar ทับปุ่มของแถบ
+// onExited = ปิดสนิทแล้ว — หน้าที่มีคิวผล (บัญชีของฉัน) แสดงอันถัดไปจากตรงนี้ ไม่ใช่สลับ notice ตอนเปิดค้าง
+// (Snackbar ตั้งเวลาปิดใหม่เฉพาะตอน open/autoHideDuration เปลี่ยน อันที่สองจะไม่หายเอง)
 export function FeedbackSnackbar({
   notice,
   onClose,
+  onExited,
   placement = 'bottom',
 }: {
   notice: Notice | null;
   onClose: () => void;
+  onExited?: () => void;
   placement?: 'top' | 'bottom';
 }) {
   // ข้อความล่าสุดค้างไว้ระหว่าง transition ตอนปิด — notice เป็น null ทันทีที่กดปิด แถบจึงเคยว่างก่อนหายไป
@@ -294,6 +299,7 @@ export function FeedbackSnackbar({
         onClose();
       }}
       anchorOrigin={{ vertical: placement, horizontal: 'center' }}
+      slotProps={{ transition: { onExited } }}
     >
       {shown ? (
         <Alert
@@ -304,7 +310,8 @@ export function FeedbackSnackbar({
           action={
             shown.action && (
               <>
-                <Button color="inherit" onClick={notice?.action?.onClick}>{shown.action.label}</Button>
+                {/* ข้อความยาวบีบปุ่มจนป้ายตัดกลางคำ ("ไปที่แด/ชบอร์ด") — ป้ายไม่ตัดบรรทัด ข้อความไปตัดแทน */}
+                <Button color="inherit" onClick={notice?.action?.onClick} sx={{ whiteSpace: 'nowrap', flexShrink: 0 }}>{shown.action.label}</Button>
                 <IconButton color="inherit" aria-label="ปิด" onClick={onClose}><CloseRounded fontSize="small" /></IconButton>
               </>
             )
@@ -315,6 +322,23 @@ export function FeedbackSnackbar({
       ) : undefined}
     </Snackbar>
   );
+}
+
+/**
+ * The Deep Link Rule: ลิงก์ `<หน้า>#<hash>` จากหน้าอื่น — router ไม่เลื่อนให้ตอน client navigation และส่วนปลายทาง (หรือส่วนที่อยู่
+ * เหนือมัน) ยังเป็น skeleton จึงรอ `ready` (โหลดจบหรือพัง) ก่อน แล้วเลื่อน `scrollRef` (ตั้ง `scrollMarginTop: 80` กัน AppBar บัง)
+ * และ focus หัวข้อ `focusId` (tabIndex -1) ให้ screen reader รู้ว่ามาถึงไหน — ครั้งเดียวต่อ navigation (location.key)
+ * ปลายทางไม่อยู่ในหน้า (เช่น ไม่มีไฟล์ที่มีปัญหาแล้ว) = อยู่ที่หัวหน้าตามปกติ
+ */
+export function useHashTarget(hash: string, ready: boolean, scrollRef: RefObject<HTMLElement | null>, focusId: string) {
+  const location = useLocation();
+  const handledKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (location.hash !== hash || !ready || handledKeyRef.current === location.key) return;
+    handledKeyRef.current = location.key;
+    scrollRef.current?.scrollIntoView({ block: 'start' });
+    document.getElementById(focusId)?.focus({ preventScroll: true });
+  }, [location.hash, location.key, ready, hash, scrollRef, focusId]);
 }
 
 /** เปิด/พับของ Disclosure จำต่อเครื่อง — localStorage โดนบล็อกได้ (โหมดส่วนตัว) อ่านไม่ได้ = พับ เขียนไม่ได้ = จำแค่รอบนี้ */
