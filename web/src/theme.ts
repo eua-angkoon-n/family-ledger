@@ -1,4 +1,4 @@
-import { alpha, createTheme, type Shadows } from '@mui/material/styles';
+import { alpha, createTheme, type Shadows, type Theme } from '@mui/material/styles';
 
 // ธีมทั้งชุด (สี ฟอนต์ รัศมีมุม เงา) มาจาก tweakcn "Bubblegum" (https://tweakcn.com/r/themes/bubblegum.json)
 // ค่า oklch ในไฟล์ต้นทางแปลงเป็น hex (sRGB, gamut-mapped) เพราะ MUI palette อ่าน oklch() ไม่ได้
@@ -199,6 +199,14 @@ export const descriptionSx = {
   letterSpacing: 0,
   textWrap: 'pretty',
 } as const;
+
+// พื้น hover ของแถวตาราง — ไม่ใช้ action.hover (= accent): ตัวอักษรในแถวไม่เปลี่ยนสีตาม จึงเหลือ 4.38–4.45 (สว่าง) และ
+// 1.04–2.54 (มืด, รายจ่าย 1.04) — ใช้ popover (สว่าง #fff) / muted (มืด #24272b) ที่ทุกคู่ตัวอักษร/เงินผ่าน 4.5 (DESIGN.md Tables)
+// ใช้ใน MuiTableRow และคู่แถวที่กางของหน้าประวัติ (hover แถวไหนก็ได้ทั้งคู่)
+export const rowHoverBg = (theme: Theme) => ({
+  backgroundColor: theme.vars.palette.brand.popover,
+  ...theme.applyStyles('dark', { backgroundColor: theme.vars.palette.brand.muted }),
+});
 
 // เงาแบบ hard offset ของ Bubblegum ต้องเปลี่ยนตามธีม แต่ MUI เก็บ shadows ไว้ระดับ root ไม่แยกตาม color scheme
 // จึงให้ shadows ชี้ไปที่ CSS var ของ palette.brand (นิยามแยกตามธีมบน <html> เดียวกัน) — elevation 1–3 = sm,
@@ -454,14 +462,9 @@ const theme = createTheme({
     MuiTableRow: {
       styleOverrides: {
         root: ({ theme }) => ({
-          // hover ไม่ใช้ action.hover (= accent): ตัวอักษรในแถวไม่เปลี่ยนสีตาม จึงเหลือ 4.38–4.45 (สว่าง) และ 1.04–2.54 (มืด,
-          // รายจ่าย 1.04) — ใช้ popover (สว่าง #fff) / muted (มืด #24272b) ที่ทุกคู่ตัวอักษร/เงินผ่าน 4.5 (ดู DESIGN.md Tables)
-          // :not(.Mui-selected) — กฎของธีมมืด (มี attribute selector นำหน้า) เจาะจงกว่ากฎ selected ด้านล่าง ไม่งั้นแถวที่เลือก
+          // hover = rowHoverBg · :not(.Mui-selected) — กฎของธีมมืด (มี attribute selector นำหน้า) เจาะจงกว่ากฎ selected ด้านล่าง ไม่งั้นแถวที่เลือก
           // ตอน hover ได้พื้น muted กับตัวอักษร sidebar-accent-foreground (1.02:1)
-          '&.MuiTableRow-hover:hover:not(.Mui-selected)': {
-            backgroundColor: theme.vars.palette.brand.popover,
-            ...theme.applyStyles('dark', { backgroundColor: theme.vars.palette.brand.muted }),
-          },
+          '&.MuiTableRow-hover:hover:not(.Mui-selected)': rowHoverBg(theme),
           '&.Mui-selected, &.Mui-selected:hover': {
             backgroundColor: theme.vars.palette.brand.sidebarAccent,
             '& > .MuiTableCell-root': { color: theme.vars.palette.brand.sidebarAccentForeground },

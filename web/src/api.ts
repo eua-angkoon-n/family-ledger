@@ -26,6 +26,9 @@ export type User = {
   status: 'pending' | 'approved' | 'rejected';
 };
 
+// GET /api/me — pending_user_count มีเฉพาะเมื่อผู้เรียกเป็นแอดมิน (จำนวนผู้ใช้ status = 'pending')
+export type MeResponse = { user: User | null; version: string; pending_user_count?: number };
+
 export type Bank = {
   id: number;
   name: string;
@@ -37,6 +40,13 @@ export type Bank = {
   parser_key: string;
   is_active: boolean;
 };
+
+// GET /api/admin/banks (แอดมิน) — account_count = bank_account ทุกแถวที่ผูกธนาคารนี้ (รวมที่เก็บเข้าคลัง — FK กันลบ)
+export type AdminBank = Bank & { account_count: number };
+// PATCH /api/banks/:id — เปลี่ยนผู้ส่ง/โดเมน/หัวข้อ/ชื่อไฟล์/parser หรือเปิดใช้งานกลับ = server สั่งอ่านเมลใหม่ทั้งกล่อง
+// ของทุกกล่องที่มีบัญชี (ไม่เก็บเข้าคลัง) ของธนาคารนี้ อยู่เบื้องหลัง · resync_mailboxes = จำนวนกล่องที่สั่ง (0 = ไม่ได้สั่ง)
+export type BankUpdateResponse = Bank & { resync_mailboxes: number };
+// DELETE /api/banks/:id ที่ยังมีบัญชีผูก → 409 "ธนาคารนี้มีบัญชีผูกอยู่ N บัญชี ลบไม่ได้ — ปิดใช้งานแทน"
 
 // reauth_required_at มีค่า = Google ปฏิเสธ refresh token (invalid_grant) ต้องเชื่อม Gmail ใหม่ผ่าน /auth/google?reconnect=<id>
 export type EmailAccount = { id: number; email: string; last_synced_at: string | null; reauth_required_at: string | null };

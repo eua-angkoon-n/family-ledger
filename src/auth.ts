@@ -57,12 +57,14 @@ export function requireAdmin(handler: (req: Request, res: Response, user: User) 
 }
 
 /** ต่อ Google ที่ปลายทาง revoke จริง ๆ ไม่ใช่แค่ลบแถวในตารางเรา */
-export async function revokeAtGoogle(refreshToken: string): Promise<void> {
-  await fetch('https://oauth2.googleapis.com/revoke', {
+export async function revokeAtGoogle(refreshToken: string, doFetch: typeof fetch = fetch): Promise<void> {
+  const res = await doFetch('https://oauth2.googleapis.com/revoke', {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ token: refreshToken }),
   });
+  // Google ตอบ 400 เมื่อ token หมดอายุ/ถูกยกเลิกไปแล้ว — ผลเท่ากับยกเลิกสำเร็จ จึงไม่ throw แต่ลง log ให้ตามได้
+  if (!res.ok) console.warn(`[auth] Google revoke ตอบ ${res.status}`);
 }
 
 /**
@@ -209,6 +211,11 @@ authRouter.get('/google/callback', async (req, res, next) => {
       return void res.status(502).send('อ่านข้อมูลผู้ใช้จาก Google ไม่สำเร็จ');
     }
     const info = (await infoRes.json()) as { sub: string; email: string; name?: string };
+    // ผู้ใช้ที่ถูกปฏิเสธล็อกอินซ้ำได้ token สด (แอดมิน revoke ไปแล้วแค่ชุดเก่า) — ห้ามเก็บ และถอนที่ Google ทิ้ง
+    // ponytail: revoke ทั้งไคลเอนต์+บัญชี Google — ถ้ากล่องเดียวกันผูกกับผู้ใช้อื่นที่ approved อยู่ อีกคนต้องเชื่อมใหม่ (คลาสเดียวกับตอนแอดมินปฏิเสธ)
+    const discardToken = () =>
+      revokeAtGoogle(token.refresh_token ?? token.access_token, fetch)
+        .catch((e: unknown) => console.error('revoke token ของผู้ใช้ที่ถูกปฏิเสธไม่สำเร็จ', e));
 
     // ต่อกล่องเพิ่ม/เชื่อมใหม่: ผูกเข้ากับผู้ใช้ใน session ไม่ใช่หา app_user จาก google_sub และไม่เปลี่ยนผู้ใช้ใน session
     // (ยืนยันความเป็นเจ้าของกล่องด้วยการผ่าน OAuth ของกล่องนั้นแล้ว)
@@ -216,6 +223,12 @@ authRouter.get('/google/callback', async (req, res, next) => {
     // Google revoke ทีเดียวทั้งไคลเอนต์+ผู้ใช้ → reject คนหนึ่งจะตัดสิทธิ์อีกคนที่แชร์กล่องนั้นไปด้วย
     // รับได้ในสเกลครอบครัว ถ้าเจอปัญหาจริงค่อยแยกเป็น many-to-many
     if (mailboxUserId != null) {
+      // แอดมินปฏิเสธไม่ได้ทำลาย session — คนที่ถูกปฏิเสธยังยิง ?add=1 ได้
+      const owner = await query<{ status: string }>('select status from app_user where id = $1', [mailboxUserId]);
+      if (owner.rows[0]?.status === 'rejected') {
+        await discardToken();
+        return void res.redirect('/');
+      }
       let mailboxEmail = info.email;
       if (reconnectMailboxId != null) {
         const mailbox = await query<{ email: string }>(
@@ -246,8 +259,10 @@ authRouter.get('/google/callback', async (req, res, next) => {
       return void res.redirect('/accounts?gmail=connected');
     }
 
-    const existing = await query<{ id: number }>('select id from app_user where google_sub = $1', [info.sub]);
+    const existing = await query<{ id: number; status: User['status'] }>('select id, status from app_user where google_sub = $1', [info.sub]);
     let userId = existing.rows[0]?.id;
+    // pending ยังเก็บ token ตามเดิม (ต้องใช้หลังอนุมัติ — worker ไม่ดึงจนกว่าจะ approved)
+    const rejected = existing.rows[0]?.status === 'rejected';
 
     // ผู้ใช้ใหม่สร้างทันทีที่นี่ ไม่มีขั้นกรอกรหัสเชิญคั่น — ด่านจริงคือ requireUser ที่ปล่อยเฉพาะ
     // approved: ADMIN_EMAIL ได้ approved อัตโนมัติ คนอื่นเป็น pending จนแอดมินกดอนุมัติ
@@ -263,10 +278,11 @@ authRouter.get('/google/callback', async (req, res, next) => {
     }
 
     // ล็อกอินโดยไม่ติ๊กอ่านอีเมลยังเข้าระบบได้ แต่ห้ามบันทึก/เขียนทับ refresh token ด้วย token ที่อ่านเมลไม่ได้
-    const gmailConnected = hasGmail && token.refresh_token != null;
+    const gmailConnected = !rejected && hasGmail && token.refresh_token != null;
     if (gmailConnected) {
       await saveEmailAccount(userId, info.email, encrypt(token.refresh_token!));
     }
+    if (rejected) await discardToken();
 
     // เก็บแค่อีเมล/ชื่อ — ห้ามใส่ token หรือ refresh_token_enc ลง audit_log เด็ดขาด
     // (คลาสเดียวกับบั๊ก pdf_password_enc รั่วเข้า before_data ที่เจอใน Slice 8)

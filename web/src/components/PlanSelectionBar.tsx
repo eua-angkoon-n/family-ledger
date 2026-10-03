@@ -27,8 +27,8 @@ type Props = {
   onClear: () => void;
 };
 
-// ยกแถบให้พ้น VersionBadge มุมล่างขวา (bottom 6/10 สูง ~21px) — จอ < ~1300px แถบกว้างจนถึงมุมนั้น
-// ถ้าวางต่ำกว่านี้จะบังเลขเวอร์ชัน (Floating Selection Bar Rule ของ DESIGN.md)
+// ยกแถบให้พ้น VersionBadge — ≥ sm ลอยมุมล่างขวา (bottom 10 สูง ~21px) จอ < ~1300px แถบกว้างจนถึงมุมนั้น
+// < sm ป้ายอยู่ท้ายเนื้อหา (สูงจากขอบล่าง ~27px ตอนเลื่อนสุด) แถบจึงต้องอยู่สูงกว่านั้นเหมือนกัน (Floating Selection Bar Rule)
 const BAR_BOTTOM = { xs: 32, sm: 36 };
 const GAP_ABOVE_BAR = 16;
 
