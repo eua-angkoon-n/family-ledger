@@ -320,6 +320,11 @@ test('tax calculation: summary, snapshot, deduction claims, export, audit', asyn
     assert.match(res.headers.get('content-type') ?? '', /text\/csv/);
     const text = await res.text();
     assert.match(text, /ประมาณการภาษี/);
+    // ผู้ใช้เปิดอ่านเอง: ปี พ.ศ. และชื่อผู้เสียภาษี ไม่ใช่ปี ค.ศ./id ดิบ
+    assert.match(text, /ปีภาษี \(พ\.ศ\.\),2569/);
+    assert.match(text, /ผู้เสียภาษี,บุคคลธรรมดา 8/);
+    assert.doesNotMatch(text, /Tax Entity/);
+    assert.match(res.headers.get('content-disposition') ?? '', /tax-estimate-2569-/);
 
     const auditRow = await db.pool.query(
       `select 1 from audit_log where user_id = $1 and action = 'tax.export' and entity_id = $2`,
@@ -379,7 +384,7 @@ test('tax calculation: summary, snapshot, deduction claims, export, audit', asyn
   // กดปุ่ม "บันทึกเป็นรายได้เต็ม" ซ้ำบนธุรกรรมเดิม ต้องไม่ได้รายได้สองก้อนจากเงินเข้าก้อนเดียว
   // รายได้ไม่ผูกกับธุรกรรมแล้ว การกดบันทึกซ้ำจากเงินเข้าก้อนเดิมจึงนับซ้ำจริง — ตั้งใจให้เป็นแบบนั้น
   // (ยอดตามแผนกับยอดใน statement ไม่ตรงกันเป็นเรื่องปกติ การบังคับให้ผูกกันทำให้บันทึกไม่ได้เลย)
-  // ตัวกันคือผู้ใช้เห็นรายการซ้ำเองในตารางรายได้และ drill-down รายตัวในหน้าภาษี
+  // ตัวกันคือผู้ใช้เห็นรายการซ้ำเองในตารางรายได้และ drill-down รายตัวในหน้าภาษี + หน้าภาษีไม่เสนอเงินเข้าที่บันทึกแล้ว (เทสต์ถัดไป)
   await t.test('บันทึกเงินเข้าก้อนเดิมสองครั้งได้ และเงินได้ทั้งปีนับสองก้อนตามที่บันทึก', async () => {
     await insertTxn(3000000, 'credit', '2026-11-28');
     const body = {
@@ -447,7 +452,7 @@ test('tax calculation: summary, snapshot, deduction claims, export, audit', asyn
     for (const id of erratic) assert.ok(!ids.includes(id), 'เงินเข้าหลายเดือนแต่ยอดสะเปะสะปะต้องไม่ถูกเสนอ');
     for (const id of payroll) assert.ok(ids.includes(id), 'เงินเดือนที่เข้าทุกเดือนยอดใกล้เคียงกันต้องถูกเสนอ');
 
-    // จับคู่ income_record กับเงินเดือนงวดหนึ่งแล้ว → งวดนั้นต้องหายจากรายการที่เสนอ
+    // บันทึกเงินเดือนงวด ม.ค. เป็นรายได้แล้ว (วันเดียวกัน ยอดเท่ากัน) → งวดนั้นต้องหายจากรายการที่เสนอ
     const employmentBefore = res.inputs.employmentIncomeSatang as number;
     const plan = (
       await db.pool.query<{ id: number }>(`insert into monthly_plan (user_id, month_start) values ($1, '2026-01-01') returning id`, [userA])
@@ -463,12 +468,38 @@ test('tax calculation: summary, snapshot, deduction claims, export, audit', asyn
        values ($1, $2, $3, 'เงินเดือน ม.ค.', 4000000, 4000000, $4, '2026-01-31')`,
       [userA, plan, item, bankAccountId],
     );
-    // ไม่มีสายผูก txn → income_record แล้ว ข้อเสนอแนะจึงยังโชว์เงินเข้าที่บันทึกไปแล้วอยู่
-    // (ผู้ใช้ข้ามเองได้ — ยอมแลกกับการที่แผนไม่ต้องผูกยอดให้ตรงกับ statement)
+    // งวด ก.พ. (4,001,000 เข้า 28 ก.พ.) บันทึกวันที่ 1 มี.ค. — ห่าง 1 วัน และกรอก gross จริง + รายการหัก
+    // ยอดเข้าบัญชีจึงไปตรงกับ expected_net ไม่ใช่ gross ก็ต้องนับว่าบันทึกแล้ว
+    const febItem = (
+      await db.pool.query<{ id: number }>(
+        `insert into monthly_plan_item (monthly_plan_id, kind, name, planned_amount_satang) values ($1, 'income', 'เงินเดือน ก.พ.', 4500000) returning id`,
+        [planId],
+      )
+    ).rows[0]!.id;
+    await db.pool.query(
+      `insert into income_record (user_id, monthly_plan_id, monthly_plan_item_id, name, gross_amount_satang, expected_net_satang, bank_account_id, income_date)
+       values ($1, $2, $3, 'เงินเดือน ก.พ.', 4500000, 4001000, $4, '2026-03-01')`,
+      [userA, planId, febItem, bankAccountId],
+    );
+    // งวด มี.ค. (4,002,000) บันทึกวันเดียวกันแต่ยอดต่าง — ไม่ใช่ก้อนเดียวกัน ต้องยังถูกเสนอ
+    const marItem = (
+      await db.pool.query<{ id: number }>(
+        `insert into monthly_plan_item (monthly_plan_id, kind, name, planned_amount_satang) values ($1, 'income', 'โบนัส มี.ค.', 4002100) returning id`,
+        [planId],
+      )
+    ).rows[0]!.id;
+    await db.pool.query(
+      `insert into income_record (user_id, monthly_plan_id, monthly_plan_item_id, name, gross_amount_satang, expected_net_satang, bank_account_id, income_date)
+       values ($1, $2, $3, 'โบนัส มี.ค.', 4002100, 4002100, $4, '2026-03-31')`,
+      [userA, planId, marItem, bankAccountId],
+    );
+    // ไม่มีสายผูก txn → income_record (ADR-0004) จึงเทียบแบบหลวม: วันห่างไม่เกิน 1 วัน + ยอดเท่ากับ gross หรือ expected_net
     const done = (await (await app.request(`/api/tax/2026/summary?tax_entity_id=${entityA}`)).json()) as any;
     const doneIds = done.unrecorded_income_txns.map((r: { id: number }) => r.id);
-    assert.ok(doneIds.includes(payroll[0]), 'เงินเดือนที่เข้าสม่ำเสมอต้องยังถูกเสนอ');
-    assert.equal(done.inputs.employmentIncomeSatang - employmentBefore, 4000000, 'ยอดต้องเข้าเงินได้จากงานประจำ');
+    assert.ok(!doneIds.includes(payroll[0]), 'เงินเข้าที่บันทึกเป็นรายได้แล้ว (วันเดียวกัน ยอดเท่ากัน) ต้องไม่ถูกเสนอซ้ำ');
+    assert.ok(!doneIds.includes(payroll[1]), 'บันทึกห่าง 1 วันและยอดเข้าตรงกับ expected_net ต้องไม่ถูกเสนอซ้ำ');
+    assert.ok(doneIds.includes(payroll[2]), 'ยอดต่างจากรายได้ที่บันทึกไว้ ต้องยังถูกเสนอ');
+    assert.equal(done.inputs.employmentIncomeSatang - employmentBefore, 4000000 + 4500000 + 4002100, 'ยอดต้องเข้าเงินได้จากงานประจำ');
 
     for (const id of [oneOff, ...erratic]) {
       await db.pool.query('delete from txn where id = $1', [id]);

@@ -11,9 +11,8 @@ import UnfoldMoreRounded from '@mui/icons-material/UnfoldMoreRounded';
 import { TAX_PAGES_ENABLED } from '../features.js';
 import { GUIDES, helpSections, highlightSegments, type HelpSection as Section } from '../guide/guides.js';
 import { descriptionSx } from '../theme.js';
-import { EmptyState, PageHeader, useHashTarget } from '../ui.js';
+import { EmptyState, PageHeader, useHashTarget, usePrintLightScheme } from '../ui.js';
 
-const SCHEME_ATTR = 'data-mui-color-scheme';
 const bodySx = { mt: 0.5, maxWidth: '75ch', color: 'text.secondary', ...descriptionSx } as const;
 
 // พื้น/ตัวอักษรคู่เดียวกับรายการที่เลือก (sidebar-accent) — ผ่าน AA ทั้งสองโหมด (6.97 / 8.09) และเห็นชัดบนพื้น card
@@ -128,25 +127,7 @@ export default function Help({ isAdmin }: { isAdmin: boolean }) {
     if (GUIDES[hashPath]) setOpen((prev) => new Set(prev).add(hashPath));
   }, [location.key]);
 
-  useEffect(() => {
-    const root = document.documentElement;
-    let scheme: string | null = null;
-    const before = () => {
-      scheme = root.getAttribute(SCHEME_ATTR);
-      root.setAttribute(SCHEME_ATTR, 'light');
-    };
-    const after = () => {
-      if (scheme) root.setAttribute(SCHEME_ATTR, scheme);
-      scheme = null;
-    };
-    window.addEventListener('beforeprint', before);
-    window.addEventListener('afterprint', after);
-    return () => {
-      window.removeEventListener('beforeprint', before);
-      window.removeEventListener('afterprint', after);
-      after();
-    };
-  }, []);
+  usePrintLightScheme();
 
   // พิมพ์คำค้น = กางทุกส่วนที่ค้นเจอ (กดพับทีละส่วนได้ตามปกติ) ล้างคำค้นแล้วส่วนที่กางไว้คงอยู่
   const search = (value: string) => {

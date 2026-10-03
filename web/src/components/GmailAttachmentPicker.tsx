@@ -1,11 +1,13 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { Alert, Button, List, ListItemButton, ListItemIcon, ListItemText, MenuItem, Stack, TextField, Typography } from '@mui/material';
 import AttachFileRounded from '@mui/icons-material/AttachFileRounded';
 import SearchRounded from '@mui/icons-material/SearchRounded';
 import { post, req, type EmailAccount, type GmailAttachmentCandidate, type TaxEntity } from '../api.js';
 import Modal from '../Modal.js';
 import { EmptyState, LoadError, type Notice } from '../ui.js';
-import { EMPTY_TAX_DOC_META_FORM, TaxDocumentMetadataFields, taxDocumentMetaPayload } from './TaxDocumentMetadataFields.js';
+import {
+  EMPTY_TAX_DOC_META_FORM, firstMetaErrorId, TaxDocumentMetadataFields, taxDocumentMetaErrors, taxDocumentMetaPayload,
+} from './TaxDocumentMetadataFields.js';
 
 type Props = {
   open: boolean;
@@ -17,6 +19,7 @@ type Props = {
 };
 
 // สองขั้น: เลือก/ค้นหาไฟล์แนบจาก Gmail ก่อน แล้วค่อยกรอก metadata เดียวกับอัปโหลดมือ (TaxDocumentMetadataFields)
+// ปิดอยู่ (TAX_GMAIL_IMPORT_ENABLED) — ยังไม่ได้ขัดตาม Unsaved Modal Rule (form/footer/dirty) แบบ TaxDocumentUploadModal ทำก่อนเปิดใช้
 export default function GmailAttachmentPicker({ open, mailboxes, taxEntities, onClose, onSaved, onNotice }: Props) {
   const [emailAccountId, setEmailAccountId] = useState('');
   const [search, setSearch] = useState('');
@@ -26,6 +29,8 @@ export default function GmailAttachmentPicker({ open, mailboxes, taxEntities, on
   const [selected, setSelected] = useState<GmailAttachmentCandidate | null>(null);
   const [form, setForm] = useState(EMPTY_TAX_DOC_META_FORM);
   const [submitting, setSubmitting] = useState(false);
+  const [attempted, setAttempted] = useState(false);
+  const idPrefix = useId();
 
   const reset = () => {
     setEmailAccountId('');
@@ -34,6 +39,7 @@ export default function GmailAttachmentPicker({ open, mailboxes, taxEntities, on
     setError('');
     setSelected(null);
     setForm(EMPTY_TAX_DOC_META_FORM);
+    setAttempted(false);
   };
 
   const searchAttachments = async () => {
@@ -56,16 +62,17 @@ export default function GmailAttachmentPicker({ open, mailboxes, taxEntities, on
 
   const submit = async () => {
     if (!selected) return;
-    const result = taxDocumentMetaPayload(form);
-    if (result.error !== null) {
-      setError(result.error);
+    setAttempted(true);
+    const firstError = firstMetaErrorId(idPrefix, taxDocumentMetaErrors(form));
+    if (firstError) {
+      requestAnimationFrame(() => document.getElementById(firstError)?.focus());
       return;
     }
     setSubmitting(true);
     setError('');
     try {
       await post('/api/tax-documents/from-gmail', {
-        ...result.payload,
+        ...taxDocumentMetaPayload(form),
         email_account_id: selected.email_account_id,
         gmail_message_id: selected.gmail_message_id,
         gmail_attachment_id: selected.gmail_attachment_id,
@@ -125,7 +132,7 @@ export default function GmailAttachmentPicker({ open, mailboxes, taxEntities, on
       ) : (
         <Stack spacing={2.5}>
           <Typography variant="body2" color="text.secondary">ไฟล์ที่เลือก: {selected.filename}</Typography>
-          <TaxDocumentMetadataFields form={form} setForm={setForm} taxEntities={taxEntities} />
+          <TaxDocumentMetadataFields form={form} setForm={setForm} taxEntities={taxEntities} idPrefix={idPrefix} attempted={attempted} />
           {error && <Alert severity="error">{error}</Alert>}
           <Stack direction={{ xs: 'column-reverse', sm: 'row' }} spacing={1} sx={{ justifyContent: 'flex-end' }}>
             <Button type="button" color="inherit" onClick={() => setSelected(null)} disabled={submitting}>ย้อนกลับ</Button>

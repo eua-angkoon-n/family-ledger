@@ -55,6 +55,13 @@ test('estimateTax', async (t) => {
     const r = estimateTax(input({ employmentIncomeSatang: 32_000_000 }), rules);
     assert.equal(r.netSatang, 16_000_000);
     assert.equal(r.estimatedTaxSatang, 50_000);
+    // ตารางขั้นบันไดบอกเงินได้ที่ตกในแต่ละขั้น — รวมกันต้องเท่า net เป๊ะ
+    assert.deepEqual(r.bracketBreakdown.map((b) => b.incomeSatang), [15_000_000, 1_000_000]);
+  });
+
+  await t.test('เงินได้ต่อขั้นรวมกันเท่ากับเงินได้สุทธิเสมอ (ขั้นบนสุดไม่มีเพดาน)', () => {
+    const r = estimateTax(input({ employmentIncomeSatang: 600_000_000 }), rules);
+    assert.equal(r.bracketBreakdown.reduce((s, b) => s + b.incomeSatang, 0), r.netSatang);
   });
 
   await t.test('เงินเดือน 200,000 → ค่าใช้จ่ายหักได้เต็มเพดาน 100,000 พอดี (50% ของ 200,000 = 100,000)', () => {

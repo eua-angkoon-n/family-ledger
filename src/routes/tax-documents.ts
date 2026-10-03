@@ -16,6 +16,9 @@ const DOCUMENT_TYPES = [
 ] as const;
 const STATUSES = ['draft', 'verified', 'submitted'] as const;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
+// base64 ของไฟล์ 10MB พอดียาว 13,981,016 ตัวอักษร — ยาวกว่านี้คือไฟล์ใหญ่เกินแน่นอน ไม่ต้อง decode ก่อน
+const MAX_FILE_BASE64_CHARS = Math.ceil(MAX_FILE_BYTES / 3) * 4;
+export const FILE_TOO_LARGE = `ไฟล์ใหญ่เกิน ${MAX_FILE_BYTES / 1024 / 1024}MB`;
 const LIST_LIMIT_DEFAULT = 50;
 const LIST_LIMIT_MAX = 200;
 // ปิดคู่กับ TAX_PAGES_ENABLED ใน web/src/features.ts — สองเส้นนี้ค้นทั้งกล่อง (has:attachment) ไม่ใช่เฉพาะเมลธนาคาร
@@ -45,16 +48,16 @@ function optEnumQ<T extends string>(q: Record<string, unknown>, field: string, v
   return v as T;
 }
 
-function optYear(v: unknown, field: string): number | null {
+function optYear(v: unknown): number | null {
   if (v == null || v === '') return null;
   const n = Number(v);
-  if (!Number.isInteger(n) || n < 2000 || n > 2200) throw new HttpError(400, `${field} ต้องเป็นปีที่ถูกต้อง`);
+  if (!Number.isInteger(n) || n < 2000 || n > 2200) throw new HttpError(400, 'ปีภาษีไม่ถูกต้อง');
   return n;
 }
 
-function requiredYear(v: unknown, field: string): number {
-  const n = optYear(v, field);
-  if (n == null) throw new HttpError(400, `ต้องกรอก ${field}`);
+function requiredYear(v: unknown): number {
+  const n = optYear(v);
+  if (n == null) throw new HttpError(400, 'ต้องกรอกปีภาษี');
   return n;
 }
 
@@ -82,7 +85,7 @@ function parseTaxDocMeta(b: Body): TaxDocMeta {
   return {
     taxEntityId: id(b, 'tax_entity_id'),
     documentType: enumStr(b, 'document_type', DOCUMENT_TYPES),
-    taxYear: requiredYear(b.tax_year, 'tax_year'),
+    taxYear: requiredYear(b.tax_year),
     issuerName: str(b, 'issuer_name', 200),
     issuerTaxId: optionalStr(b, 'issuer_tax_id', 20),
     recipientTaxId: optionalStr(b, 'recipient_tax_id', 20),
@@ -106,7 +109,7 @@ async function createTaxDocument(
 ) {
   const mime = detectMime(buf);
   if (!mime) throw new HttpError(400, 'ไฟล์ต้องเป็น PDF, JPEG หรือ PNG เท่านั้น');
-  if (buf.length > MAX_FILE_BYTES) throw new HttpError(413, `ไฟล์ใหญ่เกิน ${MAX_FILE_BYTES / 1024 / 1024}MB`);
+  if (buf.length > MAX_FILE_BYTES) throw new HttpError(413, FILE_TOO_LARGE);
 
   await assertOwnsTaxEntity(userId, meta.taxEntityId);
 
@@ -152,7 +155,7 @@ async function createTaxDocument(
 taxDocumentsRouter.get('/tax-documents', requireUser(async (req, res, user) => {
   const q = req.query as Record<string, unknown>;
   const taxEntityId = optId(q, 'tax_entity_id');
-  const taxYearFilter = optYear(q.tax_year, 'tax_year');
+  const taxYearFilter = optYear(q.tax_year);
   const status = optEnumQ(q, 'status', STATUSES);
   const documentType = optEnumQ(q, 'document_type', DOCUMENT_TYPES);
   const search = typeof q.q === 'string' && q.q.trim() !== '' ? q.q.trim() : null;
@@ -222,9 +225,11 @@ taxDocumentsRouter.post('/tax-documents', requireUser(async (req, res, user) => 
   const b = req.body as Body;
   const meta = parseTaxDocMeta(b);
   const filename = str(b, 'filename', 200);
-  const fileBase64 = str(b, 'file_base64', 15_000_000);
+  const fileBase64 = b.file_base64;
+  if (typeof fileBase64 !== 'string' || fileBase64 === '') throw new HttpError(400, 'ต้องแนบไฟล์');
+  if (fileBase64.length > MAX_FILE_BASE64_CHARS) throw new HttpError(413, FILE_TOO_LARGE);
   const buf = Buffer.from(fileBase64, 'base64');
-  if (buf.length === 0) throw new HttpError(400, 'file_base64 ไม่ถูกต้อง');
+  if (buf.length === 0) throw new HttpError(400, 'ไฟล์ไม่ถูกต้อง');
 
   const doc = await createTaxDocument(user.id, meta, buf, filename, req.ip ?? null);
   res.status(201).json(doc);
@@ -282,7 +287,7 @@ taxDocumentsRouter.patch('/tax-documents/:id', requireUser(async (req, res, user
 
   const has = (field: string) => Object.prototype.hasOwnProperty.call(b, field);
   const documentType = b.document_type == null ? null : enumStr(b, 'document_type', DOCUMENT_TYPES);
-  const taxYearValue = optYear(b.tax_year, 'tax_year');
+  const taxYearValue = optYear(b.tax_year);
   const issuerName = b.issuer_name == null ? null : str(b, 'issuer_name', 200);
   const issuerTaxIdProvided = has('issuer_tax_id');
   const recipientTaxIdProvided = has('recipient_tax_id');

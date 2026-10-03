@@ -1,18 +1,41 @@
-import { useState } from 'react';
-import { Alert, Button, Stack } from '@mui/material';
+import { useEffect, useId, useRef, useState } from 'react';
+import { Alert, Box, Button, LinearProgress, Stack, Typography } from '@mui/material';
 import UploadFileRounded from '@mui/icons-material/UploadFileRounded';
 import { post, type TaxEntity } from '../api.js';
 import Modal from '../Modal.js';
+import { dataTextSx } from '../theme.js';
 import type { Notice } from '../ui.js';
-import { EMPTY_TAX_DOC_META_FORM, TaxDocumentMetadataFields, taxDocumentMetaPayload } from './TaxDocumentMetadataFields.js';
+import {
+  EMPTY_TAX_DOC_META_FORM, firstMetaErrorId, TaxDocumentMetadataFields, taxDocumentMetaErrors, taxDocumentMetaPayload,
+} from './TaxDocumentMetadataFields.js';
 
 type Props = {
   open: boolean;
   taxEntities: TaxEntity[];
+  entitiesLoad?: { error: string; onRetry: () => void };
+  /** ผู้เสียภาษีตั้งต้น: ตัวกรองที่เลือกอยู่ หรือคนเดียวที่มี (ว่าง = ให้เลือกเอง) */
+  defaultTaxEntityId: string;
   onClose: () => void;
   onSaved: () => void;
   onNotice: (notice: Notice) => void;
 };
+
+// เพดานเดียวกับ server: detectMime รับแค่ PDF/JPEG/PNG และ MAX_FILE_BYTES 10MB หลัง decode (src/routes/tax-documents.ts)
+// base64 โต ~4/3 → 13.4MB ยังต่ำกว่าเพดาน 15MB ต่อคำขอ (server.ts)
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const ACCEPT = '.pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png';
+const ACCEPTED_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
+const FILE_HELP = 'PDF, JPEG หรือ PNG ไม่เกิน 10MB';
+
+const formatSize = (bytes: number) =>
+  bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))}KB` : `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+
+// type ว่าง (บางเครื่องไม่รู้ชนิด) ปล่อยให้ server ตรวจ magic bytes เอง
+function fileProblem(file: File): string {
+  if (file.type && !ACCEPTED_TYPES.includes(file.type)) return `รับเฉพาะ ${FILE_HELP}`;
+  if (file.size > MAX_FILE_BYTES) return `ไฟล์นี้ ${formatSize(file.size)} เกินเพดาน 10MB`;
+  return '';
+}
 
 function readAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -23,40 +46,53 @@ function readAsBase64(file: File): Promise<string> {
   });
 }
 
-// ยัด base64 ใน JSON แทน multipart — ไม่เพิ่ม dependency ใหม่ ระบบมีเพดาน 15MB ต่อคำขอฝั่ง server (server.ts)
-// และ 10MB ต่อไฟล์หลัง decode (route บังคับอีกชั้น)
-export default function TaxDocumentUploadModal({ open, taxEntities, onClose, onSaved, onNotice }: Props) {
+const revealOnMount = (el: HTMLElement | null) => el?.scrollIntoView({ block: 'nearest' });
+
+// ยัด base64 ใน JSON แทน multipart — ไม่เพิ่ม dependency ใหม่ · ไม่มีแถบความคืบหน้าจริง (fetch ไม่รายงานการส่ง) บอกเป็นสถานะ "กำลังอัปโหลด"
+export default function TaxDocumentUploadModal({ open, taxEntities, entitiesLoad, defaultTaxEntityId, onClose, onSaved, onNotice }: Props) {
+  const idPrefix = useId();
+  const fileId = `${idPrefix}-file`;
+  const [initial, setInitial] = useState(EMPTY_TAX_DOC_META_FORM);
   const [form, setForm] = useState(EMPTY_TAX_DOC_META_FORM);
   const [file, setFile] = useState<File | null>(null);
+  const [attempted, setAttempted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  // snackbar อยู่ใน #root ซึ่งเป็น aria-hidden ระหว่าง modal เปิด — ประกาศผลหลังปิดสนิท
+  const exitNoticeRef = useRef<Notice | null>(null);
 
-  const reset = () => {
-    setForm(EMPTY_TAX_DOC_META_FORM);
+  // ค่าตั้งต้นทุกครั้งที่เปิด (ปีปัจจุบัน + ผู้เสียภาษีตั้งต้น) — dirty เทียบกับค่านี้
+  useEffect(() => {
+    if (!open) return;
+    const start = { ...EMPTY_TAX_DOC_META_FORM, tax_year: String(new Date().getFullYear()), tax_entity_id: defaultTaxEntityId };
+    setInitial(start);
+    setForm(start);
     setFile(null);
+    setAttempted(false);
     setError('');
-  };
+  }, [open]);
+
+  const fileError = file ? fileProblem(file) : attempted ? 'เลือกไฟล์เอกสาร' : '';
 
   const submit = async () => {
+    if (submitting) return;
     setError('');
-    if (!file) {
-      setError('เลือกไฟล์ก่อน');
+    setAttempted(true);
+    const errors = taxDocumentMetaErrors(form);
+    const firstError = !file || fileProblem(file) ? fileId : firstMetaErrorId(idPrefix, errors);
+    if (firstError) {
+      // ช่องที่ผิดอาจอยู่ในส่วนที่เพิ่งกางออก — รอ render ก่อน focus
+      requestAnimationFrame(() => document.getElementById(firstError)?.focus());
       return;
     }
-    const result = taxDocumentMetaPayload(form);
-    if (result.error !== null) {
-      setError(result.error);
-      return;
-    }
-
     setSubmitting(true);
     try {
-      const fileBase64 = await readAsBase64(file);
-      await post('/api/tax-documents', { ...result.payload, filename: file.name, file_base64: fileBase64 });
-      onNotice({ message: 'อัปโหลดเอกสารภาษีแล้ว', severity: 'success' });
-      reset();
-      onClose();
+      const fileBase64 = await readAsBase64(file!);
+      await post('/api/tax-documents', { ...taxDocumentMetaPayload(form), filename: file!.name, file_base64: fileBase64 });
+      exitNoticeRef.current = { message: `อัปโหลดเอกสารของ “${form.issuer_name.trim()}” แล้ว`, severity: 'success' };
       onSaved();
+      onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'อัปโหลดไม่สำเร็จ');
     } finally {
@@ -65,21 +101,90 @@ export default function TaxDocumentUploadModal({ open, taxEntities, onClose, onS
   };
 
   return (
-    <Modal open={open} title="อัปโหลดเอกสารภาษี" onClose={() => { reset(); onClose(); }} busy={submitting}>
-      <Stack spacing={2.5}>
-        <Button component="label" variant="outlined" startIcon={<UploadFileRounded />} sx={{ alignSelf: 'flex-start' }}>
-          {file ? file.name : 'เลือกไฟล์ (PDF หรือรูป)'}
-          <input type="file" accept=".pdf,image/*" hidden onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-        </Button>
-        <TaxDocumentMetadataFields form={form} setForm={setForm} taxEntities={taxEntities} />
-        {error && <Alert severity="error">{error}</Alert>}
-        <Stack direction={{ xs: 'column-reverse', sm: 'row' }} spacing={1} sx={{ justifyContent: 'flex-end' }}>
-          <Button type="button" color="inherit" onClick={() => { reset(); onClose(); }} disabled={submitting}>ยกเลิก</Button>
-          <Button variant="contained" onClick={() => void submit()} disabled={submitting} aria-busy={submitting}>
-            {submitting ? 'กำลังอัปโหลด…' : 'อัปโหลด'}
-          </Button>
+    <Modal
+      open={open}
+      title="อัปโหลดเอกสารภาษี"
+      onClose={onClose}
+      busy={submitting}
+      dirty={file != null || JSON.stringify(form) !== JSON.stringify(initial)}
+      footer={{ formId: `${idPrefix}-form`, submitLabel: 'อัปโหลด' }}
+      onExited={() => {
+        // ล้างตอนปิดสนิท — ไม่งั้นเปิดครั้งถัดไปเห็นค่าเก่าหนึ่งเฟรม และส่วนที่พับคำนวณกาง/พับจากค่าเก่า
+        setInitial(EMPTY_TAX_DOC_META_FORM);
+        setForm(EMPTY_TAX_DOC_META_FORM);
+        setFile(null);
+        setAttempted(false);
+        setError('');
+        const notice = exitNoticeRef.current;
+        exitNoticeRef.current = null;
+        if (notice) onNotice(notice);
+      }}
+    >
+      {/* noValidate: ช่องบังคับตรวจเอง (error ไทยใต้ช่อง + focus ช่องแรกที่ผิด) — `required` คงไว้เพื่อ * และ aria-required */}
+      <Box
+        component="form"
+        id={`${idPrefix}-form`}
+        noValidate
+        onSubmit={(event) => {
+          event.preventDefault();
+          void submit();
+        }}
+      >
+        <Stack spacing={2.5}>
+          {error && <Alert ref={revealOnMount} severity="error">{error}</Alert>}
+          <Box>
+            {/* ปุ่มจริงสั่ง input ที่ซ่อนไว้ — Button component="label" กด Enter/Space แล้วไม่เปิดหน้าต่างเลือกไฟล์ */}
+            <Button
+              id={fileId}
+              variant="outlined"
+              startIcon={<UploadFileRounded />}
+              onClick={() => fileInputRef.current?.click()}
+              aria-describedby={`${fileId}-help`}
+              color={fileError ? 'error' : 'primary'}
+            >
+              {file ? 'เปลี่ยนไฟล์' : 'เลือกไฟล์'}
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={ACCEPT}
+              hidden
+              onChange={(e) => {
+                const picked = e.target.files?.[0];
+                if (picked) setFile(picked);
+                e.target.value = ''; // เลือกไฟล์เดิมซ้ำ (หลังแก้ไฟล์) ยังได้ change
+              }}
+            />
+            <Box id={`${fileId}-help`} sx={{ mt: 0.75 }}>
+              {file && (
+                <Typography variant="body2" sx={{ ...dataTextSx, overflowWrap: 'anywhere' }}>
+                  {file.name} · {formatSize(file.size)}
+                </Typography>
+              )}
+              <Typography variant="body2" color={fileError ? 'error' : 'text.secondary'}>{fileError || FILE_HELP}</Typography>
+            </Box>
+          </Box>
+          <TaxDocumentMetadataFields
+            form={form}
+            setForm={setForm}
+            taxEntities={taxEntities}
+            idPrefix={idPrefix}
+            attempted={attempted}
+            entitiesLoad={entitiesLoad}
+          />
+          {/* live region อยู่ใน DOM ตลอด — ข้อความขึ้นตอนเริ่มส่ง จึงประกาศแน่นอน */}
+          <Box role="status">
+            {submitting && file && (
+              <>
+                <Typography variant="body2" color="text.secondary">
+                  กำลังอัปโหลดไฟล์ <Box component="span" sx={dataTextSx}>{formatSize(file.size)}</Box> — ไฟล์ใหญ่อาจใช้เวลาสักครู่
+                </Typography>
+                <LinearProgress aria-label="กำลังอัปโหลด" sx={{ mt: 1, height: 2 }} />
+              </>
+            )}
+          </Box>
         </Stack>
-      </Stack>
+      </Box>
     </Modal>
   );
 }

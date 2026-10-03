@@ -177,6 +177,26 @@ test('tax document vault: upload, dedupe, link, verify, download, audit, archive
     assert.equal(res.status, 409);
   });
 
+  // หน้าเว็บโชว์ error ตรง ๆ — ต้องเป็นภาษาไทยที่ผู้ใช้อ่านรู้เรื่อง ไม่มีชื่อ field ดิบ
+  await t.test('ไฟล์เกิน 10MB → 413 ข้อความไทย, พิมพ์ปี พ.ศ. → 400 "ปีภาษีไม่ถูกต้อง"', async () => {
+    const meta = { tax_entity_id: taxEntityId, document_type: 'receipt', issuer_name: 'ร้านค้า', total_satang: 100, filename: 'big.pdf' };
+    const big = await app.request('/api/tax-documents', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...meta, tax_year: 2026, file_base64: Buffer.concat([pdfBytes, Buffer.alloc(10 * 1024 * 1024)]).toString('base64') }),
+    });
+    assert.equal(big.status, 413);
+    assert.equal(((await big.json()) as { error: string }).error, 'ไฟล์ใหญ่เกิน 10MB');
+
+    const buddhistYear = await app.request('/api/tax-documents', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...meta, tax_year: 2569, file_base64: pdfBytes.toString('base64') }),
+    });
+    assert.equal(buddhistYear.status, 400);
+    assert.equal(((await buddhistYear.json()) as { error: string }).error, 'ปีภาษีไม่ถูกต้อง');
+  });
+
   await t.test('ดาวน์โหลดได้ไบต์เดิมเป๊ะ + header ถูก + มี audit log', async () => {
     const res = await app.request(`/api/tax-documents/${docId}/file`);
     assert.equal(res.status, 200);

@@ -40,7 +40,6 @@ import MenuRounded from '@mui/icons-material/MenuRounded';
 import MenuBookRounded from '@mui/icons-material/MenuBookRounded';
 import OpenInBrowserRounded from '@mui/icons-material/OpenInBrowserRounded';
 import ReceiptLongRounded from '@mui/icons-material/ReceiptLongRounded';
-import ReceiptRounded from '@mui/icons-material/ReceiptRounded';
 import RefreshRounded from '@mui/icons-material/RefreshRounded';
 import SchoolRounded from '@mui/icons-material/SchoolRounded';
 import SettingsRounded from '@mui/icons-material/SettingsRounded';
@@ -191,7 +190,7 @@ const NAV_ITEMS: NavItem[] = [
   { path: '/transactions', label: 'ธุรกรรม', icon: <ReceiptLongRounded /> },
   { path: '/planning', label: 'วางแผน', icon: <EventRepeatRounded /> },
   { path: '/student-loan', label: 'หนี้ กยศ.', icon: <SchoolRounded /> },
-  { path: '/tax-documents', label: 'เอกสารภาษี', icon: <ReceiptRounded /> },
+  // ภาษีเป็นแท็บเดียว — ประมาณการ (/tax) กับเอกสาร (/tax-documents) เป็นแท็บย่อยของ TaxSubNav
   { path: '/tax', label: 'ภาษี', icon: <CalculateRounded /> },
   { path: '/accounts', label: 'บัญชีของฉัน', icon: <AccountBalanceRounded /> },
 ].filter((n) => isPageEnabled(n.path));
@@ -226,7 +225,8 @@ function NavTab({ item, iconOnly, ...tabsProps }: { item: NavItem; iconOnly: boo
         iconPosition="start"
         label={iconOnly ? undefined : item.label}
         aria-label={item.a11yLabel ?? item.label}
-        sx={{ minWidth: iconOnly ? 48 : 104 }}
+        // มีชื่อ: กว้างตามชื่อ ขอบข้าง 10px (เดิม minWidth 104 + 16px) — แอดมินที่เปิดหน้าภาษีมี 7 tabs ไม่งั้นล้นที่ 1200–1280px
+        sx={iconOnly ? { minWidth: 48 } : { minWidth: 0, px: 1.25 }}
       />
     </Tooltip>
   );
@@ -245,11 +245,33 @@ const activeIconSx = {
 // Tabs ต้อง value ตรงกับ value ของ Tab ลูกเป๊ะ — ตัดเหลือ segment แรกของ path (ตัด query/segment ย่อยทิ้ง
 // เช่น /transactions?month=... ยังนับเป็น /transactions) ไม่ตรงกับ NAV_ITEMS/settings เลย = ไม่มี tab ไหน active
 // /audit ตั้งใจไม่อยู่ใน NAV_ITEMS (เหมือน /installments ไม่อยู่แต่ routed) — เข้าถึงผ่านไอคอนข้างปุ่มออกจากระบบ (จอ < md อยู่ใน drawer)
+// /tax-documents อยู่ใต้แท็บ "ภาษี" — ผ่าน known ด้วย ปิดหน้าภาษีแล้ว (ไม่มี /tax ในเมนู) จึงไม่ส่งค่าที่ Tabs ไม่รู้จัก
 function activeNavPath(pathname: string): string | false {
   if (pathname.startsWith('/installments')) return '/planning';
-  const top = '/' + (pathname.split('/')[1] ?? '');
+  const segment = '/' + (pathname.split('/')[1] ?? '');
+  const top = segment === '/tax-documents' ? '/tax' : segment;
   const known = [...NAV_ITEMS.map((n) => n.path), '/settings'] as string[];
   return known.includes(top) ? top : false;
+}
+
+// แท็บย่อยของเมนู "ภาษี" — สองหน้ายังเป็นสอง route เดิม แถบนี้เป็นลิงก์ไปมา (render เหนือหน้าใน route ทั้งสอง)
+// ลิงก์ล้วนไม่พาตัวกรองไปด้วย (สองหน้าใช้ชื่อ query คนละชุด) · ไม่พิมพ์ เหมือน app bar
+const TAX_TABS = [
+  { path: '/tax', label: 'ประมาณการ' },
+  { path: '/tax-documents', label: 'เอกสาร' },
+] as const;
+
+function TaxSubNav() {
+  const current = useLocation().pathname.startsWith('/tax-documents') ? '/tax-documents' : '/tax'; // "/tax/" ก็ยังเป็นแท็บประมาณการ
+  return (
+    <Box component="nav" aria-label="เมนูภาษี" sx={{ mb: 3, borderBottom: 1, borderColor: 'divider', displayPrint: 'none' }}>
+      <Tabs value={current} variant="scrollable" scrollButtons="auto">
+        {TAX_TABS.map((tab) => (
+          <Tab key={tab.path} value={tab.path} label={tab.label} component={Link} to={tab.path} aria-current={current === tab.path ? 'page' : undefined} />
+        ))}
+      </Tabs>
+    </Box>
+  );
 }
 
 function AuthPanel({ children, version }: { children: ReactNode; version: string | null }) {
@@ -662,8 +684,9 @@ export default function App() {
                 minWidth: 0 ให้กล่องหดได้ ไม่งั้น tabs แบบ scrollable จะดันล้น Toolbar แทนที่จะขึ้นลูกศร */}
             <Box component="nav" aria-label="เมนูหลัก" sx={{ order: { xs: -1, md: 0 }, minWidth: 0 }}>
               {isDesktop ? (
-                // ช่วงไอคอนล้วนพอดีเสมอ (8 tabs ก็ยังพอ) แต่ ≥ lg แอดมิน 6 tabs มีชื่อเหลือที่แค่ราว ±40px ที่ 1200px และถ้าเปิด
-                // หน้าภาษีกลับ (features.ts) เป็น 8 tabs จะล้นแน่ — scrollable กันตัดหายเงียบ ๆ ลูกศรขึ้นเฉพาะตอนล้นจริง
+                // ช่วงไอคอนล้วนพอดีเสมอ (8 tabs ก็ยังพอ) · ≥ lg แอดมินที่เปิดหน้าภาษี (features.ts) มี 7 tabs — ภาษีรวมเป็นแท็บเดียว
+                // และ tab มีชื่อกว้างตามชื่อ (NavTab) ประมาณว่าเหลือที่ราว 40px ที่ 1200px (คำนวณ ยังไม่ได้วัดในเบราว์เซอร์)
+                // scrollable กันตัดหายเงียบ ๆ ถ้าเมนูยาวขึ้นอีก ลูกศรขึ้นเฉพาะตอนล้นจริง
                 // ไม่ใส่ aria-label ที่ Tabs เพราะ nav ด้านนอกมีชื่อ "เมนูหลัก" แล้ว (screen reader จะอ่านซ้ำสองรอบ)
                 <Tabs value={activeNav} variant="scrollable" scrollButtons="auto">
                   {navItems.map((item) => (
@@ -802,8 +825,8 @@ export default function App() {
             <Route path="/installments" element={<Installments />} />
             <Route path="/installments/:id" element={<Installments />} />
             <Route path="/student-loan" element={<Box component="section" aria-labelledby="student-loan-heading"><StudentLoan /></Box>} />
-            {isPageEnabled('/tax-documents') && <Route path="/tax-documents" element={<Box component="section" aria-labelledby="tax-documents-heading"><TaxDocuments /></Box>} />}
-            {isPageEnabled('/tax') && <Route path="/tax" element={<Box component="section" aria-labelledby="tax-summary-heading"><TaxSummary /></Box>} />}
+            {isPageEnabled('/tax') && <Route path="/tax" element={<Box component="section" aria-labelledby="tax-summary-heading"><TaxSubNav /><TaxSummary /></Box>} />}
+            {isPageEnabled('/tax-documents') && <Route path="/tax-documents" element={<Box component="section" aria-labelledby="tax-documents-heading"><TaxSubNav /><TaxDocuments /></Box>} />}
             {/* แอดมินสลับ "ของฉัน / ทุกคน" ที่ /audit เอง (?scope=all) — หน้าตั้งค่ามีแค่ลิงก์มา */}
             <Route path="/audit" element={<Box component="section" aria-labelledby="audit-log-heading"><AuditLog isAdmin={user.is_admin} /></Box>} />
             <Route path="/help" element={<Box component="section" aria-labelledby="help-heading"><Help isAdmin={user.is_admin} /></Box>} />

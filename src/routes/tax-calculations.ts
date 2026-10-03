@@ -14,7 +14,7 @@ function optId(q: Record<string, unknown>, field: string): number | null {
   const v = q[field];
   if (v == null || v === '') return null;
   const n = Number(v);
-  if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, `${field} ไม่ถูกต้อง`);
+  if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, 'ผู้เสียภาษีไม่ถูกต้อง'); // field เดียวที่เรียกคือ tax_entity_id
   return n;
 }
 
@@ -25,9 +25,11 @@ function requiredYear(v: unknown, field = 'ปีภาษี'): number {
   return n;
 }
 
-async function ownedEntity(userId: number, taxEntityId: number): Promise<{ id: number; entity_type: 'individual' | 'sole_proprietor' | 'company' }> {
-  const { rows } = await query<{ id: number; entity_type: 'individual' | 'sole_proprietor' | 'company' }>(
-    'select id, entity_type from tax_entity where id = $1 and user_id = $2',
+type OwnedEntity = { id: number; entity_type: 'individual' | 'sole_proprietor' | 'company'; display_name: string };
+
+async function ownedEntity(userId: number, taxEntityId: number): Promise<OwnedEntity> {
+  const { rows } = await query<OwnedEntity>(
+    'select id, entity_type, display_name from tax_entity where id = $1 and user_id = $2',
     [taxEntityId, userId],
   );
   if (!rows[0]) throw new HttpError(404, 'ไม่พบ Tax Entity');
@@ -188,8 +190,6 @@ async function unrecordedIncomeTxns(userId: number, taxEntityId: number, taxYear
          and coalesce(an.classification, '') not in ('internal_transfer', 'excluded')
          and an.tax_treatment is distinct from 'business_income'
          and t.amount_satang >= ${RECURRING_MIN_SATANG}
-         -- เดิมกรองธุรกรรมที่ผูกกับ income_record ไปแล้วออก แต่ไม่มีสายผูกนั้นอีกแล้ว
-         -- รายการที่บันทึกเป็นรายได้ไปแล้วจึงยังขึ้นเป็นข้อเสนอแนะอยู่ ผู้ใช้ข้ามเองได้
      ),
      recurring as (
        select pattern, bank_account_id from candidates
@@ -200,6 +200,19 @@ async function unrecordedIncomeTxns(userId: number, taxEntityId: number, taxYear
      select c.id, c.txn_date, c.description, c.amount_satang, c.bank_account_id, c.account_nickname
      from candidates c
      join recurring r on r.pattern = c.pattern and r.bank_account_id = c.bank_account_id
+     -- ไม่เสนอเงินเข้าที่บันทึกเป็นรายได้ไปแล้ว (ไม่งั้นกดยืนยันซ้ำแล้วเงินได้นับสองรอบ) — เทียบแบบหลวม ๆ ไม่มีสายผูก
+     -- (ADR-0004): income_record ของผู้ใช้คนนี้ที่วันรับเงินห่างไม่เกิน 1 วันและยอดเท่ากัน
+     -- ยอดเทียบได้ทั้ง gross และ expected_net เพราะกำกวม: ปุ่มยืนยันในหน้าภาษีใส่ยอดเข้าบัญชีเป็น gross (ไม่มีรายการหัก
+     -- gross = net = ยอดเข้า) แต่ถ้าผู้ใช้แก้ทีหลังเป็น gross จริง + รายการหัก ยอดเข้าบัญชีจะไปตรงกับ expected_net แทน
+     -- income_record ที่ไม่มี income_date ไม่นับ (วันที่ 1 ของแผนไม่ใช่วันรับเงิน) · ไม่กรองตาม entity ของ
+     -- income_record เพราะรายได้ที่กรอกมือมักไม่ผูกบัญชี — ฝั่ง txn คุม entity อยู่แล้ว
+     -- กรองตรงนี้ ไม่ใช่ใน candidates: ถ้ากรองก่อนนับเดือน บันทึกไป 2 ใน 3 เดือนแล้วเดือนที่เหลือจะตกเกณฑ์หายไปด้วย
+     where not exists (
+       select 1 from income_record ir
+       where ir.user_id = $1 and ir.income_date is not null
+         and abs(c.txn_date - ir.income_date) <= 1
+         and c.amount_satang in (ir.gross_amount_satang, ir.expected_net_satang)
+     )
      order by c.txn_date desc
      limit 100`,
     [userId, taxEntityId, taxYearCE],
@@ -346,7 +359,7 @@ async function buildSummary(userId: number, taxYearCE: number, taxEntityId: numb
 taxCalculationsRouter.get('/tax/:year/summary', requireUser(async (req, res, user) => {
   const taxYearCE = requiredYear(req.params.year, 'ปีภาษี');
   const taxEntityId = optId(req.query as Record<string, unknown>, 'tax_entity_id');
-  if (taxEntityId == null) throw new HttpError(400, 'ต้องระบุ tax_entity_id');
+  if (taxEntityId == null) throw new HttpError(400, 'ต้องเลือกผู้เสียภาษี');
   await assertOwnsTaxEntity(user.id, taxEntityId);
 
   res.json(await buildSummary(user.id, taxYearCE, taxEntityId));
@@ -410,17 +423,19 @@ function csvEscape(v: unknown): string {
 taxCalculationsRouter.get('/tax/:year/export.csv', requireUser(async (req, res, user) => {
   const taxYearCE = requiredYear(req.params.year, 'ปีภาษี');
   const taxEntityId = optId(req.query as Record<string, unknown>, 'tax_entity_id');
-  if (taxEntityId == null) throw new HttpError(400, 'ต้องระบุ tax_entity_id');
+  if (taxEntityId == null) throw new HttpError(400, 'ต้องเลือกผู้เสียภาษี');
   await assertOwnsTaxEntity(user.id, taxEntityId);
 
   const summary = await buildSummary(user.id, taxYearCE, taxEntityId);
+  const entity = await ownedEntity(user.id, taxEntityId);
   const e = summary.estimate;
 
+  // ไฟล์นี้ผู้ใช้เปิดอ่านเอง → ปี พ.ศ. และชื่อผู้เสียภาษี (API/DB ยังเป็น ค.ศ. + id เหมือนเดิม)
   const lines: string[] = [];
   lines.push('รายการ,จำนวนเงิน (บาท)');
-  lines.push(`ประมาณการภาษี ปีภาษี,${taxYearCE}`);
-  lines.push(`Tax Entity,${taxEntityId}`);
-  lines.push(`Rule Version,${csvEscape(summary.rule_version)}`);
+  lines.push(`ประมาณการภาษี ปีภาษี (พ.ศ.),${taxYearCE + 543}`);
+  lines.push(`ผู้เสียภาษี,${csvEscape(entity.display_name)}`);
+  lines.push(`ชุดกฎภาษี,${csvEscape(summary.rule_version)}`);
   lines.push(`เงินได้จากงานประจำ,${(summary.inputs.employmentIncomeSatang / 100).toFixed(2)}`);
   lines.push(`เงินได้ธุรกิจอื่น,${(summary.inputs.otherIncomeSatang / 100).toFixed(2)}`);
   lines.push(`ค่าใช้จ่ายหักภาษีได้,${(summary.inputs.deductibleExpenseSatang / 100).toFixed(2)}`);
@@ -440,7 +455,7 @@ taxCalculationsRouter.get('/tax/:year/export.csv', requireUser(async (req, res, 
 
   const csv = '﻿' + lines.join('\n');
   res.setHeader('content-type', 'text/csv; charset=utf-8');
-  res.setHeader('content-disposition', `attachment; filename="tax-estimate-${taxYearCE}-${taxEntityId}.csv"`);
+  res.setHeader('content-disposition', `attachment; filename="tax-estimate-${taxYearCE + 543}-${taxEntityId}.csv"`);
   res.send(csv);
 }));
 
@@ -450,7 +465,7 @@ const DEDUCTION_NOTE_MAX = 500;
 
 taxCalculationsRouter.get('/tax/deduction-claims', requireUser(async (req, res, user) => {
   const q = req.query as Record<string, unknown>;
-  const taxYearCE = q.tax_year == null || q.tax_year === '' ? null : requiredYear(q.tax_year, 'tax_year');
+  const taxYearCE = q.tax_year == null || q.tax_year === '' ? null : requiredYear(q.tax_year);
   const taxEntityId = optId(q, 'tax_entity_id');
   const { rows } = await query(
     `select c.* from tax_deduction_claim c
@@ -465,15 +480,15 @@ taxCalculationsRouter.post('/tax/deduction-claims', requireUser(async (req, res,
   const b = req.body as Body;
   const taxEntityId = id(b, 'tax_entity_id');
   await assertOwnsTaxEntity(user.id, taxEntityId);
-  const taxYearCE = requiredYear(b.tax_year, 'tax_year');
+  const taxYearCE = requiredYear(b.tax_year);
   const rules = resolveRuleSet(taxYearCE);
   const deductionType = str(b, 'deduction_type', 40);
   if (!rules.deductionTypes.includes(deductionType)) {
-    throw new HttpError(400, `deduction_type ต้องเป็นหนึ่งใน ${rules.deductionTypes.join(', ')}`);
+    throw new HttpError(400, 'ประเภทค่าลดหย่อนไม่ถูกต้อง');
   }
   const eligible = satang(b, 'eligible_amount_satang');
   const claimed = satang(b, 'claimed_amount_satang');
-  if (claimed > eligible) throw new HttpError(400, 'claimed_amount_satang ต้องไม่เกิน eligible_amount_satang');
+  if (claimed > eligible) throw new HttpError(400, 'ยอดที่ใช้สิทธิ์ต้องไม่เกินยอดที่มีสิทธิ์');
   const taxDocumentId = b.tax_document_id == null || b.tax_document_id === '' ? null : id(b, 'tax_document_id');
   if (taxDocumentId != null) {
     const owns = await query('select 1 from tax_document where id = $1 and user_id = $2', [taxDocumentId, user.id]);
@@ -511,7 +526,7 @@ taxCalculationsRouter.patch('/tax/deduction-claims/:id', requireUser(async (req,
 
     const eligible = b.eligible_amount_satang == null ? before.eligible_amount_satang : satang(b, 'eligible_amount_satang');
     const claimed = b.claimed_amount_satang == null ? before.claimed_amount_satang : satang(b, 'claimed_amount_satang');
-    if (claimed > eligible) throw new HttpError(400, 'claimed_amount_satang ต้องไม่เกิน eligible_amount_satang');
+    if (claimed > eligible) throw new HttpError(400, 'ยอดที่ใช้สิทธิ์ต้องไม่เกินยอดที่มีสิทธิ์');
 
     const { rows } = await c.query(
       `update tax_deduction_claim set

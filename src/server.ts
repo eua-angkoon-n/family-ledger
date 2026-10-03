@@ -9,6 +9,7 @@ import { pool } from './db.js';
 import { env } from './env.js';
 import { HttpError, useSecurityHeaders } from './http.js';
 import { migrate } from './migrate.js';
+import { FILE_TOO_LARGE } from './routes/tax-documents.js';
 import { startWorker } from './worker.js';
 
 const WEB_DIST = join(dirname(fileURLToPath(import.meta.url)), '..', 'web', 'dist');
@@ -47,8 +48,13 @@ app.use('/api', (_req, res) => res.status(404).json({ error: 'ไม่พบ en
 app.use(express.static(WEB_DIST));
 app.get('*', (_req, res) => res.sendFile(join(WEB_DIST, 'index.html')));
 
-app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
   if (err instanceof HttpError) return void res.status(err.status).json({ error: err.message });
+  // body เกินเพดานของ express.json ด้านบน — body-parser โยน error ของมันเอง (ไม่ใช่ HttpError) ถ้าไม่จับจะกลายเป็น 500
+  if ((err as { type?: string }).type === 'entity.too.large') {
+    const message = req.originalUrl.startsWith('/api/tax-documents') ? FILE_TOO_LARGE : 'ข้อมูลที่ส่งมาใหญ่เกินไป';
+    return void res.status(413).json({ error: message });
+  }
   const code = (err as { code?: string }).code;
   if (code === '23505') return void res.status(409).json({ error: 'ข้อมูลซ้ำกับที่มีอยู่แล้ว' });
   if (code === '23503') return void res.status(409).json({ error: 'ยังมีข้อมูลอื่นอ้างถึงอยู่ ลบไม่ได้' });
