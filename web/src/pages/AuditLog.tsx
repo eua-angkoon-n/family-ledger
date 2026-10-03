@@ -7,8 +7,8 @@ import {
 import HistoryRounded from '@mui/icons-material/HistoryRounded';
 import KeyboardArrowDownRounded from '@mui/icons-material/KeyboardArrowDownRounded';
 import KeyboardArrowRightRounded from '@mui/icons-material/KeyboardArrowRightRounded';
-import { req, type AuditLogEntry, type AuditLogListResponse, type User } from '../api.js';
-import { ACTION_LABEL, AUDIT_ACTIONS, ENTITY_LABEL, changedFields, isTaxEntity, redactRaw } from '../auditLabels.js';
+import { req, type AuditLogEntry, type AuditLogListResponse, type Category, type User } from '../api.js';
+import { ACTION_LABEL, AUDIT_ACTIONS, ENTITY_LABEL, changedFields, isTaxEntity, redactRaw, type CategoryNames } from '../auditLabels.js';
 import { TAX_PAGES_ENABLED } from '../features.js';
 import { dataTextSx, fontFamilies } from '../theme.js';
 import { BELOW_MD, EmptyState, LoadError, MD_UP, PageHeader, TableSkeleton, visuallyHiddenSx } from '../ui.js';
@@ -24,9 +24,13 @@ const formatDay = (iso: string) =>
 const codeLabel = (labels: Record<string, string>, code: string) =>
   labels[code] ?? <Box component="span" sx={dataTextSx}>{code}</Box>;
 
+// regex/รหัสของธนาคารอ่านทีละตัวอักษร — mono เฉพาะค่า ไม่รวมคำว่า "เดิม"
+const Value = ({ text, mono }: { text: string; mono: boolean }) =>
+  mono ? <Box component="code" sx={{ fontFamily: fontFamilies.mono }}>{text}</Box> : <>{text}</>;
+
 /** รายการช่องที่เปลี่ยน "ชื่อช่อง: เดิม X → Y" — สร้าง/ลบมีฝั่งเดียว แสดงเป็นค่าที่บันทึก/ค่าก่อนลบ */
-function ChangeList({ entry }: { entry: AuditLogEntry }) {
-  const changes = changedFields(entry.before_data, entry.after_data);
+function ChangeList({ entry, categories }: { entry: AuditLogEntry; categories?: CategoryNames }) {
+  const changes = changedFields(entry.before_data, entry.after_data, categories);
   if (changes.length === 0) {
     return entry.before_data == null && entry.after_data == null ? null : (
       <Typography variant="body2" color="text.secondary">ไม่มีช่องที่เปลี่ยนให้แสดง</Typography>
@@ -47,10 +51,11 @@ function ChangeList({ entry }: { entry: AuditLogEntry }) {
             <Box component="dd" sx={{ m: 0, ...dataTextSx, overflowWrap: 'anywhere' }}>
               {c.before != null && c.after != null ? (
                 <>
-                  <Box component="span" sx={{ color: 'text.secondary' }}>เดิม</Box> {c.before} <span aria-hidden>→</span>
-                  <Box component="span" sx={visuallyHiddenSx}>เป็น</Box> {c.after}
+                  <Box component="span" sx={{ color: 'text.secondary' }}>เดิม</Box> <Value text={c.before} mono={c.mono} />{' '}
+                  <span aria-hidden>→</span>
+                  <Box component="span" sx={visuallyHiddenSx}>เป็น</Box> <Value text={c.after} mono={c.mono} />
                 </>
-              ) : c.after ?? c.before}
+              ) : <Value text={(c.after ?? c.before)!} mono={c.mono} />}
             </Box>
           </Box>
         ))}
@@ -59,26 +64,34 @@ function ChangeList({ entry }: { entry: AuditLogEntry }) {
   );
 }
 
-function LogRow({ entry, showUser, showRaw }: { entry: AuditLogEntry; showUser: boolean; showRaw: boolean }) {
+function LogRow({ entry, showUser, isAdmin, categories }: {
+  entry: AuditLogEntry;
+  showUser: boolean;
+  isAdmin: boolean;
+  categories?: CategoryNames;
+}) {
   const [open, setOpen] = useState(false);
   const detailId = `audit-detail-${entry.id}`;
   const time = formatTime(entry.created_at);
   const who = entry.user_display_name || entry.user_email;
   const entityLabel = ENTITY_LABEL[entry.entity_type] ?? entry.entity_type;
+  // แอดมินเท่านั้น: รหัสข้อมูลและ IP ไว้ไล่ปัญหา — IPv4 ที่ Node รายงานเป็น IPv6-mapped (::ffff:1.2.3.4) ตัดหัวออก
   const meta = [
     entry.entity_id != null ? `${entityLabel} รหัส ${entry.entity_id}` : entityLabel,
     showUser ? entry.user_email : null,
-    entry.ip_address ? `IP ${entry.ip_address}` : null,
+    entry.ip_address ? `IP ${entry.ip_address.replace(/^::ffff:/, '')}` : null,
   ].filter(Boolean).join(' · ');
   const hasRaw = entry.before_data != null || entry.after_data != null;
+  const toggle = () => setOpen((v) => !v);
   return (
     <>
-      <TableRow hover sx={open ? { '& > td': { borderBottom: 'none' } } : undefined}>
+      {/* คลิกที่ไหนก็ได้ในแถว = ทางลัดของเมาส์ ปุ่มลูกศรยังเป็นตัวควบคุมหลักของคีย์บอร์ด/screen reader */}
+      <TableRow hover onClick={toggle} sx={{ cursor: 'pointer', ...(open ? { '& > td': { borderBottom: 'none' } } : {}) }}>
         {/* py 0.5 + ปุ่ม 40px = กึ่งกลางลูกศรตรงกับบรรทัดแรกของข้อความ (ช่องอื่นเว้นบน 14px สูงบรรทัด 20px) */}
         <TableCell sx={{ width: 48, py: 0.5, pl: 1, pr: 0 }}>
           <IconButton
             size="small"
-            onClick={() => setOpen((v) => !v)}
+            onClick={(e) => { e.stopPropagation(); toggle(); }}
             aria-expanded={open}
             aria-controls={detailId}
             aria-label={`ดูรายละเอียด ${ACTION_LABEL[entry.action] ?? entry.action} ${time}`}
@@ -94,16 +107,18 @@ function LogRow({ entry, showUser, showRaw }: { entry: AuditLogEntry; showUser: 
           </Typography>
         </TableCell>
         {showUser && <TableCell sx={{ ...MD_UP, overflowWrap: 'anywhere' }}>{who}</TableCell>}
-        <TableCell sx={MD_UP}>{codeLabel(ENTITY_LABEL, entry.entity_type)}</TableCell>
       </TableRow>
-      <TableRow>
-        {/* id อยู่ที่ช่องที่ mount ตลอด (Collapse unmount ตอนพับ) aria-controls จึงชี้เจอเสมอ */}
-        <TableCell id={detailId} colSpan={showUser ? 5 : 4} sx={{ py: 0, ...(open ? {} : { borderBottom: 'none' }) }}>
+      {/* id อยู่ที่ช่องที่ mount ตลอด (Collapse unmount ตอนพับ) aria-controls จึงชี้เจอเสมอ · ตอนพับซ่อนทั้งแถวจาก
+          screen reader ไม่งั้นนับแถวของตารางเป็นสองเท่า */}
+      <TableRow aria-hidden={open ? undefined : true}>
+        <TableCell id={detailId} colSpan={showUser ? 4 : 3} sx={{ py: 0, ...(open ? {} : { borderBottom: 'none' }) }}>
           <Collapse in={open} unmountOnExit>
             <Stack spacing={1.5} sx={{ pb: 2, pl: { md: 6 } }}>
-              <ChangeList entry={entry} />
-              <Typography variant="body2" color="text.secondary" sx={{ ...dataTextSx, overflowWrap: 'anywhere' }}>{meta}</Typography>
-              {showRaw && hasRaw && (
+              <ChangeList entry={entry} categories={categories} />
+              {isAdmin && (
+                <Typography variant="body2" color="text.secondary" sx={{ ...dataTextSx, overflowWrap: 'anywhere' }}>{meta}</Typography>
+              )}
+              {isAdmin && hasRaw && (
                 // แอดมินเท่านั้น — ค่าดิบทั้งก้อนไว้ไล่ปัญหา คนทั่วไปเห็นแค่รายการที่เปลี่ยนด้านบน
                 <Box component="details" sx={{ '& > summary': { cursor: 'pointer', py: 1.25, lineHeight: '20px', width: 'fit-content', color: 'text.secondary' } }}>
                   <summary>ข้อมูลดิบ</summary>
@@ -144,7 +159,9 @@ export default function AuditLog({ isAdmin }: { isAdmin: boolean }) {
   const [reloadKey, setReloadKey] = useState(0);
   const [users, setUsers] = useState<User[] | null>(null);
   const [usersFailed, setUsersFailed] = useState(false);
+  const [categories, setCategories] = useState<CategoryNames>();
   const entityRef = useRef<HTMLInputElement>(null);
+  const userRef = useRef<HTMLInputElement>(null);
 
   // ตัวกรอง = replace (ไม่เพิ่ม history ทุกครั้งที่เลือก) · หน้าและขอบเขต = push (Back ย้อนได้)
   const setFilter = (patch: Record<string, string | null>, replace = true) => {
@@ -183,12 +200,19 @@ export default function AuditLog({ isAdmin }: { isAdmin: boolean }) {
     return () => { current = false; };
   }, [entityType, action, userId, from, to, page, scopeAll, reloadKey]);
 
-  // รายชื่อผู้ใช้ของตัวกรองโหมดทุกคน — โหลดไม่ได้ยังกรองได้ด้วย "ทุกคน" (ไม่บล็อกทั้งหน้า)
+  // รายชื่อผู้ใช้ของตัวกรองโหมดทุกคน — โหลดไม่ได้ยังกรองได้ด้วย "ทุกคน" (ไม่บล็อกทั้งหน้า) · ลองใหม่ = ล้าง usersFailed
   useEffect(() => {
-    if (!scopeAll || users) return;
-    setUsersFailed(false);
+    if (!scopeAll || users || usersFailed) return;
     req<User[]>('/api/admin/users').then(setUsers).catch(() => setUsersFailed(true));
-  }, [scopeAll, users]);
+  }, [scopeAll, users, usersFailed]);
+
+  // ชื่อหมวดของ category_id ในรายละเอียดแถว — ไม่กรอง is_active เพราะประวัติอ้างหมวดที่ปิดใช้ไปแล้วได้
+  // โหลดไม่ได้ไม่บล็อกหน้า ช่องหมวดขึ้นว่า "ไม่ทราบชื่อหมวด" แทน
+  useEffect(() => {
+    req<Category[]>('/api/categories')
+      .then((rows) => setCategories(new Map(rows.map((c) => [c.id, c.name]))))
+      .catch(() => {});
+  }, []);
 
   // หน้าเกินช่วง (ลิงก์เก่า, ?page=99) — ไปหน้าสุดท้ายที่มีแถว หรือหน้าแรกถ้าไม่มีเลย แทนการค้างที่ "ไม่พบ" โดยไม่มีปุ่มเปลี่ยนหน้า
   const pastEnd = data != null && data.rows.length === 0 && page > 1;
@@ -213,7 +237,7 @@ export default function AuditLog({ isAdmin }: { isAdmin: boolean }) {
   const actionEntity = (code: string) => AUDIT_ACTIONS.find(([c]) => c === code)?.[2];
 
   const showUser = scopeAll;
-  const colCount = showUser ? 5 : 4;
+  const colCount = showUser ? 4 : 3;
   // แบ่งแถวตามวัน (เรียงใหม่ → เก่าจาก server อยู่แล้ว) — วันหนึ่งข้ามหน้าได้ หัววันขึ้นซ้ำต้นหน้าถัดไป
   const days: { day: string; rows: AuditLogEntry[] }[] = [];
   for (const r of rows) {
@@ -230,8 +254,8 @@ export default function AuditLog({ isAdmin }: { isAdmin: boolean }) {
         id="audit-log-heading"
         title="ประวัติการเปลี่ยนแปลง"
         description={scopeAll
-          ? 'สิ่งที่สมาชิกทุกคนทำในระบบ รวมถึงการอนุมัติผู้ใช้และการแก้ธนาคาร กดลูกศรหน้าแถวเพื่อดูว่าเปลี่ยนอะไร'
-          : 'สิ่งที่คุณทำในระบบ เช่น เข้าสู่ระบบ ใส่หมวด บันทึกจ่าย ดูย้อนหลังได้แต่แก้หรือลบไม่ได้ กดลูกศรหน้าแถวเพื่อดูว่าเปลี่ยนอะไร'}
+          ? 'สิ่งที่สมาชิกทุกคนทำในระบบ รวมถึงการอนุมัติผู้ใช้และการแก้ธนาคาร กดที่แถวเพื่อดูว่าเปลี่ยนอะไร'
+          : 'สิ่งที่คุณทำในระบบ เช่น เข้าสู่ระบบ ใส่หมวด บันทึกจ่าย ดูย้อนหลังได้แต่แก้หรือลบไม่ได้ กดที่แถวเพื่อดูว่าเปลี่ยนอะไร'}
         action={isAdmin ? (
           <ToggleButtonGroup
             exclusive
@@ -256,6 +280,7 @@ export default function AuditLog({ isAdmin }: { isAdmin: boolean }) {
             size="small"
             label="ผู้ใช้"
             value={userId}
+            inputRef={userRef}
             onChange={(e) => setFilter({ user_id: e.target.value })}
             helperText={usersFailed ? 'โหลดรายชื่อไม่สำเร็จ' : undefined}
             sx={{ flex: '1 1 180px', maxWidth: { sm: 240 } }}
@@ -264,6 +289,10 @@ export default function AuditLog({ isAdmin }: { isAdmin: boolean }) {
             {users?.map((u) => <MenuItem key={u.id} value={String(u.id)}>{u.display_name || u.email}</MenuItem>)}
             {userId && !users?.some((u) => String(u.id) === userId) && <MenuItem value={userId}>ผู้ใช้รหัส {userId}</MenuItem>}
           </TextField>
+        )}
+        {showUser && usersFailed && (
+          // ปุ่มหายไปทันทีที่เริ่มโหลดใหม่ — focus ไปช่องผู้ใช้ที่อยู่ตลอด
+          <Button color="inherit" onClick={() => { setUsersFailed(false); userRef.current?.focus(); }}>ลองโหลดรายชื่อใหม่</Button>
         )}
         <TextField
           select
@@ -356,7 +385,6 @@ export default function AuditLog({ isAdmin }: { isAdmin: boolean }) {
                   <TableCell sx={MD_UP}>เวลา</TableCell>
                   <TableCell>การกระทำ</TableCell>
                   {showUser && <TableCell sx={MD_UP}>ผู้ใช้</TableCell>}
-                  <TableCell sx={MD_UP}>ประเภทข้อมูล</TableCell>
                 </TableRow>
               </TableHead>
               {days.map(({ day, rows: dayRows }) => (
@@ -367,7 +395,7 @@ export default function AuditLog({ isAdmin }: { isAdmin: boolean }) {
                       {day}
                     </TableCell>
                   </TableRow>
-                  {dayRows.map((r) => <LogRow key={r.id} entry={r} showUser={showUser} showRaw={isAdmin} />)}
+                  {dayRows.map((r) => <LogRow key={r.id} entry={r} showUser={showUser} isAdmin={isAdmin} categories={categories} />)}
                 </TableBody>
               ))}
             </Table>

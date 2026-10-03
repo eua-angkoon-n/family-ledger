@@ -9,7 +9,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 import { isPageEnabled, TAX_PAGES_ENABLED } from '../web/src/features.js';
-import { GUIDES, HELP_GROUPS, guideForPath, helpSections } from '../web/src/guide/guides.js';
+import { GUIDES, HELP_GROUPS, guideForPath, helpSections, highlightSegments } from '../web/src/guide/guides.js';
 
 const WEB_SRC = join(import.meta.dirname, '..', 'web', 'src');
 
@@ -105,4 +105,14 @@ test('features: ปิดหน้าภาษีแล้วต้องหา�
     assert.equal(shown.includes(path), TAX_PAGES_ENABLED, `${path} ต้องขึ้นใน /help ก็ต่อเมื่อ TAX_PAGES_ENABLED`);
   }
   assert.ok(shown.includes('/dashboard') && shown.includes('/student-loan'));
+});
+
+test('/help: ไฮไลต์คำค้นเทียบแบบเดียวกับการค้น — ไม่สนตัวพิมพ์ คร่อมขอบ ** ได้ ตัวหนายังอยู่', () => {
+  const show = (text: string, q: string) =>
+    highlightSegments(text, q).map((s) => `${s.bold ? 'B' : ''}${s.hit ? 'H' : ''}:${s.text}`);
+  assert.deepEqual(show('ต่อ Gmail ใหม่', 'gmail'), [':ต่อ ', 'H:Gmail', ': ใหม่']);
+  assert.deepEqual(show('ใช้กับ**เดือนอนาคต**เท่านั้น', 'กับเดือน'), [':ใช้', 'H:กับ', 'BH:เดือน', 'B:อนาคต', ':เท่านั้น']);
+  assert.deepEqual(show('a**b**a', 'a'), ['H:a', 'B:b', 'H:a']);
+  // ไม่มีคำค้น = เหมือน Emphasis
+  assert.deepEqual(show('กด **บันทึก**', ''), [':กด ', 'B:บันทึก']);
 });

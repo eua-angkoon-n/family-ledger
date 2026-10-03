@@ -77,7 +77,8 @@ export function RowIconButton({
 }
 
 /**
- * เลขเวอร์ชันมุมล่างขวา แสดงทุกหน้ารวมหน้าเข้าสู่ระบบ ค่ามาจาก `GET /api/me`
+ * เลขเวอร์ชัน แสดงทุกหน้ารวมหน้าเข้าสู่ระบบ ค่ามาจาก `GET /api/me` — วางเป็นลูกตัวสุดท้ายของหน้า (App.tsx)
+ * ≥ sm ลอยมุมล่างขวา · < sm อยู่ในลำดับเนื้อหาท้ายหน้าชิดขวา (ลอยแล้วทับแถวตาราง/ข้อความบนจอแคบ)
  * ใช้ฟอนต์ data ตาม Financial Clarity Rule (เลขเวอร์ชันคือข้อมูลเทคนิค ไม่ใช่ข้อความอธิบาย)
  * `pointerEvents: none` เพื่อไม่บังปุ่มใด ๆ และ z-index อยู่ต่ำกว่า dialog/snackbar ของ MUI
  */
@@ -87,10 +88,14 @@ export function VersionBadge({ version }: { version: string | null }) {
     // ไม่ใส่ aria-label: บน div ที่ไม่มี role screen reader ข้ามทิ้ง — ข้อความที่เห็น "v1.4.0" อ่านออกเสียงได้อยู่แล้ว
     <Box
       sx={{
-        position: 'fixed',
-        right: { xs: 8, sm: 12 },
-        bottom: { xs: 6, sm: 10 },
-        px: 0.75,
+        position: { xs: 'static', sm: 'fixed' },
+        right: { sm: 12 },
+        bottom: { sm: 10 },
+        // < sm: ชิดขวาตรงขอบเนื้อหา (gutter 16px ของ Container) · justifySelf ให้ชิดขวาในกล่อง grid ของหน้าเข้าสู่ระบบด้วย
+        textAlign: 'right',
+        justifySelf: { xs: 'end', sm: 'auto' },
+        px: { xs: 2, sm: 0.75 },
+        pb: { xs: 0.75, sm: 0 },
         color: 'text.secondary',
         fontSize: '0.875rem', // ขั้น `label` ของ DESIGN.md — ไม่ลด opacity ทับ เพราะ muted ต้องคง contrast AA
         pointerEvents: 'none',

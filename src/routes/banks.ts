@@ -93,12 +93,14 @@ banksRouter.patch('/banks/:id', requireAdmin(async (req, res, admin) => {
     await audit(c, { userId: admin.id, action: 'bank.update', entityType: 'bank', entityId: bankId, before, after: rows[0], ip: req.ip ?? null });
     // statement ที่เคยพลาดเพราะรูปแบบเดิม (หรือมาตอนธนาคารปิดอยู่) ต้องถูกอ่านใหม่ — สั่งเฉพาะกล่องที่มีบัญชีใช้งาน
     // ของธนาคารนี้ กล่องที่ต้องเชื่อม Gmail ใหม่ข้าม (sync จะโยน GmailReauthRequiredError อยู่ดี)
+    // กล่องของผู้ใช้ที่ไม่ approved ข้ามด้วย (doSync ไม่ดึงอยู่แล้ว — กรองที่นี่ให้ resync_mailboxes นับตรง)
     const resync = (!before.is_active && rows[0].is_active) || MATCH_FIELDS.some((f) => before[f] !== rows[0][f]);
     const mailboxIds = resync
       ? (await c.query<{ id: number }>(
           `select distinct a.email_account_id as id from bank_account a
            join email_account e on e.id = a.email_account_id
-           where a.bank_id = $1 and a.archived_at is null and e.reauth_required_at is null`,
+           join app_user u on u.id = e.user_id
+           where a.bank_id = $1 and a.archived_at is null and e.reauth_required_at is null and u.status = 'approved'`,
           [bankId],
         )).rows.map((r) => r.id)
       : [];

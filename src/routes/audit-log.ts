@@ -14,6 +14,14 @@ function optDate(q: Record<string, unknown>, field: string): string | null {
   return v;
 }
 
+// ciphertext (`*_enc`) ห้ามออกทาง API — แถวเก่าก่อนแก้บั๊ก Slice 8 มี pdf_password_enc (migration 014 ล้างระดับบนแล้ว)
+// ตัดซ้ำตอนอ่านทุกระดับ (payload บางตัวเป็น array/ซ้อน) กันจุดเขียน audit ใหม่ที่พลาดในอนาคตด้วย
+function withoutSecrets(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(withoutSecrets);
+  if (v === null || typeof v !== 'object') return v;
+  return Object.fromEntries(Object.entries(v).filter(([k]) => !k.endsWith('_enc')).map(([k, x]) => [k, withoutSecrets(x)]));
+}
+
 // ponytail: ไม่มีการลบข้อมูลเก่าออกเลย ตารางโตไปเรื่อย ๆ — สเกลครอบครัวโตช้ามาก (หลักหมื่นแถว/ปี)
 // ถ้าวันไหนใหญ่จริงค่อยเพิ่ม `delete from audit_log where created_at < now() - interval '2 years'`
 // เข้า worker เดือนละครั้ง ยังไม่ทำเป็น cron ตอนนี้เพราะจะกลายเป็นกลไกที่ต้องดูแลโดยไม่มีใครเดือดร้อน
@@ -71,5 +79,10 @@ auditLogRouter.get('/audit-log', requireUser(async (req, res, user) => {
       ? Number(rows[0]!.total_count)
       : ((await query<{ n: number }>(`select count(*)::int as n ${filterSql}`, params)).rows[0]?.n ?? 0);
 
-  res.json({ rows: rows.map(({ total_count: _t, ...r }) => r), total_count: totalCount, limit, offset: offsetRaw });
+  res.json({
+    rows: rows.map(({ total_count: _t, ...r }) => ({ ...r, before_data: withoutSecrets(r.before_data), after_data: withoutSecrets(r.after_data) })),
+    total_count: totalCount,
+    limit,
+    offset: offsetRaw,
+  });
 }));

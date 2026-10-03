@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { Fragment, useEffect, useRef, useState, type RefObject } from 'react';
 import { Link as RouterLink, useLocation } from 'react-router-dom';
 import {
   Accordion, AccordionDetails, AccordionSummary, Box, Button, Link, Paper, Stack, TextField, Typography,
@@ -9,21 +9,36 @@ import SearchOffRounded from '@mui/icons-material/SearchOffRounded';
 import UnfoldLessRounded from '@mui/icons-material/UnfoldLessRounded';
 import UnfoldMoreRounded from '@mui/icons-material/UnfoldMoreRounded';
 import { TAX_PAGES_ENABLED } from '../features.js';
-import { Emphasis } from '../guide/GuideTour.js';
-import { GUIDES, helpSections, type HelpSection as Section } from '../guide/guides.js';
+import { GUIDES, helpSections, highlightSegments, type HelpSection as Section } from '../guide/guides.js';
 import { descriptionSx } from '../theme.js';
 import { EmptyState, PageHeader, useHashTarget } from '../ui.js';
 
 const SCHEME_ATTR = 'data-mui-color-scheme';
 const bodySx = { mt: 0.5, maxWidth: '75ch', color: 'text.secondary', ...descriptionSx } as const;
 
+// พื้น/ตัวอักษรคู่เดียวกับรายการที่เลือก (sidebar-accent) — ผ่าน AA ทั้งสองโหมด (6.97 / 8.09) และเห็นชัดบนพื้น card
+// (accent สีเหลืองเกือบกลืนกับ card ธีมสว่าง) ไม่ใช้เหลืองเริ่มต้นของเบราว์เซอร์ที่ไม่ตามธีมมืด
+const markSx = { bgcolor: 'brand.sidebarAccent', color: 'brand.sidebarAccentForeground', borderRadius: 0.5 } as const;
+
+/** `**คำ**` = ตัวหนาแบบ Emphasis ของ tour + ไฮไลต์คำค้นด้วย `<mark>` (term ว่าง = ไม่มีไฮไลต์) */
+function Marked({ text, term }: { text: string; term: string }) {
+  return (
+    <>
+      {highlightSegments(text, term).map((s, i) => {
+        const node = s.hit ? <Box component="mark" sx={markSx}>{s.text}</Box> : s.text;
+        return <Fragment key={i}>{s.bold ? <strong>{node}</strong> : node}</Fragment>;
+      })}
+    </>
+  );
+}
+
 /** ข้อ ๆ ที่คั่นด้วย " · " ใน guides.ts เป็นรายการ — ขั้นยาวอ่านไล่ทีละข้อได้ (ใน tour ยังเป็นย่อหน้าเดียว) */
-function StepBody({ text }: { text: string }) {
+function StepBody({ text, term }: { text: string; term: string }) {
   const items = text.split(' · ');
-  if (items.length === 1) return <Typography sx={bodySx}><Emphasis text={text} /></Typography>;
+  if (items.length === 1) return <Typography sx={bodySx}><Marked text={text} term={term} /></Typography>;
   return (
     <Box component="ul" sx={{ ...bodySx, mb: 0, pl: 2.5, '& > li + li': { mt: 0.5 } }}>
-      {items.map((item) => <li key={item}><Emphasis text={item} /></li>)}
+      {items.map((item) => <li key={item}><Marked text={item} term={term} /></li>)}
     </Box>
   );
 }
@@ -32,8 +47,9 @@ function StepBody({ text }: { text: string }) {
  * หนึ่งหน้าของระบบ = หนึ่งส่วน id = path ไม่มี "/" (ลิงก์ `/help#planning`) · หัวข้อ h3 (heading ของ Accordion) ห่อปุ่มที่ชื่อ
  * = ชื่อหน้าเท่านั้น คำอธิบายหน้าเป็น aria-describedby — ไม่ใช่ชื่อปุ่มยาวทั้งประโยค
  */
-function HelpSection({ section, expanded, onToggle, sectionRef }: {
+function HelpSection({ section, term, expanded, onToggle, sectionRef }: {
   section: Section;
+  term: string;
   expanded: boolean;
   onToggle: (open: boolean) => void;
   sectionRef?: RefObject<HTMLDivElement>;
@@ -59,9 +75,11 @@ function HelpSection({ section, expanded, onToggle, sectionRef }: {
         expandIcon={<ExpandMoreRounded />}
       >
         <Box sx={{ minWidth: 0 }}>
-          <Typography component="span" id={`${id}-title`} sx={{ display: 'block', fontWeight: 600 }}>{guide.title}</Typography>
+          <Typography component="span" id={`${id}-title`} sx={{ display: 'block', fontWeight: 600 }}>
+            <Marked text={guide.title} term={term} />
+          </Typography>
           <Typography component="span" id={`${id}-purpose`} color="text.secondary" sx={{ display: 'block', mt: 0.5, ...descriptionSx }}>
-            {guide.purpose}
+            <Marked text={guide.purpose} term={term} />
           </Typography>
         </Box>
       </AccordionSummary>
@@ -69,8 +87,8 @@ function HelpSection({ section, expanded, onToggle, sectionRef }: {
         <Stack spacing={2.5}>
           {steps.map((step) => (
             <Box key={step.title} sx={{ breakInside: 'avoid' }}>
-              <Typography component="h4" sx={{ fontWeight: 600 }}>{step.title}</Typography>
-              <StepBody text={step.body} />
+              <Typography component="h4" sx={{ fontWeight: 600 }}><Marked text={step.title} term={term} /></Typography>
+              <StepBody text={step.body} term={term} />
             </Box>
           ))}
           <Box sx={{ displayPrint: 'none' }}>
@@ -236,6 +254,7 @@ export default function Help({ isAdmin }: { isAdmin: boolean }) {
               <HelpSection
                 key={section.path}
                 section={section}
+                term={term}
                 expanded={open.has(section.path)}
                 onToggle={(next) => toggle(section.path, next)}
                 sectionRef={section.path === hashPath ? hashRef : undefined}

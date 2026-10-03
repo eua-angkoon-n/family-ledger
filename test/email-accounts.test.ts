@@ -164,6 +164,35 @@ test('email accounts: sync กับ token ที่ใช้ไม่ได้ 
     assert.equal((await syncEmailAccount(mailboxId)).already_running, false);
   });
 
+  await t.test('กล่องของผู้ใช้ pending/rejected: ไม่ยิง Google ไม่ขยับ last_synced_at (รอบชั่วโมงและ resync ผ่าน syncEmailAccount ทั้งหมด)', async () => {
+    for (const status of ['pending', 'rejected']) {
+      const owner = (await db.pool.query<{ id: number }>(
+        `insert into app_user (google_sub, email, display_name, is_admin, status)
+         values ($1, $2, $2, false, $3) returning id`,
+        [`google-sub-${status}`, `${status}@example.com`, status],
+      )).rows[0]!.id;
+      const box = (await db.pool.query<{ id: number }>(
+        `insert into email_account (user_id, email, refresh_token_enc) values ($1, $2, $3) returning id`,
+        [owner, `${status}@example.com`, encrypt('refresh-token')],
+      )).rows[0]!.id;
+      const before = tokenCalls;
+      for (const opts of [{}, { full: true }]) {
+        assert.deepEqual(await syncEmailAccount(box, opts), {
+          messages_scanned: 0, statements_inserted: 0, statements_failed: 0, skipped: 0, already_running: false,
+        });
+      }
+      assert.equal(tokenCalls, before, `${status}: ห้ามขอ access token`);
+      const row = (await db.pool.query('select last_synced_at from email_account where id = $1', [box])).rows[0]!;
+      assert.equal(row.last_synced_at, null, `${status}: last_synced_at ต้องค้าง null ให้รอบแรกหลังอนุมัติดึงเต็มกล่อง`);
+      if (status !== 'pending') continue;
+      // อนุมัติแล้ว: รอบชั่วโมงแรก (ไม่ได้ขอ full) ต้องค้นทั้งกล่อง ไม่มี after:
+      await db.pool.query(`update app_user set status = 'approved' where id = $1`, [owner]);
+      listQueries.length = 0;
+      await syncEmailAccount(box);
+      assert.deepEqual(listQueries.sort(), banks.map((b) => `from:${b.sender_email}`).sort());
+    }
+  });
+
   await t.test('countStatements: ไฟล์ที่พัง (รวมไฟล์เดิมที่ยังพัง) ไม่นับเป็น statement ใหม่', () => {
     // parse_failed ถูกเขียนทับทุกรอบที่เจอไฟล์เดิม — เคยนับเป็น inserted ทุกรอบ
     assert.deepEqual(countStatements(['parse_failed']), { inserted: 0, failed: 1 });

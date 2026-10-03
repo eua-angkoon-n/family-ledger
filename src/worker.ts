@@ -114,10 +114,14 @@ async function doSync(emailAccountId: number, requestFull: boolean): Promise<Syn
     messages_scanned: 0, statements_inserted: 0, statements_failed: 0, skipped: 0, already_running: false,
   };
 
+  // ด่านเดียวที่ทุกทางสั่ง sync ผ่าน (รอบชั่วโมง, resync จาก accounts/banks, ยิงมือ): เจ้าของกล่องต้อง approved
+  // pending/rejected ไม่ถูกอ่านเมลเลย — last_synced_at ค้าง null ไว้ หลังอนุมัติรอบแรกจึงดึงเต็มกล่อง
   const { rows } = await query<{
     id: number; user_id: number; refresh_token_enc: string; last_synced_at: Date | null; reauth_required_at: Date | null;
   }>(
-    'select id, user_id, refresh_token_enc, last_synced_at, reauth_required_at from email_account where id = $1',
+    `select e.id, e.user_id, e.refresh_token_enc, e.last_synced_at, e.reauth_required_at
+     from email_account e join app_user u on u.id = e.user_id
+     where e.id = $1 and u.status = 'approved'`,
     [emailAccountId],
   );
   const account = rows[0];

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readdir } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
@@ -131,8 +131,31 @@ test('migrate() roll-forward', async (t) => {
       `insert into monthly_plan_item(monthly_plan_id,recurring_rule_id,kind,name,planned_amount_satang,occurrence_date)
        values($1,$2,'expense','ค่าน้ำ ค่าไฟ',400000,'2026-07-10') returning id`, [legacyPlan, legacyRule],
     )).rows[0]!.id;
-    const rest = [...throughSlice5, ...await db.migrate()];
+    // 014: แถว audit เก่าที่มี ciphertext (`*_enc`) ระดับบนต้องถูกลบ key ทิ้ง ส่วนอื่นคงเดิม
+    const through013 = await db.migrate({ upTo: '013_email_account_reauth.sql' });
+    const seedAudit = (before: string | null, after: string | null) => db.pool.query<{ id: number }>(
+      `insert into audit_log (user_id, action, entity_type, before_data, after_data) values ($1, 'x', 'bank_account', $2, $3) returning id`,
+      [userId, before, after],
+    ).then((r) => r.rows[0]!.id);
+    const leaked = await seedAudit(
+      '{"id": 1, "pdf_password_enc": "c1", "refresh_token_enc": "c2", "nested": {"tax_id_enc": "c3"}}',
+      '{"id": 1, "nickname": "x", "some_new_enc": "c4"}',
+    );
+    const arrayPayload = await seedAudit('[{"pdf_password_enc": "c5"}]', null);
+    const clean = await seedAudit(null, '{"note": "x_enc ในค่าไม่ใช่ key"}');
+    const rest = [...throughSlice5, ...through013, ...await db.migrate()];
     assert.deepEqual(rest, files.filter((f) => f > upTo));
+    const auditRow = async (id: number) =>
+      (await db.pool.query('select before_data, after_data from audit_log where id = $1', [id])).rows[0];
+    const expected = {
+      [leaked]: { before_data: { id: 1, nested: { tax_id_enc: 'c3' } }, after_data: { id: 1, nickname: 'x' } },
+      [arrayPayload]: { before_data: [{ pdf_password_enc: 'c5' }], after_data: null }, // array ข้าม (route ตัดตอนอ่าน)
+      [clean]: { before_data: null, after_data: { note: 'x_enc ในค่าไม่ใช่ key' } },
+    };
+    for (const [id, row] of Object.entries(expected)) assert.deepEqual(await auditRow(Number(id)), row);
+    // idempotent: รันซ้ำได้ผลเท่าเดิม
+    await db.pool.query(await readFile(join(MIGRATIONS_DIR, '014_audit_log_strip_secrets.sql'), 'utf8'));
+    for (const [id, row] of Object.entries(expected)) assert.deepEqual(await auditRow(Number(id)), row);
     const preservedItem = (await db.pool.query('select planned_amount_satang,income_record_id,installment_due_id,amount_mode from monthly_plan_item where id=$1', [legacyItem])).rows[0];
     assert.deepEqual(preservedItem, { planned_amount_satang: 10000, income_record_id: null, installment_due_id: null, amount_mode: 'fixed' });
     assert.equal((await db.pool.query('select amount_mode from monthly_plan_item where id=$1', [legacyEstimated])).rows[0]!.amount_mode, 'estimated');

@@ -72,12 +72,12 @@ const GMAIL_NOTICE: Record<string, Notice> = {
 
 // แถบเตือนทุกหน้า: กล่องอีเมลที่ Google ปฏิเสธสิทธิ์ (invalid_grant) หรือยังไม่มีกล่องอีเมลเลย — ทั้งสองกรณีนำเข้า statement ไม่ได้
 // ปุ่มไป /auth/google ต้องเป็น <a href> (โหลดทั้งหน้าไป OAuth) ไม่ใช่ Link ของ router; ปุ่มอยู่ใต้ข้อความ ไม่ใช้ action
-// ของ Alert เพราะที่ 320px ข้อความจะเหลือที่แคบมาก
+// ของ Alert เพราะที่ 320px ข้อความจะเหลือที่แคบมาก · ไม่พิมพ์ (ไม่งั้นติดหัวคู่มือ/หน้าภาษีบนกระดาษ)
 function GmailBanner({ mailboxes }: { mailboxes: EmailAccount[] | null }) {
   if (!mailboxes) return null;
   if (mailboxes.length === 0) {
     return (
-      <Alert severity="info" sx={{ mb: 3, ...descriptionSx }}>
+      <Alert severity="info" sx={{ mb: 3, displayPrint: 'none', ...descriptionSx }}>
         ยังไม่ได้เชื่อม Gmail — ระบบยังนำเข้า statement ไม่ได้
         <Box sx={{ mt: 1 }}><Button variant="outlined" color="inherit" href="/auth/google?add=1">เชื่อม Gmail</Button></Box>
       </Alert>
@@ -86,7 +86,7 @@ function GmailBanner({ mailboxes }: { mailboxes: EmailAccount[] | null }) {
   const broken = mailboxes.filter((m) => m.reauth_required_at);
   if (broken.length === 0) return null;
   return (
-    <Alert severity="error" sx={{ mb: 3, ...descriptionSx }}>
+    <Alert severity="error" sx={{ mb: 3, displayPrint: 'none', ...descriptionSx }}>
       ต้องเชื่อม Gmail ใหม่: สิทธิ์อ่านอีเมลของ <Box component="span" sx={{ ...dataTextSx, overflowWrap: 'anywhere' }}>{broken.map((m) => m.email).join(', ')}</Box>{' '}
       หมดอายุหรือถูกยกเลิก ระบบจึงหยุดนำเข้า statement จากกล่องอีเมลนี้
       <Box sx={{ mt: 1 }}>
@@ -169,7 +169,8 @@ function activeNavPath(pathname: string): string | false {
 
 function AuthPanel({ children, version }: { children: ReactNode; version: string | null }) {
   return (
-    <Box component="main" sx={{ minHeight: '100vh', display: 'grid', placeItems: 'center', p: { xs: 2, sm: 3 } }}>
+    // แถว auto ล่าง = เลขเวอร์ชัน (< sm อยู่ในลำดับเนื้อหา) — กล่องยังอยู่กลางจอ ≥ sm เลขเวอร์ชัน fixed แถวนี้จึงว่าง
+    <Box component="main" sx={{ minHeight: '100vh', display: 'grid', gridTemplateRows: '1fr auto', placeItems: 'center', p: { xs: 2, sm: 3 } }}>
       <Box sx={{ position: 'fixed', top: { xs: 8, sm: 16 }, right: { xs: 8, sm: 16 } }}>
         <ThemeModeToggle />
       </Box>
@@ -348,14 +349,17 @@ export default function App() {
                   ))}
                 </Tabs>
               ) : (
+                // มีผู้ใช้รออนุมัติ (แอดมิน) = จุด warning บน ☰ ตัวเลขอยู่ที่ตั้งค่าใน drawer — screen reader ได้ประโยคในชื่อปุ่ม
                 <IconButton
                   color="inherit"
-                  aria-label="เปิดเมนู"
+                  aria-label={pendingUserCount > 0 ? `เปิดเมนู (รออนุมัติ ${pendingUserCount} คน)` : 'เปิดเมนู'}
                   aria-controls={menuOpen ? 'main-menu-drawer' : undefined}
                   aria-expanded={menuOpen}
                   onClick={() => setMenuOpen(true)}
                 >
-                  <MenuRounded />
+                  <Badge variant="dot" color="warning" invisible={pendingUserCount <= 0}>
+                    <MenuRounded />
+                  </Badge>
                 </IconButton>
               )}
             </Box>
@@ -463,7 +467,8 @@ export default function App() {
         </List>
       </Drawer>
 
-      <Container component="main" maxWidth="lg" sx={{ py: { xs: 3, sm: 4 }, pb: 8 }}>
+      {/* < sm เลขเวอร์ชันต่อท้ายหน้า (ไม่ลอย) ระยะล่างรวมกับบรรทัดเวอร์ชันจึงใกล้เดิม */}
+      <Container component="main" maxWidth="lg" sx={{ py: { xs: 3, sm: 4 }, pb: { xs: 4, sm: 8 } }}>
         <GmailBanner mailboxes={mailboxes} />
         <Suspense fallback={<TableSkeleton rows={6} />}>
           <Routes>

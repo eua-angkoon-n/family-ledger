@@ -6,6 +6,7 @@ import {
   Box,
   Button,
   Chip,
+  FormControlLabel,
   FormLabel,
   MenuItem,
   Paper,
@@ -24,10 +25,12 @@ import {
 } from '@mui/material';
 import AddRounded from '@mui/icons-material/AddRounded';
 import AccountBalanceRounded from '@mui/icons-material/AccountBalanceRounded';
+import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import EditRounded from '@mui/icons-material/EditRounded';
 import GroupRounded from '@mui/icons-material/GroupRounded';
 import HistoryRounded from '@mui/icons-material/HistoryRounded';
+import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded';
 import { del, patch, post, req, type AdminBank, type Bank, type BankUpdateResponse, type User } from './api.js';
 import { createFormFieldChangeHandler } from './form.js';
 import Modal from './Modal.js';
@@ -76,27 +79,27 @@ const FIELD_ID: Record<BankField, string> = {
   attachment_filename_pattern: 'bank-filename',
 };
 
-// ตัวอย่างจริงของ SCB (migrations/003, ชื่อไฟล์จาก test fixture) — ไม่มีเลขบัญชีปน
+// ตัวอย่างจริงของ SCB (migrations/003, ชื่อไฟล์จาก test fixture) — ไม่มีเลขบัญชีปน · บอก "ตัวอย่างจาก SCB" เพราะขึ้นตอนแก้ธนาคารอื่นด้วย
 const REGEX_FIELDS = [
   {
     key: 'subject_monthly',
     short: 'หัวข้อรายเดือน',
     label: 'หัวข้ออีเมล statement รายเดือน',
-    helper: 'หัวข้ออีเมลที่ธนาคารส่ง statement ให้ทุกเดือน เช่น SCB ส่งหัวข้อ “SCB E PASSBOOK: e-Statement”',
+    helper: 'หัวข้ออีเมลที่ธนาคารส่ง statement ให้ทุกเดือน — ตัวอย่างจาก SCB: “SCB E PASSBOOK: e-Statement”',
     placeholder: '^SCB E PASSBOOK: e-Statement$',
   },
   {
     key: 'subject_ondemand',
     short: 'หัวข้อขอเอง',
     label: 'หัวข้ออีเมล statement ที่ขอย้อนหลังเอง',
-    helper: 'หัวข้อตอนผู้ใช้ขอ statement ย้อนหลังจากแอปธนาคาร (เหมือนรายเดือนก็ใส่ซ้ำได้) เช่น SCB ส่ง “Sending deposit account statement with annotations from SCB Easy Application system”',
+    helper: 'หัวข้อตอนผู้ใช้ขอ statement ย้อนหลังจากแอปธนาคาร (เหมือนรายเดือนก็ใส่ซ้ำได้) — ตัวอย่างจาก SCB: “Sending deposit account statement with annotations from SCB Easy Application system”',
     placeholder: '^Sending deposit account statement with annotations from SCB Easy Application system$',
   },
   {
     key: 'attachment_filename_pattern',
     short: 'ชื่อไฟล์',
     label: 'ชื่อไฟล์ PDF ที่แนบมา',
-    helper: 'ไฟล์แนบที่ชื่อไม่ตรงจะถูกข้าม (เช่นคู่มือที่แนบมาด้วย) เช่น SCB แนบ “AcctSt_Jan26.pdf”',
+    helper: 'ไฟล์แนบที่ชื่อไม่ตรงจะถูกข้าม (เช่นคู่มือที่แนบมาด้วย) — ตัวอย่างจาก SCB: “AcctSt_Jan26.pdf”',
     placeholder: '^(?:X{4}\\d{6}|AcctSt_[A-Za-z]{3}\\d{2})\\.pdf$',
   },
 ] as const satisfies readonly { key: BankField; short: string; label: string; helper: string; placeholder: string }[];
@@ -133,9 +136,9 @@ function bankFormErrors(f: BankForm, others: AdminBank[], showRequired: boolean)
   return errors;
 }
 
-/** ช่องลองหัวข้อ/ชื่อไฟล์: ตรงกับรูปแบบไหนบ้าง — ใช้ทดสอบกับทั้งสามรูปแบบพร้อมกันเหมือนที่ worker ใช้ */
-function sampleResult(f: BankForm, sample: string): string {
-  if (sample === '') return 'วางหัวข้ออีเมลหรือชื่อไฟล์จริงเพื่อดูว่าตรงกับรูปแบบไหน — ช่องนี้ไม่ถูกบันทึก';
+/** ช่องลองหัวข้อ/ชื่อไฟล์: ตรงกับรูปแบบไหนบ้าง — ใช้ทดสอบกับทั้งสามรูปแบบพร้อมกันเหมือนที่ worker ใช้ · matched null = ยังไม่ได้ลอง */
+function sampleResult(f: BankForm, sample: string): { text: string; matched: boolean | null } {
+  if (sample === '') return { text: 'วางหัวข้ออีเมลหรือชื่อไฟล์จริงเพื่อดูว่าตรงกับรูปแบบไหน — ช่องนี้ไม่ถูกบันทึก', matched: null };
   const matched: string[] = [];
   const skipped: string[] = [];
   for (const { key, short } of REGEX_FIELDS) {
@@ -144,7 +147,10 @@ function sampleResult(f: BankForm, sample: string): string {
     else if (re.test(sample)) matched.push(short);
   }
   const result = matched.length > 0 ? `ตรงกับ ${matched.join(', ')}` : 'ไม่ตรงกับรูปแบบไหนเลย';
-  return skipped.length > 0 ? `${result} (ยังไม่ได้ลอง ${skipped.join(', ')} เพราะรูปแบบว่างหรือใช้ไม่ได้)` : result;
+  return {
+    text: skipped.length > 0 ? `${result} (ยังไม่ได้ลอง ${skipped.join(', ')} เพราะรูปแบบว่างหรือใช้ไม่ได้)` : result,
+    matched: matched.length > 0,
+  };
 }
 
 function Banks() {
@@ -160,11 +166,17 @@ function Banks() {
   const [formError, setFormError] = useState('');
   const [attempted, setAttempted] = useState(false);
   const [sample, setSample] = useState('');
+  // ข้อความที่ประกาศ (role="status") — ตั้งเฉพาะตอนช่องตัวอย่างเปลี่ยน พิมพ์ช่องรูปแบบแล้วไม่ประกาศทุกตัวอักษร
+  const [sampleStatus, setSampleStatus] = useState('');
   const [submitting, setSubmitting] = useState(false);
   // ธนาคารที่ถามลบค้างไว้จน dialog ปิดสนิท — ไม่งั้นชื่อในคำถามว่างระหว่าง fade ออก
   const [deleting, setDeleting] = useState<AdminBank | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteError, setDeleteError] = useState('');
+  // ปิดใช้งานธนาคารที่มีบัญชีผูก — ถามก่อน (ค้างไว้จน dialog ปิดสนิทเหมือน deleting)
+  const [disabling, setDisabling] = useState<AdminBank | null>(null);
+  const [disableOpen, setDisableOpen] = useState(false);
+  const [disableError, setDisableError] = useState('');
   const [notice, setNotice] = useState<Notice | null>(null);
   // ผลของการกดใน dialog ขึ้นหลัง dialog ปิดสนิท (`#root` เป็น aria-hidden จนถึง onExited) — เปิดได้ทีละ dialog จึงพอช่องเดียว
   const noticeAfterCloseRef = useRef<Notice | null>(null);
@@ -217,6 +229,7 @@ function Banks() {
     setFormError('');
     setAttempted(false);
     setSample('');
+    setSampleStatus('');
     setModalOpen(true);
   };
   const openEdit = (bank: AdminBank) => openForm(bank.id, {
@@ -263,8 +276,15 @@ function Banks() {
   };
 
   // เปลี่ยนสถานะในตารางทันที (สวิตช์คือสถานะ) ไม่สำเร็จ = คืนค่าเดิม + แจ้งใน snackbar
+  // ปิดธนาคารที่มีบัญชีผูก (รวมที่เก็บเข้าคลัง) ถามก่อน — เปิดกลับและธนาคารที่ไม่มีบัญชีไม่ต้องถาม
   const toggleBank = async (bank: AdminBank) => {
     if (togglingRef.current.has(bank.id)) return;
+    if (bank.is_active && bank.account_count > 0) {
+      setDisableError('');
+      setDisabling(bank);
+      setDisableOpen(true);
+      return;
+    }
     togglingRef.current.add(bank.id);
     const next = !bank.is_active;
     const setActive = (value: boolean) => setBanks((rows) => rows && rows.map((b) => (b.id === bank.id ? { ...b, is_active: value } : b)));
@@ -283,6 +303,24 @@ function Banks() {
       setNotice({ message: errorText(e, 'เปลี่ยนสถานะธนาคารไม่สำเร็จ'), severity: 'error' });
     } finally {
       togglingRef.current.delete(bank.id);
+    }
+  };
+
+  // ผลขึ้นหลัง dialog ปิดสนิท (flushNotice) · ไม่สำเร็จ = error ใน dialog สวิตช์ยังเปิดอยู่
+  const disableBank = async () => {
+    if (!disabling) return;
+    setDisableError('');
+    setSubmitting(true);
+    try {
+      await patch<BankUpdateResponse>(`/api/banks/${disabling.id}`, { is_active: false });
+      const id = disabling.id;
+      setBanks((rows) => rows && rows.map((b) => (b.id === id ? { ...b, is_active: false } : b)));
+      noticeAfterCloseRef.current = { message: `ปิดใช้งาน ${disabling.name} แล้ว ระบบหยุดหยิบ statement ใหม่ของธนาคารนี้`, severity: 'success' };
+      setDisableOpen(false);
+    } catch (e) {
+      setDisableError(errorText(e, 'ปิดใช้งานธนาคารไม่สำเร็จ'));
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -313,6 +351,36 @@ function Banks() {
 
   // ตัวเลือก parser: ค่าเดิมของธนาคารที่แก้อยู่ต้องมีเสมอ แม้โหลดรายชื่อไม่ได้ (ไม่งั้น select ว่างเหมือนไม่เคยตั้ง)
   const parserOptions = [...new Set([...(parserKeys ?? []), formInitial.parser_key].filter(Boolean))];
+  const sampleCheck = sampleResult(form, sample);
+
+  // สวิตช์และปุ่มของแถวใช้ทั้งคอลัมน์ (≥ md) และบรรทัดใต้ชื่อ (< md) — อันที่ซ่อนเป็น display:none จึงไม่ซ้ำใน tab/screen reader
+  // ชื่อคงที่ สถานะบอกด้วย checked (เหมือนผู้เสียภาษีในหน้าบัญชีของฉัน)
+  // < md สวิตช์เป็นตัวควบคุมหลักของแถว — ขนาดปกติให้พื้นที่กดพอ (small สูง ~24px)
+  const activeSwitch = (bank: AdminBank, size: 'small' | 'medium' = 'small') => (
+    <Switch
+      size={size}
+      checked={bank.is_active}
+      onChange={() => void toggleBank(bank)}
+      slotProps={{ input: { 'aria-label': `ใช้งาน ${bank.name}` } }}
+    />
+  );
+  const rowActions = (bank: AdminBank) => (
+    <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end', alignItems: 'center' }}>
+      <RowIconButton label={`แก้ไข ${bank.name}`} tooltip="แก้ไข" onClick={() => openEdit(bank)}>
+        <EditRounded fontSize="small" />
+      </RowIconButton>
+      {/* มีบัญชีผูก (รวมที่เก็บเข้าคลัง) = FK กันลบ — บอกเหตุผลและทางเลือกแทนการให้กดแล้วเจอ 409 */}
+      <RowIconButton
+        label={`ลบ ${bank.name}`}
+        tooltip="ลบ"
+        color="error"
+        disabledReason={bank.account_count > 0 ? `ลบไม่ได้ — มีบัญชีผูกอยู่ ${bank.account_count.toLocaleString('th-TH')} บัญชี (รวมที่เก็บเข้าคลัง) ปิดใช้งานแทน` : null}
+        onClick={() => openDelete(bank)}
+      >
+        <DeleteOutlineRounded fontSize="small" />
+      </RowIconButton>
+    </Stack>
+  );
 
   return (
     <Box sx={{ mt: 4 }}>
@@ -335,7 +403,8 @@ function Banks() {
               action={<Button variant="contained" startIcon={<AddRounded />} onClick={() => openForm(null, EMPTY)}>เพิ่มธนาคารแรก</Button>}
             />
           ) : (
-            // < md เหลือ ธนาคาร · ใช้งาน · จัดการ — อีเมลผู้ส่งพับเป็นบรรทัดรอง หัวข้ออีเมล (regex ยาว) ดูในฟอร์มแก้ไข
+            // < md เหลือคอลัมน์เดียว: ชื่อ ตัวแกะ อีเมลผู้ส่ง แล้วสวิตช์ + ปุ่มเป็นบรรทัดล่าง (ท่าเดียวกับตารางผู้ใช้ — ที่ 320px
+            // สวิตช์ + สองปุ่มข้างชื่อเหลือที่ให้ชื่อราว 70px) หัวข้ออีเมล (regex ยาว) ดูในฟอร์มแก้ไข
             // ไม่มี minWidth จึงไม่ล้นกล่อง ไม่ใส่ tabIndex (ไม่มีอะไรให้เลื่อน)
             <TableContainer component={Paper} variant="outlined" role="region" aria-label="ตารางธนาคารที่รองรับ" sx={{ mt: 3, position: 'relative' }}>
               <Table size="small" aria-label="ธนาคารที่รองรับ">
@@ -344,8 +413,8 @@ function Banks() {
                     <TableCell>ธนาคาร</TableCell>
                     <TableCell sx={MD_UP}>ผู้ส่ง</TableCell>
                     <TableCell sx={MD_UP}>หัวข้ออีเมล</TableCell>
-                    <TableCell>ใช้งาน</TableCell>
-                    <TableCell align="right">จัดการ</TableCell>
+                    <TableCell sx={MD_UP}>ใช้งาน</TableCell>
+                    <TableCell align="right" sx={MD_UP}>จัดการ</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -357,6 +426,11 @@ function Banks() {
                           ตัวแกะ <code>{bank.parser_key}</code>{SEP}<Box component="span" sx={dataTextSx}>{bank.account_count.toLocaleString('th-TH')}</Box> บัญชี
                         </Typography>
                         <Typography variant="body2" color="text.secondary" sx={{ ...BELOW_MD, ...dataTextSx }}>{bank.sender_email}</Typography>
+                        <Stack direction="row" sx={{ ...BELOW_MD, mt: 1, alignItems: 'center', justifyContent: 'space-between' }}>
+                          {/* label ที่ตาเห็นแทนหัวคอลัมน์ที่ซ่อน · ชื่อที่ screen reader อ่านยังเป็น aria-label "ใช้งาน <ธนาคาร>" */}
+                          <FormControlLabel control={activeSwitch(bank, 'medium')} label="ใช้งาน" sx={{ ml: 0 }} />
+                          {rowActions(bank)}
+                        </Stack>
                       </TableCell>
                       <TableCell sx={{ ...MD_UP, overflowWrap: 'anywhere' }}>
                         <Box sx={dataTextSx}>{bank.sender_email}</Box>
@@ -366,32 +440,8 @@ function Banks() {
                         <Typography variant="body2" color="text.secondary">รายเดือน <code>{bank.subject_monthly}</code></Typography>
                         <Typography variant="body2" color="text.secondary">ขอเอง <code>{bank.subject_ondemand}</code></Typography>
                       </TableCell>
-                      <TableCell>
-                        {/* ชื่อคงที่ สถานะบอกด้วย checked (เหมือนผู้เสียภาษีในหน้าบัญชีของฉัน) */}
-                        <Switch
-                          size="small"
-                          checked={bank.is_active}
-                          onChange={() => void toggleBank(bank)}
-                          slotProps={{ input: { 'aria-label': `ใช้งาน ${bank.name}` } }}
-                        />
-                      </TableCell>
-                      <TableCell align="right" sx={{ py: 0.5 }}>
-                        <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end', alignItems: 'center' }}>
-                          <RowIconButton label={`แก้ไข ${bank.name}`} tooltip="แก้ไข" onClick={() => openEdit(bank)}>
-                            <EditRounded fontSize="small" />
-                          </RowIconButton>
-                          {/* มีบัญชีผูก (รวมที่เก็บเข้าคลัง) = FK กันลบ — บอกเหตุผลและทางเลือกแทนการให้กดแล้วเจอ 409 */}
-                          <RowIconButton
-                            label={`ลบ ${bank.name}`}
-                            tooltip="ลบ"
-                            color="error"
-                            disabledReason={bank.account_count > 0 ? `ลบไม่ได้ — มีบัญชีผูกอยู่ ${bank.account_count.toLocaleString('th-TH')} บัญชี ปิดใช้งานแทน` : null}
-                            onClick={() => openDelete(bank)}
-                          >
-                            <DeleteOutlineRounded fontSize="small" />
-                          </RowIconButton>
-                        </Stack>
-                      </TableCell>
+                      <TableCell sx={MD_UP}>{activeSwitch(bank)}</TableCell>
+                      <TableCell align="right" sx={{ ...MD_UP, py: 0.5 }}>{rowActions(bank)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -489,6 +539,33 @@ function Banks() {
                 <code>^</code> = ขึ้นต้นด้วย · <code>$</code> = ลงท้ายด้วย · <code>\.</code> = จุดจริง ๆ · <code>\d</code> = ตัวเลข — ตัวพิมพ์เล็ก/ใหญ่ต้องตรง
               </Typography>
               <Stack spacing={2}>
+                {/* ช่องลองอยู่บนสุด ผลเป็น helper ของช่องเอง (เห็นโดยไม่ต้องเลื่อน) — ตรง = success ไม่ตรง = warning พร้อมไอคอน
+                    Enter ไม่บันทึกฟอร์ม (ช่องนี้ไม่ถูกบันทึก — กด Enter หลังวางมักเป็นการ "ลอง" ไม่ใช่ "บันทึก") */}
+                <TextField
+                  label="ลองกับหัวข้ออีเมลหรือชื่อไฟล์ตัวอย่าง"
+                  value={sample}
+                  onChange={(event) => {
+                    setSample(event.target.value);
+                    setSampleStatus(event.target.value === '' ? '' : sampleResult(form, event.target.value).text);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.nativeEvent.isComposing) event.preventDefault();
+                  }}
+                  placeholder="ตัวอย่างจาก SCB: SCB E PASSBOOK: e-Statement"
+                  helperText={
+                    <Box component="span" sx={{ display: 'flex', gap: 0.5, alignItems: 'flex-start', overflowWrap: 'anywhere' }}>
+                      {sampleCheck.matched === true && <CheckCircleRounded aria-hidden sx={{ fontSize: '1.125rem' }} />}
+                      {sampleCheck.matched === false && <WarningAmberRounded aria-hidden sx={{ fontSize: '1.125rem' }} />}
+                      {sampleCheck.text}
+                    </Box>
+                  }
+                  slotProps={{
+                    htmlInput: { autoCapitalize: 'off', spellCheck: false },
+                    formHelperText: {
+                      sx: { color: sampleCheck.matched === true ? 'success.main' : sampleCheck.matched === false ? 'warning.main' : undefined },
+                    },
+                  }}
+                />
                 {REGEX_FIELDS.map(({ key, label, helper, placeholder }) => (
                   // mono ให้แยก \ . [ ] ออกจากกัน · multiline ยืดตามความยาวให้เห็นทั้งสาย (regex ยังเป็นบรรทัดเดียว — setRegexField)
                   <TextField
@@ -509,18 +586,9 @@ function Banks() {
                     }}
                   />
                 ))}
-                <TextField
-                  label="ลองกับหัวข้ออีเมลหรือชื่อไฟล์ตัวอย่าง"
-                  value={sample}
-                  onChange={(event) => setSample(event.target.value)}
-                  placeholder="SCB E PASSBOOK: e-Statement"
-                  slotProps={{ htmlInput: { autoCapitalize: 'off', spellCheck: false } }}
-                />
               </Stack>
-              {/* ผลเปลี่ยนตามที่พิมพ์ทั้งในช่องตัวอย่างและช่องรูปแบบ — status ประกาศแบบ polite */}
-              <Typography role="status" variant="body2" color="text.secondary" sx={{ mt: 1, mx: 1.75, overflowWrap: 'anywhere' }}>
-                {sampleResult(form, sample)}
-              </Typography>
+              {/* ประกาศผลเฉพาะตอนช่องตัวอย่างเปลี่ยน — ผลล่าสุดหลังแก้ช่องรูปแบบอ่านได้จาก helper ของช่องตัวอย่าง (aria-describedby) */}
+              <Box role="status" sx={visuallyHiddenSx}>{sampleStatus}</Box>
             </Box>
           </Stack>
         </Box>
@@ -532,7 +600,8 @@ function Banks() {
         description={
           <Stack spacing={1.5}>
             <Typography sx={descriptionSx}>
-              ลบธนาคาร “{deleting?.name}” หรือไม่? ยังไม่มีบัญชีใดผูกกับธนาคารนี้ ลบแล้วกู้คืนไม่ได้ ถ้าจะใช้อีกต้องเพิ่มและกรอกรูปแบบใหม่ทั้งหมด
+              {/* ลบไม่สำเร็จ (เช่น 409 มีบัญชีผูกเพิ่มระหว่างนั้น) = ไม่ยืนยันว่ายังไม่มีบัญชีผูก — error ด้านล่างบอกเหตุผลเอง */}
+              ลบธนาคาร “{deleting?.name}” หรือไม่? {!deleteError && 'ยังไม่มีบัญชีใดผูกกับธนาคารนี้ '}ลบแล้วกู้คืนไม่ได้ ถ้าจะใช้อีกต้องเพิ่มและกรอกรูปแบบใหม่ทั้งหมด
             </Typography>
             {deleteError && <Alert severity="error">{deleteError}</Alert>}
           </Stack>
@@ -548,6 +617,28 @@ function Banks() {
           focusAddAfterExitRef.current = false;
           flushNotice();
         }}
+      />
+      {/* ข้อเท็จจริงจาก src/worker.ts (หยิบเฉพาะธนาคารที่เปิดใช้งาน) และ src/routes/banks.ts (เปิดกลับ = อ่านอีเมลย้อนหลังใหม่
+          ของกล่องที่มีบัญชีของธนาคารนี้) · account_count นับรวมบัญชีที่เก็บเข้าคลัง จึงบอกไว้ในวงเล็บ */}
+      <ConfirmDialog
+        open={disableOpen}
+        title="ปิดใช้งานธนาคาร"
+        description={
+          <Stack spacing={1.5}>
+            <Typography sx={descriptionSx}>
+              ปิดใช้งาน “{disabling?.name}” หรือไม่? มีบัญชีของสมาชิกผูกกับธนาคารนี้{' '}
+              <Box component="span" sx={dataTextSx}>{disabling?.account_count.toLocaleString('th-TH')}</Box> บัญชี (รวมที่เก็บเข้าคลัง)
+              ระบบจะหยุดรับ statement ใหม่ของบัญชีเหล่านี้จนกว่าจะเปิดใช้งานกลับ เมื่อเปิดกลับ ระบบอ่านอีเมลย้อนหลังใหม่ให้เอง
+            </Typography>
+            {disableError && <Alert severity="error">{disableError}</Alert>}
+          </Stack>
+        }
+        confirmLabel="ปิดใช้งาน"
+        confirmColor="warning"
+        busy={submitting}
+        onClose={() => setDisableOpen(false)}
+        onConfirm={() => void disableBank()}
+        onExited={flushNotice}
       />
       <FeedbackSnackbar notice={notice} onClose={() => setNotice(null)} />
     </Box>
@@ -611,6 +702,8 @@ function Users({ currentUserId, onUsersChanged }: { currentUserId: number; onUse
     setLoadError('');
     try {
       setUsers(pendingFirst(await req<User[]>('/api/admin/users')));
+      // คนที่สมัครหลังโหลดแอปขึ้นในตารางแล้ว — ตัวนับบนเมนู/แท็บต้องตามด้วย
+      onUsersChanged();
     } catch (e) {
       setLoadError(errorText(e, 'โหลดข้อมูลผู้ใช้ไม่สำเร็จ'));
     }
@@ -811,7 +904,7 @@ export default function SettingsPage({ userId, pendingUserCount, onUsersChanged 
         level={1}
         id="settings-heading"
         title="ตั้งค่า"
-        description="ธนาคารที่ระบบรองรับและผู้ใช้ที่เข้าระบบได้ — หน้านี้เห็นเฉพาะแอดมิน และทุกอย่างที่แก้ที่นี่มีผลกับทุกคน"
+        description="เห็นเฉพาะแอดมิน — ทุกอย่างที่แก้ที่นี่มีผลกับทุกคน"
         action={
           <Button variant="outlined" component={Link} to="/audit?scope=all" startIcon={<HistoryRounded />} sx={{ whiteSpace: 'nowrap', alignSelf: 'flex-start' }}>
             ดูบันทึกระบบของทุกคน

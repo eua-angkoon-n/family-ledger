@@ -22,14 +22,19 @@ type QueryCall = { sql: string; params: unknown[] };
 const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 const NO_GMAIL_SCOPE = 'openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
 
-async function openTestApp(existingUserId?: number, googleEmail = 'member@example.com') {
+async function openTestApp(existingUserId?: number, googleEmail = 'member@example.com', existingStatus = 'approved') {
   const calls: QueryCall[] = [];
+  const revoked: string[] = [];
   // แก้ค่าได้กลางเทสต์ — จำลองผู้ใช้เลือกบัญชี Google อื่น/เอาติ๊ก gmail.readonly ออกในหน้า consent
   const google = { email: googleEmail, scope: `${NO_GMAIL_SCOPE} ${GMAIL_SCOPE}` };
   const fakeQuery = async (sql: string, params: unknown[] = []) => {
     calls.push({ sql, params });
-    if (sql.includes('select id from app_user')) {
-      return { rows: existingUserId ? [{ id: existingUserId }] : [], rowCount: existingUserId ? 1 : 0 };
+    if (sql.includes('from app_user where google_sub')) {
+      return { rows: existingUserId ? [{ id: existingUserId, status: existingStatus }] : [], rowCount: existingUserId ? 1 : 0 };
+    }
+    if (sql.includes('select status from app_user')) {
+      const found = params[0] === existingUserId;
+      return { rows: found ? [{ status: existingStatus }] : [], rowCount: found ? 1 : 0 };
     }
     if (sql.includes('insert into app_user')) return { rows: [{ id: 42 }], rowCount: 1 };
     // กล่อง id 5 เป็นของผู้ใช้เดิม (existingUserId) เท่านั้น
@@ -39,8 +44,12 @@ async function openTestApp(existingUserId?: number, googleEmail = 'member@exampl
     }
     return { rows: [], rowCount: 1 };
   };
-  const fakeFetch = async (input: string | URL | Request) => {
+  const fakeFetch = async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
+    if (url === 'https://oauth2.googleapis.com/revoke') {
+      revoked.push(new URLSearchParams(String(init?.body)).get('token')!);
+      return new Response(null, { status: 200 });
+    }
     if (url === 'https://oauth2.googleapis.com/token') {
       return Response.json({ access_token: 'access-token', refresh_token: 'refresh-token', scope: google.scope });
     }
@@ -84,7 +93,7 @@ async function openTestApp(existingUserId?: number, googleEmail = 'member@exampl
 
   const sessionUserId = async () => ((await (await request('/test/session')).json()) as { userId: number | null }).userId;
 
-  return { calls, google, request, sessionUserId, close: () => server.close() };
+  return { calls, google, revoked, request, sessionUserId, close: () => server.close() };
 }
 
 async function completeGoogleLogin(request: (path: string, init?: RequestInit) => Promise<Response>, startPath = '/auth/google') {
@@ -214,7 +223,7 @@ test('เชื่อม Gmail ใหม่ (?reconnect=) ด้วยบัญ�
   assert.match(upsert.sql, /reauth_required_at = null/);
   assert.deepEqual(upsert.params, [7, 'Member@Example.com', 'encrypted:refresh-token']);
   assert.equal(after.find(({ sql }) => sql.includes('insert into audit_log'))?.params[1], 'auth.mailbox_reconnect');
-  assert.equal(after.some(({ sql }) => sql.includes('app_user')), false, 'ไม่หา/สร้าง app_user ตอนเชื่อมใหม่');
+  assert.equal(after.some(({ sql }) => sql.includes('google_sub') || sql.includes('insert into app_user')), false, 'ไม่หา/สร้าง app_user ตอนเชื่อมใหม่');
   assert.equal(await app.sessionUserId(), 7);
 });
 
@@ -254,4 +263,28 @@ test('ต่อกล่องเพิ่ม (?add=1) โดยไม่ติ�
   assert.equal(callback.headers.get('location'), '/accounts?gmail=not_granted');
   assert.equal(app.calls.slice(before).some(isMailboxWrite), false);
   assert.equal(await app.sessionUserId(), 7);
+});
+
+test('ผู้ใช้ที่ถูกปฏิเสธล็อกอินใหม่/ต่อกล่องเพิ่ม: ไม่เก็บ refresh token และถอน token ที่ Google — pending ยังเก็บตามเดิม', async (t) => {
+  const pending = await openTestApp(7, 'member@example.com', 'pending');
+  t.after(pending.close);
+  await completeGoogleLogin(pending.request);
+  assert.ok(pending.calls.some(isMailboxWrite), 'pending ต้องเก็บ token ไว้ใช้หลังอนุมัติ');
+  assert.deepEqual(pending.revoked, []);
+
+  const app = await openTestApp(7, 'member@example.com', 'rejected');
+  t.after(app.close);
+  const callback = await completeGoogleLogin(app.request);
+  assert.equal(callback.headers.get('location'), '/');
+  assert.equal(app.calls.some(isMailboxWrite), false);
+  assert.deepEqual(app.revoked, ['refresh-token']);
+  assert.equal(await app.sessionUserId(), 7, 'ยังตั้ง session ให้เว็บแสดงหน้าถูกปฏิเสธ');
+  const loginAudit = app.calls.find(({ sql }) => sql.includes('insert into audit_log'));
+  assert.equal(JSON.parse(String(loginAudit?.params[5])).gmail_connected, false);
+
+  // แอดมินปฏิเสธไม่ได้ทำลาย session — ?add=1 ก็ต้องไม่เก็บ
+  const added = await completeGoogleLogin(app.request, '/auth/google?add=1');
+  assert.equal(added.headers.get('location'), '/');
+  assert.equal(app.calls.some(isMailboxWrite), false);
+  assert.equal(app.revoked.length, 2);
 });

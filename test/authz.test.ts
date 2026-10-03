@@ -960,6 +960,17 @@ test('cross-user authorization: Slice 4A endpoints', async (t) => {
     await loginAs(userA);
     assert.equal((await request(`/api/banks/${resyncBank}`, json({ name: 'ยึด' }))).status, 403);
 
+    // กล่องของผู้ใช้ที่ถูกปฏิเสธมีบัญชีใช้งานของธนาคารนี้ — ต้องไม่ถูกนับ/สั่งอ่านใหม่
+    const rejectedUser = (await db.pool.query<{ id: number }>(
+      `insert into app_user (google_sub, email, display_name, is_admin, status)
+       values ('google-sub-rejected', 'rejected@example.com', 'R', false, 'rejected') returning id`,
+    )).rows[0]!.id;
+    await db.pool.query(
+      `insert into bank_account (user_id, bank_id, email_account_id, nickname, account_number, pdf_password_enc)
+       values ($1, $2, $3, 'บัญชีทดสอบ', '5550000006', 'enc:x')`,
+      [rejectedUser, resyncBank, await seedEmailAccount(rejectedUser, 'rejected@example.com')],
+    );
+
     await loginAs(admin);
     // ฟอร์มส่งทุกฟิลด์ทุกครั้ง — ค่าเดิม (ตัวพิมพ์ต่างก็ถูก lowercase เหมือนเดิม) ไม่นับว่าเปลี่ยน
     const renamed = await patch({ name: 'ธนาคารทดสอบ 2', sender_email: 'STMT@bank.example', subject_monthly: 'monthly', parser_key: 'scb' });
@@ -969,5 +980,23 @@ test('cross-user authorization: Slice 4A endpoints', async (t) => {
     assert.equal((await patch({ is_active: false })).resync_mailboxes, 0);
     assert.equal((await patch({ is_active: true })).resync_mailboxes, 2);
     assert.equal((await patch({ is_active: true })).resync_mailboxes, 0); // true→true ไม่ใช่การเปิดกลับ
+  });
+
+  await t.test('50. GET /api/audit-log ตัดทุก key *_enc (แถวเก่าก่อนแก้บั๊ก Slice 8) ทั้งของตัวเองและแอดมิน scope=all', async () => {
+    const legacy = (await db.pool.query<{ id: number }>(
+      `insert into audit_log (user_id, action, entity_type, entity_id, before_data, after_data)
+       values ($1, 'bank_account.archive', 'bank_account', 1,
+               '{"id": 1, "pdf_password_enc": "cipher-1", "nested": {"tax_id_enc": "cipher-2"}}',
+               '[{"id": 1, "refresh_token_enc": "cipher-3"}]') returning id`,
+      [userA],
+    )).rows[0]!.id;
+    for (const [who, query] of [[userA, ''], [admin, 'scope=all&']] as const) {
+      await loginAs(who);
+      const res = await request(`/api/audit-log?${query}entity_type=bank_account`);
+      assert.equal(res.status, 200);
+      const row = ((await res.json()) as { rows: { id: number; before_data: unknown; after_data: unknown }[] }).rows.find((r) => r.id === legacy);
+      assert.deepEqual(row?.before_data, { id: 1, nested: {} });
+      assert.deepEqual(row?.after_data, [{ id: 1 }]);
+    }
   });
 });
