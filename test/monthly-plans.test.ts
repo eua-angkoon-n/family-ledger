@@ -634,14 +634,30 @@ test('monthly planning API', async (t) => {
     assert.equal((await send(`/api/installment-dues/${future.id}/payments`,'POST',{...paymentBody,amount_satang:3334})).status,201);
     assert.equal((await send(`/api/installment-dues/${plan.dues[2]!.id}/skip`,'POST',{})).status,200);
     assert.equal((await send(`/api/monthly-item-payments/${payment.id}`,'PATCH',{status:'cancelled'})).status,200);
-    const detail=await (await request(`/api/installment-plans/${plan.id}`)).json() as {paid_satang:number;outstanding_satang:number;structural_editable:boolean;dues:{status:string}[]};
+    const detail=await (await request(`/api/installment-plans/${plan.id}`)).json() as {paid_satang:number;outstanding_satang:number;structural_editable:boolean;dues:{status:string;monthly_plan_item_id:number|null;payments:{id:number}[]}[]};
     assert.equal(detail.paid_satang,3334);assert.equal(detail.outstanding_satang,7666);assert.equal(detail.structural_editable,false);assert.equal(detail.dues[2]!.status,'skipped');
     assert.equal(await txnCount(),before);
     const generated=(await getPlan(month)).items.filter(i=>i.name.startsWith('Laptop')).length;
     assert.equal((await getPlan(month)).items.filter(i=>i.name.startsWith('Laptop')).length,generated);
-    await send(`/api/installment-plans/${plan.id}`,'PATCH',{status:'cancelled'});
+    assert.equal((await send(`/api/installment-plans/${plan.id}`,'PATCH',{status:'cancelled'})).status,200);
+    const cancelled=await (await request(`/api/installment-plans/${plan.id}`)).json() as typeof detail;
+    assert.deepEqual(cancelled.dues.map(d=>[d.monthly_plan_item_id!==null,d.payments.length>0]),[[false,false],[true,true],[false,false],[true,true]]);
+    const cancelledMonthItems=(await getPlan(month)).items.filter(i=>i.name.startsWith('Laptop'));
+    assert.equal(cancelledMonthItems.length,1);
+    assert.equal(cancelledMonthItems[0]!.payments.length,1);
     const report=await (await request('/api/installment-plans')).json() as {totals:{outstanding_satang:number}};
     assert.equal(report.totals.outstanding_satang,0);
+    const restoredResponse=await send(`/api/installment-plans/${plan.id}`,'PATCH',{status:'active'});
+    assert.equal(restoredResponse.status,200,await restoredResponse.clone().text());
+    const restored=await restoredResponse.json() as typeof detail & {status:string};
+    assert.equal(restored.status,'active');
+    assert.deepEqual(restored.dues.map(d=>[d.monthly_plan_item_id!==null,d.status]),[[true,'planned'],[true,'planned'],[true,'skipped'],[true,'paid']]);
+    assert.equal((await getPlan(month)).items.filter(i=>i.name.startsWith('Laptop')).length,generated);
+    assert.equal((await send(`/api/monthly-plans/${month}/close`,'POST',{})).status,200);
+    assert.equal((await send(`/api/installment-plans/${plan.id}`,'PATCH',{status:'cancelled'})).status,200);
+    assert.equal((await getPlan(month)).items.filter(i=>i.name.startsWith('Laptop')).length,generated);
+    assert.equal((await send(`/api/installment-plans/${plan.id}`,'PATCH',{status:'active'})).status,200);
+    assert.equal((await getPlan(month)).items.filter(i=>i.name.startsWith('Laptop')).length,generated);
   });
 
   await t.test('Slice 6 ยอดสุทธิเป็นศูนย์ และรายการหักเชื่อมซ้ำไม่ได้', async () => {

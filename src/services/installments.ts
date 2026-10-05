@@ -181,8 +181,6 @@ export async function saveInstallment(
     b.status == null
       ? (previous?.status ?? "active")
       : enumStr(b, "status", ["active", "cancelled"]);
-  if (previous?.status === "cancelled" && status !== "cancelled")
-    throw new HttpError(409, "เปิดแผนที่ยกเลิกแล้วไม่ได้");
   if (previous) {
     await db.query(
       `update installment_plan set name=$2,category_id=$3,default_account_id=$4,status=$5,updated_at=now() where id=$1`,
@@ -202,6 +200,13 @@ export async function saveInstallment(
         [planId, ...STRUCTURAL.map((k) => scheduleInput[k])],
       );
     }
+    if (status === "cancelled")
+      await db.query(
+        `delete from monthly_plan_item i using installment_due d,monthly_plan mp
+        where i.installment_due_id=d.id and d.installment_plan_id=$1 and mp.id=i.monthly_plan_id and mp.status='open'
+        and not exists(select 1 from monthly_item_payment p where p.monthly_plan_item_id=i.id)`,
+        [planId],
+      );
     await db.query(
       `update monthly_plan_item i set name=$2 || case when d.installment_no=0 then ' · เงินดาวน์' else ' · งวด ' || d.installment_no end,category_id=$3,
       explicit_status=case when $4='cancelled' then 'cancelled' else d.explicit_status end,updated_at=now()
