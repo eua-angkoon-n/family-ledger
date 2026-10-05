@@ -81,8 +81,8 @@ test('/help: ค้นหาไม่สนตัวพิมพ์ ค้นข
   // ชื่อหน้าตรง = ทุกขั้นของหน้านั้น
   const planning = helpSections(true, 'วางแผนรายเดือน').flatMap((g) => g.sections).find((s) => s.path === '/planning');
   assert.equal(planning?.steps.length, GUIDES['/planning']!.steps.length);
-  // ตรงเฉพาะในเนื้อหาขั้น = เหลือเฉพาะขั้นนั้น · "กับ**เดือนอนาคต**" ใน guides.ts
-  const rule = helpSections(true, 'กับเดือนอนาคต').flatMap((g) => g.sections);
+  // ตรงเฉพาะในเนื้อหาขั้น = เหลือเฉพาะขั้นนั้น · "ปรับ**เดือนถัดไป**" ใน guides.ts
+  const rule = helpSections(true, 'ปรับเดือนถัดไป').flatMap((g) => g.sections);
   assert.deepEqual(rule.map((s) => [s.path, s.steps.length]), [['/planning', 1]]);
   assert.ok(shownPaths(false, 'gmail').includes('/accounts'), 'ค้น "gmail" ต้องเจอ "Gmail"');
   // คำที่มีเฉพาะในหน้าตั้งค่า: แอดมินเจอ คนอื่นไม่เจอ
