@@ -669,6 +669,21 @@ test('monthly planning API', async (t) => {
     assert.deepEqual((await getPlan(month)).items.filter(i=>i.name.startsWith('Laptop')).map(i=>[i.id,i.explicit_status,i.payments.map(p=>[p.id,p.status])]),closedBefore);
   });
 
+  await t.test('opening a month removes unpaid installment rows left by legacy cancellation', async () => {
+    const month=shiftMonth(12);await getPlan(month);
+    const created=await send('/api/installment-plans','POST',{name:'Legacy cancelled phone',total_amount_satang:3000000,down_payment_satang:0,interest_satang:0,fee_satang:0,installment_count:1,frequency_unit:'month',frequency_interval:1,first_due_date:`${month}-20`});
+    assert.equal(created.status,201,await created.clone().text());
+    const installment=await created.json() as {id:number};
+    assert.equal((await getPlan(month)).items.filter(i=>i.name.startsWith('Legacy cancelled phone')).length,1);
+
+    // จำลองข้อมูลจากเวอร์ชันก่อน 1.5.3: แผนถูกยกเลิก แต่แถวที่ยังไม่จ่ายค้างอยู่ในหน้าวางแผน
+    await db.pool.query(`update installment_plan set status='cancelled' where id=$1`,[installment.id]);
+    await db.pool.query(`update monthly_plan_item i set explicit_status='cancelled' from installment_due d where i.installment_due_id=d.id and d.installment_plan_id=$1`,[installment.id]);
+
+    assert.equal((await getPlan(month)).items.filter(i=>i.name.startsWith('Legacy cancelled phone')).length,0);
+    assert.equal((await db.pool.query(`select count(*)::int as n from monthly_plan_item i join installment_due d on d.id=i.installment_due_id where d.installment_plan_id=$1`,[installment.id])).rows[0]!.n,0);
+  });
+
   await t.test('Slice 6 ยอดสุทธิเป็นศูนย์ และรายการหักเชื่อมซ้ำไม่ได้', async () => {
     const month=shiftMonth(10);await getPlan(month);
     const body={month,name:'Other income',gross_amount_satang:12345,bank_account_id:accountId,income_date:`${month}-15`,deductions:[]};
