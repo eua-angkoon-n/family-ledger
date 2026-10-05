@@ -20,6 +20,14 @@ export async function generateInstallmentItems(
   userId: number,
   monthPlanId?: number,
 ) {
+  // ซ่อมข้อมูลจากเวอร์ชันก่อน 1.5.3 ซึ่งยกเลิกแผนแล้วทิ้งงวดที่ยังไม่เคยจ่ายไว้ในเดือนที่เปิด
+  await db.query(
+    `delete from monthly_plan_item i using installment_due d,installment_plan p,monthly_plan mp
+    where i.installment_due_id=d.id and d.installment_plan_id=p.id and p.user_id=$1 and p.status='cancelled'
+    and mp.id=i.monthly_plan_id and mp.status='open' and ($2::bigint is null or mp.id=$2)
+    and not exists(select 1 from monthly_item_payment pay where pay.monthly_plan_item_id=i.id)`,
+    [userId, monthPlanId ?? null],
+  );
   const result = await db.query(
     `insert into monthly_plan_item(monthly_plan_id,installment_due_id,kind,name,category_id,planned_amount_satang,due_date,explicit_status)
     select mp.id,d.id,'expense',p.name || case when d.installment_no=0 then ' · เงินดาวน์' else ' · งวด ' || d.installment_no end,p.category_id,d.amount_satang,d.due_date,d.explicit_status
