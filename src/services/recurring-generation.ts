@@ -108,19 +108,112 @@ type ActiveRule = RecurrenceSpec & {
   category_id: number | null;
 };
 
+type RuleSnapshot = ActiveRule & { is_active: boolean };
+type ItemStatus = 'active' | 'skipped' | 'cancelled';
+
+async function insertRuleItems(
+  db: Queryable,
+  planId: number,
+  rule: ActiveRule,
+  monthStart: string,
+  statuses = new Map<string, ItemStatus>(),
+): Promise<number> {
+  let inserted = 0;
+  for (const dueDate of occurrencesInMonth(rule, monthStart)) {
+    const res = await db.query(
+      `insert into monthly_plan_item
+         (monthly_plan_id, recurring_rule_id, kind, name, category_id, planned_amount_satang,
+          amount_mode, occurrence_date, due_date, explicit_status)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9)
+       on conflict do nothing`,
+      [
+        planId,
+        rule.id,
+        rule.kind,
+        rule.name,
+        rule.category_id,
+        rule.amount_satang,
+        rule.amount_mode,
+        dueDate,
+        statuses.get(dueDate) ?? 'active',
+      ],
+    );
+    inserted += res.rowCount ?? 0;
+  }
+  return inserted;
+}
+
 /**
- * กางรายการประจำของ user ลงในแผนเดือนหนึ่ง — **insert-only** เท่านั้น
+ * ทำให้รายการที่กางไว้ในเดือนถัดไปตรงกับกฎล่าสุด โดยไม่ย้อนแตะเดือนปัจจุบัน/อดีต เดือนปิด
+ * หรือรายการที่มีประวัติรับ/จ่ายแล้ว การแก้กฎใช้ delete+generate ใหม่เพื่อรองรับการเปลี่ยนรอบและวันครบกำหนด
+ * ส่วนการ archive ลบแถวที่ยังไม่มีประวัติเป็นรายแถวและเก็บแถวที่มีประวัติไว้
+ */
+export async function reconcileFutureRecurringItems(
+  db: Queryable,
+  userId: number,
+  ruleId: number,
+): Promise<number> {
+  const rule = (
+    await db.query<RuleSnapshot>(
+      `select id, kind, name, amount_mode, amount_satang, category_id, is_active,
+              frequency_unit, frequency_interval, anchor_day, start_date, end_date
+       from recurring_rule where id=$1 and user_id=$2`,
+      [ruleId, userId],
+    )
+  ).rows[0];
+  if (!rule) return 0;
+
+  const replaceable = `i.income_record_id is null
+    and not exists(select 1 from income_record r where r.monthly_plan_item_id=i.id)
+    and not exists(select 1 from income_deduction d where d.monthly_plan_item_id=i.id)
+    and not exists(select 1 from monthly_item_payment pay where pay.monthly_plan_item_id=i.id)`;
+
+  if (!rule.is_active) {
+    const removed = await db.query(
+      `delete from monthly_plan_item i using monthly_plan mp
+       where i.monthly_plan_id=mp.id and i.recurring_rule_id=$1 and mp.user_id=$2
+       and mp.status='open' and mp.month_start>date_trunc('month',current_date)::date
+       and ${replaceable}`,
+      [ruleId, userId],
+    );
+    return removed.rowCount ?? 0;
+  }
+
+  const { rows: plans } = await db.query<{ id: number; month_start: string }>(
+    `select mp.id,mp.month_start from monthly_plan mp
+     where mp.user_id=$1 and mp.status='open' and mp.month_start>date_trunc('month',current_date)::date
+     and exists(select 1 from monthly_plan_item i where i.monthly_plan_id=mp.id and i.recurring_rule_id=$2)
+     order by mp.month_start for update`,
+    [userId, ruleId],
+  );
+
+  let changed = 0;
+  for (const plan of plans) {
+    const { rows: items } = await db.query<{ occurrence_date: string; explicit_status: ItemStatus }>(
+      `delete from monthly_plan_item i
+       where i.monthly_plan_id=$1 and i.recurring_rule_id=$2 and ${replaceable}
+       returning i.occurrence_date,i.explicit_status`,
+      [plan.id, ruleId],
+    );
+    changed += items.length;
+    const statuses = new Map(items.map((item) => [item.occurrence_date, item.explicit_status]));
+    changed += await insertRuleItems(db, plan.id, rule, plan.month_start, statuses);
+  }
+  return changed;
+}
+
+/**
+ * กางรายการประจำของ user ลงในแผนเดือนหนึ่ง — ระหว่าง GET เป็น **insert-only** เท่านั้น
  *
  * `on conflict do nothing` ชน `monthly_plan_item_rule_uniq` ทำให้เรียกซ้ำได้ไม่เกิดแถวซ้ำ (§9.2, §16 ข้อ 15)
- * และห้ามเปลี่ยนเป็น upsert เด็ดขาด: การแก้ยอด/ชื่อของ rule ต้องมีผลกับเดือนที่ยัง generate ไม่ถึงเท่านั้น
- * ไม่ย้อนแก้เดือนที่ผู้ใช้ตรวจหรือปิดไปแล้ว (§9.2, §16 ข้อ 16)
+ * การแก้กฎใช้ `reconcileFutureRecurringItems` แทน upsert เพื่อเปลี่ยนเฉพาะเดือนถัดไปที่ยังไม่มีประวัติรับ/จ่าย
+ * โดยไม่ย้อนแก้เดือนปัจจุบัน/อดีต เดือนปิด หรือรายการที่มีประวัติแล้ว
  *
  * **ข้ามกฎที่กางลงเดือนนี้ไปแล้ว**: insert-only กันการ *แก้* แถวเดิมได้ แต่ไม่กันการ *เพิ่ม* แถวใหม่
  * — คีย์กันซ้ำมี `occurrence_date` อยู่ด้วย แก้ `anchor_day` 1 → 23 แล้วเปิดเดือนเดิมซ้ำจึงได้ทั้ง
  * วันที่ 1 และ 23 เป็นแถวซ้ำที่ผู้ใช้ลบเองไม่ได้ (เจอจริงกับกฎ "ค่าน้ำ ค่าไฟ" 2026-09 ถึง 2026-12)
- * เดือนไหนมีแถวของกฎข้อนั้นอยู่แล้ว = generate ไปแล้ว ข้ามทั้งกฎ ตรงตาม §9.2 "การแก้ Recurring Rule
- * มีผลเฉพาะรายการในอนาคต" ผลที่ตามมา: แก้กฎแล้วอยากให้เดือนที่เปิดดูไปแล้วเปลี่ยนตาม ต้องลบรายการ
- * ของกฎนั้นในเดือนนั้นทิ้ง (DELETE /monthly-plan-items/:id) แล้ว GET ใหม่จะกางตามกฎปัจจุบันให้
+ * เดือนไหนมีแถวของกฎข้อนั้นอยู่แล้ว = generate ไปแล้ว ข้ามทั้งกฎ การแก้/เลิกใช้กฎจะ reconcile
+ * แถวเดือนถัดไปใน transaction ของ route โดยตรง
  *
  * **ไม่ generate ย้อนเดือนที่ผ่านไปแล้ว**: เดือนที่ผ่านไปแล้วออกตั้งแต่บรรทัดแรก
  * ผลที่ยอมรับ: สร้างกฎวันนี้แล้วเปิดดูเดือนก่อน ๆ จะไม่มีรายการย้อนหลังให้ ซึ่งตรงตามสเปก
@@ -163,18 +256,8 @@ export async function generateMonthlyItems(
   let inserted = 0;
   for (const r of rows) {
     if (materialized.has(r.id)) continue;
-    for (const dueDate of occurrencesInMonth(r, monthStart)) {
-      // copy `amount_mode` ลงแถวด้วย — สถานะการจ่ายอ่านจาก snapshot ของกฎ ไม่ join สดกลับไป (migration 011)
-      const res = await db.query(
-        `insert into monthly_plan_item
-           (monthly_plan_id, recurring_rule_id, kind, name, category_id, planned_amount_satang,
-            amount_mode, occurrence_date, due_date)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $8)
-         on conflict do nothing`,
-        [planId, r.id, r.kind, r.name, r.category_id, r.amount_satang, r.amount_mode, dueDate],
-      );
-      inserted += res.rowCount ?? 0;
-    }
+    // copy `amount_mode` ลงแถวด้วย — สถานะการจ่ายอ่านจาก snapshot ของกฎ ไม่ join สดกลับไป (migration 011)
+    inserted += await insertRuleItems(db, planId, r, monthStart);
   }
   return inserted;
 }

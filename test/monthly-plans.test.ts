@@ -160,7 +160,7 @@ test('monthly planning API', async (t) => {
   const MONTH_CLOSING = shiftMonth(6);
   const MONTH_ESTIMATED = shiftMonth(7);
 
-  await t.test('รายการประจำ: กางให้เอง idempotent และการแก้กฎไม่ย้อนแก้เดือนที่ generate แล้ว', async () => {
+  await t.test('รายการประจำ: กาง idempotent และแก้เดือนถัดไปที่ยังไม่มีประวัติรับจ่าย', async () => {
     const created = await send('/api/recurring-rules', 'POST', {
       name: 'ค่าเช่าบ้าน',
       kind: 'expense',
@@ -185,7 +185,10 @@ test('monthly planning API', async (t) => {
     assert.equal(again.generated_item_count, 0);
     assert.equal(again.items.filter((i) => i.name === 'ค่าเช่าบ้าน').length, 1);
 
-    // §16 ข้อ 16: แก้กฎแล้วเดือนที่ generate ไปแล้วต้องไม่ขยับ มีผลเฉพาะเดือนที่ยังไม่ generate
+    const nextBeforePatch = await getPlan(MONTH_RULES_NEXT);
+    assert.equal(itemNamed(nextBeforePatch, 'ค่าเช่าบ้าน').planned_amount_satang, 1_500_000);
+
+    // แก้กฎแล้วเดือนปัจจุบันคงเดิม แต่เดือนถัดไปที่กางไว้และยังไม่จ่ายต้องเปลี่ยนตาม
     const patched = await send(`/api/recurring-rules/${ruleId}`, 'PATCH', { amount_satang: 1_800_000 });
     assert.equal(patched.status, 200);
     assert.equal(itemNamed(await getPlan(MONTH_RULES), 'ค่าเช่าบ้าน').planned_amount_satang, 1_500_000);
@@ -217,6 +220,7 @@ test('monthly planning API', async (t) => {
     const afterAnchor = await getPlan(MONTH_RULES);
     assert.equal(afterAnchor.generated_item_count, 0);
     assert.equal(afterAnchor.items.filter((i) => i.recurring_rule_id === ruleId).length, 1);
+    assert.equal(itemNamed(await getPlan(MONTH_RULES_NEXT), 'ค่าเช่าบ้าน').due_date, `${MONTH_RULES_NEXT}-23`);
 
     // ลบรายการของกฎออกจากเดือนนั้นจนหมด → GET รอบถัดไปกางใหม่ตามกฎปัจจุบัน (anchor 23)
     const stale = afterAnchor.items.find((i) => i.recurring_rule_id === ruleId)!;
@@ -225,9 +229,49 @@ test('monthly planning API', async (t) => {
     assert.equal(regenerated.generated_item_count, 1);
     assert.equal(itemNamed(regenerated, 'ค่าเช่าบ้าน').due_date, `${MONTH_RULES}-23`);
 
-    // archive แล้วเดือนใหม่ไม่ generate อีก แต่ของเดิมยังอยู่เป็นประวัติ
+    // เดือนอนาคตที่จ่ายแล้วต้องคง snapshot เดิม แต่รายการที่ยังไม่จ่ายเปลี่ยนตามการแก้กฎ
+    const paidFuture = itemNamed(await getPlan(MONTH_RULES_NEXT), 'ค่าเช่าบ้าน');
+    assert.equal((await send(`/api/monthly-plan-items/${paidFuture.id}/payments`, 'POST', { amount_satang: 1_800_000, paid_date: `${MONTH_RULES_NEXT}-23`, bank_account_id: accountId })).status, 201);
+    assert.equal(itemNamed(await getPlan(MONTH_COPY_TARGET), 'ค่าเช่าบ้าน').planned_amount_satang, 1_800_000);
+    assert.equal((await send(`/api/recurring-rules/${ruleId}`, 'PATCH', { name: 'ค่าเช่าบ้านใหม่' })).status, 200);
+    assert.equal(itemNamed(await getPlan(MONTH_RULES_NEXT), 'ค่าเช่าบ้าน').payment_state, 'paid');
+    assert.equal(itemNamed(await getPlan(MONTH_COPY_TARGET), 'ค่าเช่าบ้านใหม่').planned_amount_satang, 1_800_000);
+
+    // archive ลบเฉพาะเดือนอนาคตที่ยังไม่จ่าย เดือนปัจจุบันและเดือนอนาคตที่จ่ายแล้วคงไว้เป็นประวัติ
     assert.equal((await send(`/api/recurring-rules/${ruleId}/archive`, 'POST', {})).status, 200);
     assert.equal(itemNamed(await getPlan(MONTH_RULES), 'ค่าเช่าบ้าน').planned_amount_satang, 1_800_000);
+    assert.equal(itemNamed(await getPlan(MONTH_RULES_NEXT), 'ค่าเช่าบ้าน').payment_state, 'paid');
+    assert.equal((await getPlan(MONTH_COPY_TARGET)).items.some((i) => i.recurring_rule_id === ruleId), false);
+  });
+
+  await t.test('รายการประจำหลายครั้งต่อเดือน: แก้เฉพาะครั้งที่ยังไม่จ่าย', async () => {
+    const month = shiftMonth(12);
+    const created = await send('/api/recurring-rules', 'POST', {
+      name: 'ค่าใช้จ่ายรายสัปดาห์',
+      kind: 'expense',
+      amount_satang: 10_000,
+      frequency_unit: 'day',
+      frequency_interval: 7,
+      start_date: `${month}-01`,
+    });
+    assert.equal(created.status, 201);
+    const ruleId = ((await created.json()) as { id: number }).id;
+    const before = (await getPlan(month)).items.filter((i) => i.recurring_rule_id === ruleId);
+    assert.ok(before.length >= 4);
+    assert.equal((await send(`/api/monthly-plan-items/${before[0]!.id}/payments`, 'POST', {
+      amount_satang: 10_000,
+      paid_date: before[0]!.due_date,
+      bank_account_id: accountId,
+    })).status, 201);
+
+    assert.equal((await send(`/api/recurring-rules/${ruleId}`, 'PATCH', { amount_satang: 20_000 })).status, 200);
+    const afterEdit = (await getPlan(month)).items.filter((i) => i.recurring_rule_id === ruleId);
+    assert.equal(afterEdit.find((i) => i.id === before[0]!.id)?.planned_amount_satang, 10_000);
+    assert.ok(afterEdit.filter((i) => i.id !== before[0]!.id).every((i) => i.planned_amount_satang === 20_000));
+
+    assert.equal((await send(`/api/recurring-rules/${ruleId}/archive`, 'POST', {})).status, 200);
+    const afterArchive = (await getPlan(month)).items.filter((i) => i.recurring_rule_id === ruleId);
+    assert.deepEqual(afterArchive.map((i) => i.id), [before[0]!.id]);
   });
 
   await t.test('รายการเฉพาะเดือน: เพิ่ม copy จากเดือนก่อน (ซ้ำไม่ได้) และ skip โดยไม่ลบประวัติ', async () => {

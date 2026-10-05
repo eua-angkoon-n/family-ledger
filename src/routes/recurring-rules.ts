@@ -4,6 +4,7 @@ import { pool, query, tx } from '../db.js';
 import { enumStr, HttpError, id, isoDate, pathId, satang, str, type Body } from '../http.js';
 import { audit } from '../services/audit.js';
 import { assertOwnedRefs } from '../services/plan-query.js';
+import { reconcileFutureRecurringItems } from '../services/recurring-generation.js';
 
 export const recurringRulesRouter = Router();
 
@@ -74,9 +75,8 @@ recurringRulesRouter.post('/recurring-rules', requireUser(async (req, res, user)
   res.status(201).json(created);
 }));
 
-// การแก้กฎมีผลเฉพาะรายการในอนาคต (§9.2) — ไม่ต้องทำอะไรเพิ่มที่นี่ เพราะ generateMonthlyItems ข้ามกฎ
-// ที่กางลงเดือนนั้นไปแล้วทั้งกฎ รายการของเดือนที่ generate ไปแล้วจึงไม่ถูกแตะ ทั้งเดือนที่เปิดและปิด (§16 ข้อ 16)
-// แค่ insert-only ไม่พอ: คีย์กันซ้ำมี occurrence_date อยู่ด้วย แก้ anchor_day จึงเคยได้แถวที่สองของกฎเดิม
+// การแก้กฎมีผลกับรายการในเดือนถัดไปที่ยังไม่มีประวัติรับ/จ่าย เดือนปัจจุบัน/อดีต เดือนปิด
+// และรายการที่มีประวัติแล้วคงเป็น snapshot เดิม
 //
 // anchor_day / end_date / default_account_id / category_id เป็น nullable จึงใช้ท่า hasOwnProperty +
 // `case when $k then $v else col end` แบบ routes/accounts.ts แยกจาก coalesce ไม่งั้นตั้งกลับเป็น null ไม่ได้
@@ -131,13 +131,14 @@ recurringRulesRouter.patch('/recurring-rules/:id', requireUser(async (req, res, 
     // end_date < start_date ที่เกิดจากการแก้ทีละฟิลด์ ให้ CHECK constraint ของตารางเป็นคนปฏิเสธ
     // (error handler กลางแปลง 23514 เป็น 400) — เช็คในโค้ดหลัง update แล้ว throw จะ commit ค่าผิดไปก่อน
     if (!rows[0]) throw new HttpError(404, 'ไม่พบรายการประจำ');
+    await reconcileFutureRecurringItems(c, user.id, ruleId);
     await audit(c, { userId: user.id, action: 'recurring_rule.update', entityType: 'recurring_rule', entityId: ruleId, before, after: rows[0], ip: req.ip ?? null });
     return rows[0];
   });
   res.json(rule);
 }));
 
-// archive = ปิดใช้งาน ไม่ลบ — รายการที่เคย generate ไว้ในเดือนก่อน ๆ ต้องคงอยู่เป็นประวัติ
+// archive = ปิดใช้งานกฎ ลบเฉพาะรายการเดือนถัดไปที่ยังไม่มีประวัติรับ/จ่าย
 recurringRulesRouter.post('/recurring-rules/:id/archive', requireUser(async (req, res, user) => {
   const ruleId = pathId(req);
   const archived = await tx(async (c) => {
@@ -147,6 +148,7 @@ recurringRulesRouter.post('/recurring-rules/:id/archive', requireUser(async (req
       [ruleId, user.id],
     );
     if (!rows[0]) throw new HttpError(404, 'ไม่พบรายการประจำ');
+    await reconcileFutureRecurringItems(c, user.id, ruleId);
     await audit(c, { userId: user.id, action: 'recurring_rule.archive', entityType: 'recurring_rule', entityId: ruleId, before, after: rows[0], ip: req.ip ?? null });
     return rows[0];
   });
