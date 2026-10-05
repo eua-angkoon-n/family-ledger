@@ -654,10 +654,19 @@ test('monthly planning API', async (t) => {
     assert.deepEqual(restored.dues.map(d=>[d.monthly_plan_item_id!==null,d.status]),[[true,'planned'],[true,'planned'],[true,'skipped'],[true,'paid']]);
     assert.equal((await getPlan(month)).items.filter(i=>i.name.startsWith('Laptop')).length,generated);
     assert.equal((await send(`/api/monthly-plans/${month}/close`,'POST',{})).status,200);
+    const closedBefore=(await getPlan(month)).items.filter(i=>i.name.startsWith('Laptop')).map(i=>[i.id,i.explicit_status,i.payments.map(p=>[p.id,p.status])]);
     assert.equal((await send(`/api/installment-plans/${plan.id}`,'PATCH',{status:'cancelled'})).status,200);
-    assert.equal((await getPlan(month)).items.filter(i=>i.name.startsWith('Laptop')).length,generated);
-    assert.equal((await send(`/api/installment-plans/${plan.id}`,'PATCH',{status:'active'})).status,200);
-    assert.equal((await getPlan(month)).items.filter(i=>i.name.startsWith('Laptop')).length,generated);
+    const cancelledAgain=await (await request(`/api/installment-plans/${plan.id}`)).json() as typeof detail;
+    assert.deepEqual(cancelledAgain.dues.map(d=>[d.monthly_plan_item_id!==null,d.payments.length>0]),[[true,false],[true,true],[false,false],[true,true]]);
+    assert.deepEqual((await getPlan(month)).items.filter(i=>i.name.startsWith('Laptop')).map(i=>[i.id,i.explicit_status,i.payments.map(p=>[p.id,p.status])]),closedBefore);
+    const restoredAgainResponse=await send(`/api/installment-plans/${plan.id}`,'PATCH',{status:'active'});
+    assert.equal(restoredAgainResponse.status,200,await restoredAgainResponse.clone().text());
+    const restoredAgain=await restoredAgainResponse.json() as typeof restored;
+    assert.deepEqual(restoredAgain.dues.map(d=>d.status),restored.dues.map(d=>d.status));
+    assert.ok(restoredAgain.dues.every(d=>d.monthly_plan_item_id!==null));
+    assert.equal(new Set(restoredAgain.dues.map(d=>d.monthly_plan_item_id)).size,restoredAgain.dues.length);
+    assert.deepEqual([0,1,3].map(i=>restoredAgain.dues[i]!.monthly_plan_item_id),[0,1,3].map(i=>restored.dues[i]!.monthly_plan_item_id));
+    assert.deepEqual((await getPlan(month)).items.filter(i=>i.name.startsWith('Laptop')).map(i=>[i.id,i.explicit_status,i.payments.map(p=>[p.id,p.status])]),closedBefore);
   });
 
   await t.test('Slice 6 ยอดสุทธิเป็นศูนย์ และรายการหักเชื่อมซ้ำไม่ได้', async () => {
