@@ -269,9 +269,56 @@ test('monthly planning API', async (t) => {
     assert.equal(afterEdit.find((i) => i.id === before[0]!.id)?.planned_amount_satang, 10_000);
     assert.ok(afterEdit.filter((i) => i.id !== before[0]!.id).every((i) => i.planned_amount_satang === 20_000));
 
-    assert.equal((await send(`/api/recurring-rules/${ruleId}/archive`, 'POST', {})).status, 200);
+    // ถ้ามีการบันทึกจ่ายพร้อมกับ archive ต้องรอ transaction นั้นก่อน แล้วเก็บรายการและ payment ไว้
+    const concurrentItem = afterEdit.find((i) => i.id !== before[0]!.id)!;
+    const paymentClient = await pool.connect();
+    let paymentCommitted = false;
+    let archiving!: Promise<Response>;
+    try {
+      await paymentClient.query('begin');
+      await paymentClient.query(
+        `select mp.id from monthly_plan_item i join monthly_plan mp on mp.id=i.monthly_plan_id
+         where i.id=$1 for update of mp,i`,
+        [concurrentItem.id],
+      );
+      await paymentClient.query(
+        `insert into monthly_item_payment(monthly_plan_item_id,amount_satang,paid_date,bank_account_id)
+         values($1,5000,$2,$3)`,
+        [concurrentItem.id, concurrentItem.due_date, accountId],
+      );
+      archiving = send(`/api/recurring-rules/${ruleId}/archive`, 'POST', {});
+      assert.equal(await Promise.race([archiving.then(() => 'done'), new Promise((resolve) => setTimeout(() => resolve('waiting'), 50))]), 'waiting');
+      await paymentClient.query('commit');
+      paymentCommitted = true;
+    } finally {
+      if (!paymentCommitted) await paymentClient.query('rollback');
+      paymentClient.release();
+    }
+    assert.equal((await archiving).status, 200);
     const afterArchive = (await getPlan(month)).items.filter((i) => i.recurring_rule_id === ruleId);
-    assert.deepEqual(afterArchive.map((i) => i.id), [before[0]!.id]);
+    assert.deepEqual(afterArchive.map((i) => i.id).sort((a, b) => a - b), [before[0]!.id, concurrentItem.id].sort((a, b) => a - b));
+    assert.equal(afterArchive.find((i) => i.id === concurrentItem.id)?.paid_satang, 5_000);
+  });
+
+  await t.test('รายการประจำ: ขยายช่วงกลับมาต้องเติมเดือนที่กางไว้แต่ไม่มีรายการแล้ว', async () => {
+    const month = shiftMonth(11);
+    const created = await send('/api/recurring-rules', 'POST', {
+      name: 'กฎขยายช่วง',
+      kind: 'expense',
+      amount_satang: 30_000,
+      frequency_unit: 'month',
+      frequency_interval: 1,
+      anchor_day: 5,
+      start_date: `${month}-01`,
+    });
+    assert.equal(created.status, 201);
+    const ruleId = ((await created.json()) as { id: number }).id;
+    assert.equal((await getPlan(month)).items.filter((i) => i.recurring_rule_id === ruleId).length, 1);
+
+    assert.equal((await send(`/api/recurring-rules/${ruleId}`, 'PATCH', { end_date: `${month}-01` })).status, 200);
+    assert.equal((await getPlan(month)).items.filter((i) => i.recurring_rule_id === ruleId).length, 0);
+    assert.equal((await send(`/api/recurring-rules/${ruleId}`, 'PATCH', { end_date: null })).status, 200);
+    assert.equal((await getPlan(month)).items.filter((i) => i.recurring_rule_id === ruleId).length, 1);
   });
 
   await t.test('รายการเฉพาะเดือน: เพิ่ม copy จากเดือนก่อน (ซ้ำไม่ได้) และ skip โดยไม่ลบประวัติ', async () => {

@@ -168,6 +168,15 @@ export async function reconcileFutureRecurringItems(
     and not exists(select 1 from income_deduction d where d.monthly_plan_item_id=i.id)
     and not exists(select 1 from monthly_item_payment pay where pay.monthly_plan_item_id=i.id)`;
 
+  // ล็อกแผนก่อนตรวจประวัติให้เป็นลำดับเดียวกับเส้นทางรับ/จ่าย ป้องกันการเพิ่มประวัติ
+  // พร้อมกับ reconcile แล้วถูก DELETE ... CASCADE ทิ้งจาก snapshot เก่า
+  const { rows: plans } = await db.query<{ id: number; month_start: string }>(
+    `select mp.id,mp.month_start from monthly_plan mp
+     where mp.user_id=$1 and mp.status='open' and mp.month_start>date_trunc('month',current_date)::date
+     order by mp.month_start for update`,
+    [userId],
+  );
+
   if (!rule.is_active) {
     const removed = await db.query(
       `delete from monthly_plan_item i using monthly_plan mp
@@ -178,14 +187,6 @@ export async function reconcileFutureRecurringItems(
     );
     return removed.rowCount ?? 0;
   }
-
-  const { rows: plans } = await db.query<{ id: number; month_start: string }>(
-    `select mp.id,mp.month_start from monthly_plan mp
-     where mp.user_id=$1 and mp.status='open' and mp.month_start>date_trunc('month',current_date)::date
-     and exists(select 1 from monthly_plan_item i where i.monthly_plan_id=mp.id and i.recurring_rule_id=$2)
-     order by mp.month_start for update`,
-    [userId, ruleId],
-  );
 
   let changed = 0;
   for (const plan of plans) {
